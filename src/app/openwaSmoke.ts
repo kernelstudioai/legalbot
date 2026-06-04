@@ -16,6 +16,11 @@ export interface OpenWaSmokeApp {
   stop(reason?: string): Promise<void>;
 }
 
+export interface SignalProcessLike {
+  on(signal: NodeJS.Signals, listener: (signal: NodeJS.Signals) => void): unknown;
+  exit(code?: number): void;
+}
+
 export interface StartOpenWaSmokeAppOptions {
   envSource?: NodeJS.ProcessEnv;
   logger?: Logger;
@@ -78,32 +83,73 @@ export const startOpenWaSmokeApp = async ({
     lawyer_phone_configured: env.LAWYER_PHONE_E164.length > 0
   });
 
+  let shutdownPromise: Promise<void> | undefined;
+  const clientCleanupAvailable = typeof client.kill === "function";
+
   return {
     env,
     async stop(reason = "shutdown") {
-      if (typeof client.kill === "function") {
-        await client.kill(reason);
+      if (shutdownPromise) {
+        return shutdownPromise;
       }
+
+      shutdownPromise = (async () => {
+        logger.info("openwa_shutdown_starting", {
+          reason,
+          client_cleanup_available: clientCleanupAvailable
+        });
+
+        try {
+          if (clientCleanupAvailable) {
+            await client.kill?.(reason);
+          }
+
+          logger.info("openwa_shutdown_complete", {
+            reason,
+            client_cleanup_available: clientCleanupAvailable
+          });
+        } catch (error) {
+          logger.error("openwa_shutdown_failed", {
+            reason,
+            client_cleanup_available: clientCleanupAvailable,
+            error: error instanceof Error ? error.message : "unknown_error"
+          });
+
+          throw error;
+        }
+      })();
+
+      return shutdownPromise;
     }
   };
 };
 
-const installSignalHandlers = (app: OpenWaSmokeApp): void => {
+export const installOpenWaSignalHandlers = (
+  app: OpenWaSmokeApp,
+  processLike: SignalProcessLike = process
+): void => {
   let stopping = false;
 
-  const stop = (signal: NodeJS.Signals) => {
+  const stop = async (signal: NodeJS.Signals) => {
     if (stopping) {
       return;
     }
 
     stopping = true;
-    void app.stop(signal).finally(() => {
-      process.exit(0);
-    });
+    try {
+      await app.stop(signal);
+      processLike.exit(0);
+    } catch {
+      processLike.exit(1);
+    }
   };
 
-  process.on("SIGINT", stop);
-  process.on("SIGTERM", stop);
+  processLike.on("SIGINT", (signal) => {
+    void stop(signal);
+  });
+  processLike.on("SIGTERM", (signal) => {
+    void stop(signal);
+  });
 };
 
 const isDirectExecution = (): boolean => {
@@ -113,7 +159,7 @@ const isDirectExecution = (): boolean => {
 
 const main = async (): Promise<void> => {
   const app = await startOpenWaSmokeApp();
-  installSignalHandlers(app);
+  installOpenWaSignalHandlers(app);
 };
 
 if (isDirectExecution()) {

@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Logger } from "../../src/logging/logger";
-import { startOpenWaSmokeApp } from "../../src/app/openwaSmoke";
+import {
+  installOpenWaSignalHandlers,
+  startOpenWaSmokeApp,
+  type SignalProcessLike
+} from "../../src/app/openwaSmoke";
 
 const createLogger = (): Logger => ({
   debug: vi.fn(),
@@ -74,6 +78,51 @@ describe("openwa smoke startup", () => {
 
     await app.stop("test_shutdown");
 
+    expect(logger.info).toHaveBeenCalledWith("openwa_shutdown_starting", {
+      reason: "test_shutdown",
+      client_cleanup_available: true
+    });
+    expect(logger.info).toHaveBeenCalledWith("openwa_shutdown_complete", {
+      reason: "test_shutdown",
+      client_cleanup_available: true
+    });
     expect(kill).toHaveBeenCalledWith("test_shutdown");
+  });
+
+  it("installs signal handlers that trigger client cleanup when available", async () => {
+    const logger = createLogger();
+    const kill = vi.fn().mockResolvedValue(true);
+    const createClient = vi.fn().mockResolvedValue({
+      onMessage: vi.fn().mockResolvedValue(undefined),
+      sendText: vi.fn(),
+      kill
+    });
+    const listeners = new Map<NodeJS.Signals, (signal: NodeJS.Signals) => void>();
+    const processLike: SignalProcessLike = {
+      on: vi.fn((signal, listener) => {
+        listeners.set(signal, listener);
+      }),
+      exit: vi.fn()
+    };
+
+    const app = await startOpenWaSmokeApp({
+      envSource: {
+        BOT_MODE: "smoke",
+        OPENWA_SESSION_ID: "legalbot-smoke",
+        OPENWA_HEADLESS: "false",
+        LAWYER_PHONE_E164: "+15551234567"
+      },
+      logger,
+      createClient
+    });
+
+    installOpenWaSignalHandlers(app, processLike);
+
+    listeners.get("SIGTERM")?.("SIGTERM");
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(kill).toHaveBeenCalledWith("SIGTERM");
+    expect(processLike.exit).toHaveBeenCalledWith(0);
   });
 });
