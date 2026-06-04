@@ -2,6 +2,13 @@ import { pathToFileURL } from "node:url";
 import { loadSmokeRuntimeEnv, type SmokeRuntimeEnv } from "../config/env.ts";
 import { consoleLogger, type Logger } from "../logging/logger.ts";
 import {
+  createSqlitePersistenceService,
+  type PersistenceService,
+  type SqlitePersistenceService
+} from "../persistence/index.ts";
+import { assertSqliteMigrationsApplied } from "../persistence/sqlite/index.ts";
+import { createOpenWaTechnicalPersistence } from "../runtime/openwa/technicalPersistence.ts";
+import {
   startOpenWaStatusServer,
   type OpenWaStatusServerAddress
 } from "./openwaStatusServer.ts";
@@ -30,9 +37,15 @@ export interface SignalProcessLike {
 }
 
 export interface StartOpenWaSmokeAppOptions {
+  cwd?: string;
   envSource?: NodeJS.ProcessEnv;
   logger?: Logger;
   createClient?: (config: OpenWaConfig) => Promise<OpenWaRuntimeClient>;
+  persistenceService?: PersistenceService;
+  createSqlitePersistence?: (config: {
+    databaseUrl: string;
+    cwd?: string;
+  }) => SqlitePersistenceService;
 }
 
 const createDefaultClient = async (
@@ -56,13 +69,38 @@ const createSmokeOpenWaConfig = (env: SmokeRuntimeEnv): OpenWaConfig =>
   });
 
 export const startOpenWaSmokeApp = async ({
+  cwd = process.cwd(),
   envSource = process.env,
   logger = consoleLogger,
-  createClient = createDefaultClient
+  createClient = createDefaultClient,
+  persistenceService,
+  createSqlitePersistence = createSqlitePersistenceService
 }: StartOpenWaSmokeAppOptions = {}): Promise<OpenWaSmokeApp> => {
   const env = loadSmokeRuntimeEnv(envSource);
   const config = createSmokeOpenWaConfig(env);
   const startupMeta = toOpenWaStartupMeta(config);
+  const technicalPersistenceService =
+    env.TECHNICAL_PERSISTENCE_ENABLED === true
+      ? (persistenceService ??
+        (() => {
+          assertSqliteMigrationsApplied({
+            databaseUrl: env.DATABASE_URL,
+            cwd
+          });
+          return createSqlitePersistence({
+            databaseUrl: env.DATABASE_URL,
+            cwd
+          });
+        })())
+      : undefined;
+  const shouldClosePersistence =
+    technicalPersistenceService !== undefined && persistenceService === undefined;
+  const technicalPersistence =
+    technicalPersistenceService !== undefined
+      ? createOpenWaTechnicalPersistence(technicalPersistenceService, {
+          sessionId: env.OPENWA_SESSION_ID
+        })
+      : undefined;
 
   logger.info("openwa_smoke_preflight", {
     node_version: process.version,
@@ -77,7 +115,8 @@ export const startOpenWaSmokeApp = async ({
     openwa_recovery_max_attempts: env.OPENWA_RECOVERY_MAX_ATTEMPTS,
     openwa_recovery_retry_delay_seconds: env.OPENWA_RECOVERY_RETRY_DELAY_SECONDS,
     openwa_startup_max_attempts: env.OPENWA_STARTUP_MAX_ATTEMPTS,
-    openwa_startup_retry_delay_seconds: env.OPENWA_STARTUP_RETRY_DELAY_SECONDS
+    openwa_startup_retry_delay_seconds: env.OPENWA_STARTUP_RETRY_DELAY_SECONDS,
+    technical_persistence_enabled: env.TECHNICAL_PERSISTENCE_ENABLED
   });
 
   logger.info("openwa_client_starting", {
@@ -89,7 +128,8 @@ export const startOpenWaSmokeApp = async ({
     openwa_recovery_max_attempts: env.OPENWA_RECOVERY_MAX_ATTEMPTS,
     openwa_recovery_retry_delay_seconds: env.OPENWA_RECOVERY_RETRY_DELAY_SECONDS,
     openwa_startup_max_attempts: env.OPENWA_STARTUP_MAX_ATTEMPTS,
-    openwa_startup_retry_delay_seconds: env.OPENWA_STARTUP_RETRY_DELAY_SECONDS
+    openwa_startup_retry_delay_seconds: env.OPENWA_STARTUP_RETRY_DELAY_SECONDS,
+    technical_persistence_enabled: env.TECHNICAL_PERSISTENCE_ENABLED
   });
 
   const supervisor = createOpenWaSupervisor({
@@ -102,7 +142,8 @@ export const startOpenWaSmokeApp = async ({
     livenessFailureThreshold: env.OPENWA_LIVENESS_FAILURE_THRESHOLD,
     recoveryMode: env.OPENWA_RECOVERY_MODE,
     recoveryMaxAttempts: env.OPENWA_RECOVERY_MAX_ATTEMPTS,
-    recoveryRetryDelaySeconds: env.OPENWA_RECOVERY_RETRY_DELAY_SECONDS
+    recoveryRetryDelaySeconds: env.OPENWA_RECOVERY_RETRY_DELAY_SECONDS,
+    ...(technicalPersistence ? { technicalPersistence } : {})
   });
   const statusServer = await startOpenWaStatusServer({
     config: {
@@ -112,6 +153,12 @@ export const startOpenWaSmokeApp = async ({
     },
     logger,
     getHealth: () => supervisor.getHealth()
+  }).catch((error: unknown) => {
+    if (shouldClosePersistence) {
+      technicalPersistence?.close?.();
+    }
+
+    throw error;
   });
 
   let client: OpenWaRuntimeClient;
@@ -120,7 +167,21 @@ export const startOpenWaSmokeApp = async ({
     client = await supervisor.start();
   } catch (error) {
     await statusServer.stop();
+    if (shouldClosePersistence) {
+      technicalPersistence?.close?.();
+    }
     throw error;
+  }
+
+  if (technicalPersistence) {
+    try {
+      await technicalPersistence.recordRuntimeStarted();
+    } catch (error) {
+      logger.warn("openwa_technical_persistence_failed", {
+        operation: "record_runtime_started",
+        error: error instanceof Error ? error.message : "unknown_error"
+      });
+    }
   }
 
   logger.info("openwa_client_ready", {
@@ -152,8 +213,21 @@ export const startOpenWaSmokeApp = async ({
         });
 
         try {
+          if (technicalPersistence) {
+            try {
+              await technicalPersistence.recordRuntimeStopped(reason);
+            } catch (error) {
+              logger.warn("openwa_technical_persistence_failed", {
+                operation: "record_runtime_stopped",
+                error: error instanceof Error ? error.message : "unknown_error"
+              });
+            }
+          }
           await supervisor.stop(reason);
           await statusServer.stop();
+          if (shouldClosePersistence) {
+            technicalPersistence?.close?.();
+          }
 
           logger.info("openwa_shutdown_complete", {
             reason,
@@ -161,6 +235,9 @@ export const startOpenWaSmokeApp = async ({
           });
         } catch (error) {
           await statusServer.stop();
+          if (shouldClosePersistence) {
+            technicalPersistence?.close?.();
+          }
           logger.error("openwa_shutdown_failed", {
             reason,
             client_cleanup_available: clientCleanupAvailable,

@@ -4,6 +4,7 @@ import { createOpenWaLivenessCheck } from "./liveness.ts";
 import { registerOpenWaListener } from "./listener.ts";
 import type { OpenWaConfig } from "./client.ts";
 import type { OpenWaLivenessCheck, OpenWaRuntimeClient } from "./types.ts";
+import type { OpenWaTechnicalPersistence } from "../../runtime/openwa/technicalPersistence.ts";
 
 export type OpenWaSupervisorState =
   | "starting"
@@ -67,8 +68,10 @@ export interface OpenWaSupervisorDependencies {
       dispatcher: OpenWaDispatcher;
       logger: Logger;
       processedMessageIds?: Set<string>;
+      technicalPersistence?: OpenWaTechnicalPersistence;
     }
   ) => Promise<unknown>;
+  technicalPersistence?: OpenWaTechnicalPersistence;
 }
 
 const STOPPED_DURING_STARTUP_ERROR = "openwa_startup_stopped";
@@ -91,7 +94,8 @@ export const createOpenWaSupervisor = ({
   recoveryRetryDelaySeconds = DEFAULT_RECOVERY_RETRY_DELAY_SECONDS,
   createDispatcher = createOpenWaDispatcher,
   createLivenessCheck = (client) => client.checkLiveness ?? createOpenWaLivenessCheck({}),
-  registerListener = registerOpenWaListener
+  registerListener = registerOpenWaListener,
+  technicalPersistence
 }: OpenWaSupervisorDependencies): OpenWaSupervisor => {
   const livenessEnabled = livenessIntervalSeconds > 0 && livenessFailureThreshold > 0;
   const processedMessageIds = new Set<string>();
@@ -288,7 +292,8 @@ export const createOpenWaSupervisor = ({
     await registerListener(client, {
       dispatcher,
       logger,
-      processedMessageIds
+      processedMessageIds,
+      ...(technicalPersistence ? { technicalPersistence } : {})
     });
     await assertNotShuttingDown(client);
 

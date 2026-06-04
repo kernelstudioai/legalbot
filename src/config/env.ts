@@ -81,7 +81,8 @@ const EnvSchema = z.object({
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   OPENWA_HEADLESS: createBooleanEnvSchema("true"),
   DATABASE_URL: DatabaseUrlSchema,
-  DATABASE_MIGRATIONS_ENABLED: createBooleanEnvSchema("true")
+  DATABASE_MIGRATIONS_ENABLED: createBooleanEnvSchema("true"),
+  TECHNICAL_PERSISTENCE_ENABLED: createBooleanEnvSchema("false")
 });
 
 export type AppEnv = z.infer<typeof EnvSchema>;

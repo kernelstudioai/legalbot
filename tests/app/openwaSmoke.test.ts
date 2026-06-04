@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createServer } from "node:http";
 import type { Logger } from "../../src/logging/logger";
+import type { PersistenceService } from "../../src/persistence";
 import {
   installOpenWaSignalHandlers,
   startOpenWaSmokeApp,
@@ -12,6 +13,31 @@ const createLogger = (): Logger => ({
   info: vi.fn(),
   warn: vi.fn(),
   error: vi.fn()
+});
+
+const createPersistenceService = (): PersistenceService => ({
+  isMessageProcessed: vi.fn().mockResolvedValue(false),
+  markMessageProcessed: vi.fn().mockResolvedValue({
+    inserted: true,
+    record: {
+      messageId: "wamid.test-1",
+      channel: "whatsapp",
+      senderId: "[redacted-phone]",
+      transportChatId: "[redacted-phone]",
+      processedAt: "2026-06-04T12:00:00.000Z"
+    }
+  }),
+  appendAuditEvent: vi.fn().mockImplementation(async (event) => ({
+    eventId: event.eventId,
+    eventType: event.eventType,
+    entityType: event.entityType,
+    entityId: event.entityId,
+    occurredAt: event.occurredAt ?? "2026-06-04T12:00:00.000Z",
+    ...(event.metadata ? { metadata: event.metadata } : {})
+  })),
+  createCase: vi.fn(),
+  getCase: vi.fn(),
+  updateCaseStatus: vi.fn()
 });
 
 describe("openwa smoke startup", () => {
@@ -104,7 +130,8 @@ describe("openwa smoke startup", () => {
       openwa_recovery_max_attempts: 2,
       openwa_recovery_retry_delay_seconds: 11,
       openwa_startup_max_attempts: 2,
-      openwa_startup_retry_delay_seconds: 9
+      openwa_startup_retry_delay_seconds: 9,
+      technical_persistence_enabled: false
     });
     expect(logger.info).toHaveBeenCalledWith(
       "openwa_client_starting",
@@ -123,7 +150,8 @@ describe("openwa smoke startup", () => {
         openwa_recovery_max_attempts: 2,
         openwa_recovery_retry_delay_seconds: 11,
         openwa_startup_max_attempts: 2,
-        openwa_startup_retry_delay_seconds: 9
+        openwa_startup_retry_delay_seconds: 9,
+        technical_persistence_enabled: false
       })
     );
     expect(logger.info).toHaveBeenCalledWith("openwa_supervisor_state_changed", {
@@ -298,5 +326,103 @@ describe("openwa smoke startup", () => {
         });
       });
     }
+  });
+
+  it("does not open sqlite persistence when technical persistence is disabled", async () => {
+    const logger = createLogger();
+    const createClient = vi.fn().mockResolvedValue({
+      onMessage: vi.fn().mockResolvedValue(undefined),
+      sendText: vi.fn(),
+      kill: vi.fn().mockResolvedValue(true)
+    });
+    const createSqlitePersistence = vi.fn();
+
+    const app = await startOpenWaSmokeApp({
+      envSource: {
+        BOT_MODE: "smoke",
+        OPENWA_SESSION_ID: "legalbot-smoke",
+        OPENWA_HEADLESS: "false",
+        TECHNICAL_PERSISTENCE_ENABLED: "false",
+        LAWYER_PHONE_E164: "+15551234567"
+      },
+      logger,
+      createClient,
+      createSqlitePersistence
+    });
+
+    expect(createSqlitePersistence).not.toHaveBeenCalled();
+
+    await app.stop("test_shutdown");
+  });
+
+  it("fails safely when technical persistence is enabled before migrations are applied", async () => {
+    const logger = createLogger();
+    const createClient = vi.fn();
+
+    await expect(
+      startOpenWaSmokeApp({
+        cwd: "C:\\Users\\Jacopo\\Documents\\legalbot",
+        envSource: {
+          BOT_MODE: "smoke",
+          OPENWA_SESSION_ID: "legalbot-smoke",
+          OPENWA_HEADLESS: "false",
+          TECHNICAL_PERSISTENCE_ENABLED: "true",
+          DATABASE_URL: "file:./tmp/non-existent-runtime.sqlite",
+          LAWYER_PHONE_E164: "+15551234567"
+        },
+        logger,
+        createClient
+      })
+    ).rejects.toThrow(
+      "Technical persistence requires an existing migrated SQLite database. Run npm run db:migrate before enabling TECHNICAL_PERSISTENCE_ENABLED."
+    );
+
+    expect(createClient).not.toHaveBeenCalled();
+  });
+
+  it("uses an injected persistence service when technical persistence is enabled", async () => {
+    const logger = createLogger();
+    const persistenceService = createPersistenceService();
+    const createClient = vi.fn().mockResolvedValue({
+      onMessage: vi.fn().mockResolvedValue(undefined),
+      sendText: vi.fn(),
+      kill: vi.fn().mockResolvedValue(true)
+    });
+    const createSqlitePersistence = vi.fn();
+
+    const app = await startOpenWaSmokeApp({
+      envSource: {
+        BOT_MODE: "smoke",
+        OPENWA_SESSION_ID: "legalbot-smoke",
+        OPENWA_HEADLESS: "false",
+        TECHNICAL_PERSISTENCE_ENABLED: "true",
+        LAWYER_PHONE_E164: "+15551234567"
+      },
+      logger,
+      createClient,
+      persistenceService,
+      createSqlitePersistence
+    });
+
+    expect(createSqlitePersistence).not.toHaveBeenCalled();
+    expect(persistenceService.appendAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "openwa_runtime_started",
+        entityId: "legalbot-smoke"
+      })
+    );
+
+    await app.stop("test_shutdown");
+
+    expect(persistenceService.appendAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "openwa_runtime_stopped",
+        entityId: "legalbot-smoke",
+        metadata: expect.objectContaining({
+          reason: "test_shutdown",
+          sessionId: "legalbot-smoke"
+        })
+      })
+    );
   });
 });

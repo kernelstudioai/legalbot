@@ -5,9 +5,12 @@ export {
   type OpenSqliteDatabaseResult
 } from "./database.ts";
 export {
+  assertSqliteMigrationsApplied,
   getSqliteMigrationStatus,
   runSqliteMigrations,
   SqliteMigrationRunner,
+  type AssertSqliteMigrationsAppliedOptions,
+  type AssertSqliteMigrationsAppliedResult,
   type GetSqliteMigrationStatusOptions,
   type GetSqliteMigrationStatusResult,
   type RunSqliteMigrationsOptions,
