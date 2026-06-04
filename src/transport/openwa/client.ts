@@ -10,6 +10,7 @@ export interface OpenWaConfig {
   authTimeout: number;
   qrTimeout: number;
   browserExecutablePath?: string;
+  useChrome?: boolean;
 }
 
 export const OPENWA_SESSION_PATH = "openwa-session";
@@ -65,6 +66,7 @@ export const createOpenWaConfig = ({
 
   if (browserExecutablePath) {
     config.browserExecutablePath = browserExecutablePath;
+    config.useChrome = true;
   }
 
   return config;
@@ -81,7 +83,8 @@ const toOpenWaConfigObject = (config: OpenWaConfig): ConfigObject => {
     qrTimeout: config.qrTimeout,
     ...(config.browserExecutablePath
       ? {
-          executablePath: config.browserExecutablePath
+          executablePath: config.browserExecutablePath,
+          useChrome: config.useChrome
         }
       : {})
   };

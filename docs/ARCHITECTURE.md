@@ -21,7 +21,7 @@ This project is a Node.js 22 + TypeScript strict foundation for a WhatsApp legal
 - `src/app/openwaSmoke.ts` is the executable smoke entrypoint that validates runtime env, starts the OpenWA client, installs signal handlers, and wires transport dependencies.
 - Retry the smoke startup with `npm run smoke:openwa` so the documented command stays aligned with the repo script.
 - `src/transport/openwa/client.ts` owns OpenWA bootstrap, runtime session path setup, and raw OpenWA message adaptation.
-- `OPENWA_BROWSER_EXECUTABLE_PATH` is an optional smoke-only env override that maps to the OpenWA launch `executablePath` when Windows needs to use a system Chrome binary.
+- `OPENWA_BROWSER_EXECUTABLE_PATH` is an optional smoke-only env override that maps to the OpenWA launch `executablePath` and also enables `useChrome: true` when Windows needs to use a system Chrome binary.
 - `src/transport/openwa/listener.ts` only logs receipt, maps raw transport data into the existing pipeline input, runs the pipeline, and hands the resulting `OutputPlan` to the dispatcher.
 - `src/transport/openwa/dispatcher.ts` only sends supported text actions and ignores unsupported actions without introducing domain behavior.
 
@@ -29,7 +29,8 @@ This project is a Node.js 22 + TypeScript strict foundation for a WhatsApp legal
 
 - If Puppeteer reports that the configured browser was not found, keep the default behavior first so OpenWA can still use its managed cache when that cache is complete.
 - When a Windows machine already has Chrome installed, set `OPENWA_BROWSER_EXECUTABLE_PATH` to the local Chrome executable such as `C:\Program Files\Google\Chrome\Application\chrome.exe` before running `npm run smoke:openwa`.
-- This override is optional and only affects the OpenWA launch config; leaving it unset preserves the existing Puppeteer cache fallback behavior.
+- When `OPENWA_BROWSER_EXECUTABLE_PATH` is set, the smoke startup passes both `executablePath` and `useChrome: true` to OpenWA. Leaving it unset preserves the existing Puppeteer cache fallback behavior.
+- If a smoke run launches Chrome but later times out during OpenWA initialization, delete `openwa-session/_IGNORE_<sessionId>` before retrying so the next smoke boot starts from a clean ignored transport session state.
 
 ## Current Constraints
 

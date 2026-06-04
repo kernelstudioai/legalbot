@@ -19,7 +19,7 @@ describe("openwa client config", () => {
     });
   });
 
-  it("passes through an explicit browser executable path when provided", async () => {
+  it("passes through an explicit browser executable path and enables system chrome detection when provided", async () => {
     await createOpenWaClient(
       createOpenWaConfig({
         sessionId: "legalbot-smoke",
@@ -31,7 +31,8 @@ describe("openwa client config", () => {
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "legalbot-smoke",
-        executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+        executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        useChrome: true
       })
     );
   });
@@ -45,7 +46,8 @@ describe("openwa client config", () => {
 
     expect(create).toHaveBeenCalledWith(
       expect.not.objectContaining({
-        executablePath: expect.anything()
+        executablePath: expect.anything(),
+        useChrome: expect.anything()
       })
     );
   });
