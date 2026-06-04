@@ -2,13 +2,28 @@
 
 ## Scope
 
-M8 keeps persistence bootstrap operator-only. It adds explicit database bootstrap and status commands on top of the M7 SQLite skeleton without wiring database writes into the live OpenWA listener.
+M9 keeps persistence bootstrap and runtime persistence detached from live OpenWA message handling. It adds a `PersistenceService` application boundary on top of the M7 store interfaces and M8 operator DB commands without wiring database writes into the current smoke listener.
 
 ## Interfaces
 
 - `CaseStore`: minimal create/get/update support for case metadata only.
 - `ProcessedMessageStore`: duplicate-detection markers keyed by transport message id.
 - `AuditLogStore`: append-only audit events with optional JSON metadata.
+- `PersistenceService`: the only application boundary that future intake/runtime code should use when it needs persistence.
+
+## Persistence Service Boundary
+
+- `src/persistence/persistenceService.ts` composes `CaseStore`, `ProcessedMessageStore`, and `AuditLogStore`.
+- Supported service methods:
+  - `isMessageProcessed(messageId)`
+  - `markMessageProcessed(messageId, metadata)`
+  - `appendAuditEvent(event)`
+  - `createCase(input)`
+  - `getCase(caseId)`
+  - `updateCaseStatus(caseId, status)`
+- `createSqlitePersistenceService(config)` opens a SQLite-backed service against an explicit `file:` database path.
+- `createInMemoryPersistenceService()` provides a process-local service for tests and non-SQLite callers.
+- The service sanitizes processed-message metadata and audit payloads by stripping body/content/text fields before they can cross the boundary.
 
 ## SQLite Foundation
 
@@ -27,8 +42,10 @@ M8 keeps persistence bootstrap operator-only. It adds explicit database bootstra
 
 - `data/` stays ignored by git, and runtime/session/browser/database artifacts must not be committed.
 - No WhatsApp message bodies are persisted.
+- Processed-message metadata and audit payloads must not include `messageBody`, `body`, `content`, or `text` fields by default.
 - No database writes occur in live message handling yet.
 - No live WhatsApp persistence is enabled yet, and no persistence is introduced before future privacy and consent gates for legal intake.
+- Any future runtime usage of `PersistenceService` still requires an explicit consent/intake gate before live message content or legal-intake state is written.
 
 ## File Location And Backups
 
@@ -43,3 +60,4 @@ M8 keeps persistence bootstrap operator-only. It adds explicit database bootstra
 - When `DATABASE_MIGRATIONS_ENABLED=false`, `npm run db:migrate` reports pending migrations and skips schema changes.
 - `npm run db:status` reports applied and pending migration ids and counts without reading or printing table contents.
 - The migration boundary is intentionally separate from OpenWA startup so transport smoke behavior remains unchanged.
+- `createSqlitePersistenceService(...)` expects a database path that has already been prepared through the explicit migration boundary or an equivalent test setup.
