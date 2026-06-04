@@ -3,8 +3,26 @@ coverage/
 dist/
 *.log
 
+# local environment
+.env
+.env.*
+
+# runtime/session state
+sessions/
+openwa-session/
+data/
+logs/
+*.data.json
+*.node-persist*
+
+# browser profiles
+.openwa/
+.wwebjs_auth/
+.wwebjs_cache/
+.chromium/
+chrome-profile/
+user-data/
+
 # managed
-**.data.json
-**.node-persist**
 **_IGNORE_**
 # end managed
