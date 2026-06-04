@@ -27,10 +27,16 @@ This project is a Node.js 22 + TypeScript strict foundation for a WhatsApp legal
 
 ## Windows Smoke Troubleshooting
 
-- If Puppeteer reports that the configured browser was not found, keep the default behavior first so OpenWA can still use its managed cache when that cache is complete.
+- Use Node 22 LTS before retrying the smoke startup. The repo `engines` policy is `>=22 <23`.
+- If `wmic` is missing on Windows 11, install the WMIC optional feature as Administrator with `DISM /Online /Add-Capability /CapabilityName:WMIC~~~~`, then verify with `wmic os get caption`.
 - When a Windows machine already has Chrome installed, set `OPENWA_BROWSER_EXECUTABLE_PATH` to the local Chrome executable such as `C:\Program Files\Google\Chrome\Application\chrome.exe` before running `npm run smoke:openwa`.
-- When `OPENWA_BROWSER_EXECUTABLE_PATH` is set, the smoke startup passes both `executablePath` and `useChrome: true` to OpenWA. Leaving it unset preserves the existing Puppeteer cache fallback behavior.
-- If a smoke run launches Chrome but later times out during OpenWA initialization, delete `openwa-session/_IGNORE_<sessionId>` before retrying so the next smoke boot starts from a clean ignored transport session state.
+- When `OPENWA_BROWSER_EXECUTABLE_PATH` is set, the smoke startup passes `executablePath`, `useChrome: true`, `headless: false`, `qrTimeout`, and `authTimeout` into the OpenWA create config. Leaving the executable path unset preserves the existing Puppeteer cache fallback behavior.
+- If a smoke run launches Chrome but later times out during OpenWA initialization, delete `openwa-session/_IGNORE_<sessionId>` before retrying so the next smoke boot starts from a clean ignored transport session state. In PowerShell, run `Remove-Item -Recurse -Force .\openwa-session\_IGNORE_<sessionId>`.
+- Keep the Chrome window visible during smoke runs and classify what you see before retrying again:
+  - QR: the WhatsApp QR code is visible. Scan it from the phone, wait for chats to load, and keep the window open.
+  - Blank: the window stays white or never reaches WhatsApp Web. Close Chrome, delete `openwa-session/_IGNORE_<sessionId>`, and retry.
+  - Error: Chrome shows a crash page, profile warning, or other browser error. Close Chrome, verify `OPENWA_BROWSER_EXECUTABLE_PATH`, then retry.
+  - Loaded: WhatsApp Web finishes loading but OpenWA still times out. Delete `openwa-session/_IGNORE_<sessionId>`, retry once, and capture the startup logs for the next investigation.
 
 ## Current Constraints
 

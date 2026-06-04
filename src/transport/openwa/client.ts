@@ -14,6 +14,8 @@ export interface OpenWaConfig {
 }
 
 export const OPENWA_SESSION_PATH = "openwa-session";
+export const OPENWA_DEFAULT_QR_TIMEOUT_SECONDS = 180;
+export const OPENWA_DEFAULT_AUTH_TIMEOUT_SECONDS = 180;
 
 const normalizeTimestamp = (
   timestamp: number | undefined,
@@ -49,19 +51,27 @@ export const toOpenWaRawMessage = (
 
 export interface CreateOpenWaConfigOptions {
   sessionId: string;
+  headless?: boolean;
+  sessionDataPath?: string;
+  authTimeout?: number;
+  qrTimeout?: number;
   browserExecutablePath?: string;
 }
 
 export const createOpenWaConfig = ({
   sessionId,
+  headless = false,
+  sessionDataPath = path.join(process.cwd(), OPENWA_SESSION_PATH),
+  authTimeout = OPENWA_DEFAULT_AUTH_TIMEOUT_SECONDS,
+  qrTimeout = OPENWA_DEFAULT_QR_TIMEOUT_SECONDS,
   browserExecutablePath
 }: CreateOpenWaConfigOptions): OpenWaConfig => {
   const config: OpenWaConfig = {
     sessionId,
-    headless: true,
-    sessionDataPath: path.join(process.cwd(), OPENWA_SESSION_PATH),
-    authTimeout: 0,
-    qrTimeout: 0
+    headless,
+    sessionDataPath,
+    authTimeout,
+    qrTimeout
   };
 
   if (browserExecutablePath) {
@@ -72,7 +82,7 @@ export const createOpenWaConfig = ({
   return config;
 };
 
-const toOpenWaConfigObject = (config: OpenWaConfig): ConfigObject => {
+export const toOpenWaConfigObject = (config: OpenWaConfig): ConfigObject => {
   mkdirSync(config.sessionDataPath, { recursive: true });
 
   return {
@@ -89,6 +99,16 @@ const toOpenWaConfigObject = (config: OpenWaConfig): ConfigObject => {
       : {})
   };
 };
+
+export const toOpenWaStartupMeta = (config: OpenWaConfig) => ({
+  session_id: config.sessionId,
+  session_data_path: path.relative(process.cwd(), config.sessionDataPath) || config.sessionDataPath,
+  openwa_browser_executable_path_set: Boolean(config.browserExecutablePath),
+  openwa_use_chrome: config.useChrome === true,
+  openwa_headless: config.headless,
+  openwa_qr_timeout_seconds: config.qrTimeout,
+  openwa_auth_timeout_seconds: config.authTimeout
+});
 
 export const wrapOpenWaClient = (
   client: Pick<Client, "onMessage" | "sendText" | "kill">

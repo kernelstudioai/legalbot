@@ -1,5 +1,12 @@
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createOpenWaClient, createOpenWaConfig } from "../../../src/transport/openwa/client";
+import {
+  createOpenWaClient,
+  createOpenWaConfig,
+  OPENWA_DEFAULT_AUTH_TIMEOUT_SECONDS,
+  OPENWA_DEFAULT_QR_TIMEOUT_SECONDS,
+  OPENWA_SESSION_PATH
+} from "../../../src/transport/openwa/client";
 
 const { create } = vi.hoisted(() => ({
   create: vi.fn()
@@ -23,6 +30,9 @@ describe("openwa client config", () => {
     await createOpenWaClient(
       createOpenWaConfig({
         sessionId: "legalbot-smoke",
+        headless: false,
+        authTimeout: 240,
+        qrTimeout: 300,
         browserExecutablePath:
           "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
       })
@@ -31,6 +41,10 @@ describe("openwa client config", () => {
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "legalbot-smoke",
+        headless: false,
+        sessionDataPath: path.join(process.cwd(), OPENWA_SESSION_PATH),
+        authTimeout: 240,
+        qrTimeout: 300,
         executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
         useChrome: true
       })
@@ -45,8 +59,21 @@ describe("openwa client config", () => {
     );
 
     expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "legalbot-smoke",
+        headless: false,
+        sessionDataPath: path.join(process.cwd(), OPENWA_SESSION_PATH),
+        authTimeout: OPENWA_DEFAULT_AUTH_TIMEOUT_SECONDS,
+        qrTimeout: OPENWA_DEFAULT_QR_TIMEOUT_SECONDS
+      })
+    );
+    expect(create).toHaveBeenCalledWith(
       expect.not.objectContaining({
-        executablePath: expect.anything(),
+        executablePath: expect.anything()
+      })
+    );
+    expect(create).toHaveBeenCalledWith(
+      expect.not.objectContaining({
         useChrome: expect.anything()
       })
     );
