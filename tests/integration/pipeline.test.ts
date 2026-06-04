@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runInboundPipeline } from "../../src/app";
+import { InMemoryConsentStore } from "../../src/persistence";
+import { InMemoryClientIntakeStore } from "../../src/runtime/client/intake";
 import type { OpenWaMessage } from "../../src/transport/openwa/types";
 
 describe("inbound pipeline", () => {
@@ -23,5 +25,31 @@ describe("inbound pipeline", () => {
     expect(result.runtimeDecision.action).toBe("acknowledge");
     expect(result.outputPlan.messages).toHaveLength(1);
     expect(result.outputPlan.messages[0]?.to).toBe("client-123@c.us");
+  });
+
+  it("keeps the M13 consent flow for unknown consent before intake starts", async () => {
+    const rawMessage: OpenWaMessage = {
+      id: "wamid.client-consent-1",
+      from: "client-456@c.us",
+      chatId: "client-456@c.us",
+      body: "Vorrei aiuto",
+      sender: {
+        pushname: "Client"
+      },
+      fromMe: false,
+      timestamp: Date.parse("2026-06-04T12:10:00.000Z")
+    };
+
+    const consentStore = new InMemoryConsentStore();
+    const intakeStore = new InMemoryClientIntakeStore();
+    const result = await runInboundPipeline(rawMessage, {
+      clientConsentPersistence: consentStore,
+      clientIntakePersistence: intakeStore
+    });
+
+    expect(result.runtimeDecision.action).toBe("request_consent");
+    expect(result.outputPlan.messages[0]?.body).toContain("Acconsento al trattamento");
+    expect(await consentStore.getConsentState("client-456@c.us")).toBe("requested");
+    expect(await intakeStore.getIntakeRecord("client-456@c.us")).toBeNull();
   });
 });

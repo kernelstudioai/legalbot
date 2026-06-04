@@ -10,7 +10,10 @@ export const RuntimeDecision = z.object({
     "consent_granted_ack",
     "consent_denied_close",
     "consent_clarification",
-    "intake_not_implemented"
+    "intake_ask_name",
+    "intake_ask_problem_summary",
+    "intake_complete_ack",
+    "intake_invalid_response"
   ]),
   rationale: z.string().min(1)
 });

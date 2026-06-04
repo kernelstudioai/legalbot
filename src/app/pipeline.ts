@@ -6,7 +6,10 @@ import type {
 } from "../contracts/index.ts";
 import { normalizeInbound } from "../ingress/normalizeInbound.ts";
 import { buildOutputPlan } from "../output/buildOutputPlan.ts";
-import type { ClientConsentPersistence } from "../runtime/client/clientRuntime.ts";
+import type {
+  ClientConsentPersistence,
+  ClientIntakePersistence
+} from "../runtime/client/clientRuntime.ts";
 import { resolveRouting } from "../routing/resolveRouting.ts";
 import { decideNextAction } from "../runtime/shared/decideNextAction.ts";
 import { deriveRuntimeContext } from "../runtime/shared/runtimeContext.ts";
@@ -21,6 +24,7 @@ export interface PipelineResult {
 
 export interface RunInboundPipelineOptions {
   clientConsentPersistence?: ClientConsentPersistence;
+  clientIntakePersistence?: ClientIntakePersistence;
 }
 
 export const runInboundPipeline = async (
@@ -37,6 +41,11 @@ export const runInboundPipeline = async (
     ...(options.clientConsentPersistence
       ? {
           clientConsentPersistence: options.clientConsentPersistence
+        }
+      : {}),
+    ...(options.clientIntakePersistence
+      ? {
+          clientIntakePersistence: options.clientIntakePersistence
         }
       : {})
   });

@@ -1,6 +1,9 @@
 import { RuntimeDecision } from "../../contracts/index.ts";
 import type { CanonicalEnvelopeType, RoutingDecisionType, RuntimeDecisionType } from "../../contracts/index.ts";
-import type { ClientConsentPersistence } from "../client/clientRuntime.ts";
+import type {
+  ClientConsentPersistence,
+  ClientIntakePersistence
+} from "../client/clientRuntime.ts";
 import { runClientRuntime } from "../client/clientRuntime.ts";
 import type { RuntimeContext } from "./runtimeContext.ts";
 
@@ -9,13 +12,15 @@ export interface DecideNextActionInput {
   routingDecision: RoutingDecisionType;
   runtimeContext: RuntimeContext;
   clientConsentPersistence?: ClientConsentPersistence;
+  clientIntakePersistence?: ClientIntakePersistence;
 }
 
 export const decideNextAction = ({
   envelope,
   routingDecision,
   runtimeContext,
-  clientConsentPersistence
+  clientConsentPersistence,
+  clientIntakePersistence
 }: DecideNextActionInput): Promise<RuntimeDecisionType> => {
   if (runtimeContext.runtime === "client") {
     return runClientRuntime({
@@ -23,6 +28,11 @@ export const decideNextAction = ({
       ...(clientConsentPersistence
         ? {
             consentPersistence: clientConsentPersistence
+          }
+        : {}),
+      ...(clientIntakePersistence
+        ? {
+            intakePersistence: clientIntakePersistence
           }
         : {})
     }).then((result) => result.runtimeDecision);

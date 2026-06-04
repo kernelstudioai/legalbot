@@ -7,6 +7,8 @@ import type {
 } from "../../persistence/index.ts";
 import type { RuntimeContext } from "../shared/runtimeContext.ts";
 import { resolveConsentRuntimeDecision } from "./consent.ts";
+import type { ClientIntakeRecord, SetClientIntakeRecordInput } from "./intake.ts";
+import { resolveClientIntakeRuntimeDecision } from "./intake.ts";
 
 export const clientRuntimeContext: RuntimeContext = {
   runtime: "client"
@@ -22,9 +24,15 @@ export interface ClientConsentPersistence {
   appendConsentEvent(event: AppendConsentEventInput): Promise<unknown>;
 }
 
+export interface ClientIntakePersistence {
+  getIntakeRecord(subjectId: string): Promise<ClientIntakeRecord | null>;
+  setIntakeRecord(input: SetClientIntakeRecordInput): Promise<unknown>;
+}
+
 export interface RunClientRuntimeInput {
   envelope: CanonicalEnvelopeType;
   consentPersistence?: ClientConsentPersistence;
+  intakePersistence?: ClientIntakePersistence;
 }
 
 export interface RunClientRuntimeResult {
@@ -47,25 +55,26 @@ const buildConsentMetadata = (
 
 export const runClientRuntime = async ({
   envelope,
-  consentPersistence
+  consentPersistence,
+  intakePersistence
 }: RunClientRuntimeInput): Promise<RunClientRuntimeResult> => {
   const subjectId = deriveConsentSubjectId(envelope);
   const currentConsentState = consentPersistence
     ? await consentPersistence.getConsentState(subjectId)
     : "unknown";
-  const decision = resolveConsentRuntimeDecision({
+  const consentDecision = resolveConsentRuntimeDecision({
     consentState: currentConsentState,
     inboundText: envelope.body
   });
 
   if (consentPersistence) {
-    if (currentConsentState === "unknown" && decision.consentState === "requested") {
+    if (currentConsentState === "unknown" && consentDecision.consentState === "requested") {
       await consentPersistence.setConsentState(subjectId, "requested", {
         metadata: buildConsentMetadata(envelope)
       });
     }
 
-    if (currentConsentState === "requested" && decision.consentState === "granted") {
+    if (currentConsentState === "requested" && consentDecision.consentState === "granted") {
       await consentPersistence.setConsentState(subjectId, "granted", {
         metadata: buildConsentMetadata(envelope)
       });
@@ -78,7 +87,7 @@ export const runClientRuntime = async ({
       });
     }
 
-    if (currentConsentState === "requested" && decision.consentState === "denied") {
+    if (currentConsentState === "requested" && consentDecision.consentState === "denied") {
       await consentPersistence.setConsentState(subjectId, "denied", {
         metadata: buildConsentMetadata(envelope)
       });
@@ -92,9 +101,32 @@ export const runClientRuntime = async ({
     }
   }
 
+  if (consentDecision.consentState !== "granted") {
+    return {
+      subjectId,
+      consentState: consentDecision.consentState,
+      runtimeDecision: consentDecision.runtimeDecision
+    };
+  }
+
+  const intakeRecord = intakePersistence
+    ? await intakePersistence.getIntakeRecord(subjectId)
+    : null;
+  const intakeDecision = resolveClientIntakeRuntimeDecision({
+    subjectId,
+    intakeRecord,
+    inboundText: envelope.body,
+    consentJustGranted:
+      currentConsentState !== "granted" && consentDecision.consentState === "granted"
+  });
+
+  if (intakePersistence && intakeDecision.nextRecord) {
+    await intakePersistence.setIntakeRecord(intakeDecision.nextRecord);
+  }
+
   return {
     subjectId,
-    consentState: decision.consentState,
-    runtimeDecision: decision.runtimeDecision
+    consentState: consentDecision.consentState,
+    runtimeDecision: intakeDecision.runtimeDecision
   };
 };

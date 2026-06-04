@@ -8,6 +8,8 @@ M12 adds a consent-state persistence boundary only. It stores the current consen
 
 M13 wires that consent-state boundary into the live client runtime path without enabling intake persistence. The runtime may read consent state, upsert `requested` / `granted` / `denied`, and append consent events, but it still must not persist message bodies, legal facts, or create cases.
 
+M14 adds a client-intake state machine, but it does not introduce durable intake persistence yet. Accepted intake fields can remain only in an injected in-memory runtime store unless a future dedicated intake persistence boundary is added.
+
 ## Interfaces
 
 - `CaseStore`: minimal create/get/update support for case metadata only.
@@ -65,6 +67,11 @@ M13 wires that consent-state boundary into the live client runtime path without 
   - sanitized metadata with forbidden content fields removed and phone numbers, tokens, and browser/session/QR paths redacted
 - In the live runtime path, `subjectId` is derived narrowly from the canonical sender/chat id and used only for state lookup and updates. Consent metadata stores channel, message id, runtime, and subject-id source markers, not the full phone number.
 - Consent-state persistence does not store transcripts, message bodies, legal facts, or case records.
+- M14 intake state is intentionally separate from the persistence service. This milestone does not add a durable intake store, transcript store, or case-creation write path.
+- If an in-memory intake adapter is injected, it may hold only explicitly accepted structured fields after consent is granted:
+  - `name`
+  - `problemSummary`
+- The in-memory intake adapter must not store raw inbound bodies, invalid replies, or full transcripts.
 - Live WhatsApp runtime writes never create or update cases in M10.
 - M13 live consent wiring never stores inbound message body text in consent state metadata or consent events.
 - Any future intake writes through `PersistenceService` still require explicit `granted` consent before live message content or legal-intake state is written.
@@ -101,9 +108,12 @@ M13 wires that consent-state boundary into the live client runtime path without 
 - Client consent runtime behavior is separate:
   - optional application-layer consent persistence injection can read current consent state before the client runtime decides the response
   - `unknown` -> output `request_consent`, optionally persist `requested`
-  - `requested` + explicit grant -> persist `granted`, append `consent_granted`, output `consent_granted_ack`
+  - `requested` + explicit grant -> persist `granted`, append `consent_granted`, start intake with `intake_ask_name`
   - `requested` + explicit denial -> persist `denied`, append `consent_denied`, output `consent_denied_close`
   - `requested` + ambiguous reply -> output `consent_clarification` without granting consent
-  - `granted` -> output a safe `intake_not_implemented` placeholder
+  - `granted` + `not_started` -> keep intake state in the injected runtime adapter and output `intake_ask_name`
+  - `granted` + valid `asking_name` reply -> store only the accepted `name` field and output `intake_ask_problem_summary`
+  - `granted` + valid `asking_problem_summary` reply -> store only the accepted `problemSummary` field and output `intake_complete_ack`
+  - invalid intake values -> output `intake_invalid_response` without storing the raw reply
   - `denied` -> output the safe no-processing close response
-- M13 does not create cases, store legal facts, or persist message bodies even when consent is granted.
+- M14 still does not create cases, store full transcripts, or persist raw message bodies even when consent is granted.

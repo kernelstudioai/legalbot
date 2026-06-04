@@ -36,7 +36,7 @@ describe("buildOutputPlan", () => {
     ]);
   });
 
-  it("uses the safe placeholder when intake is not implemented", () => {
+  it("uses intake templates for consent-gated intake actions", () => {
     const plan = buildOutputPlan({
       envelope: {
         messageId: "msg-2",
@@ -56,11 +56,11 @@ describe("buildOutputPlan", () => {
       },
       runtimeDecision: {
         actor: "client",
-        action: "intake_not_implemented",
-        rationale: "intake pending"
+        action: "intake_ask_name",
+        rationale: "consent granted"
       }
     });
 
-    expect(plan.messages[0]?.body).toContain("intake non e ancora attivo");
+    expect(plan.messages[0]?.body).toContain("nome e cognome");
   });
 });

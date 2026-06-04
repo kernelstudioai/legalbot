@@ -9,6 +9,7 @@ import {
   consentMessageTemplates,
   isConsentRuntimeAction
 } from "../runtime/client/consent.ts";
+import { intakeMessageTemplates, isIntakeRuntimeAction } from "../runtime/client/intake.ts";
 
 export interface BuildOutputPlanInput {
   envelope: CanonicalEnvelopeType;
@@ -30,6 +31,8 @@ export const buildOutputPlan = ({
 
   const body = isConsentRuntimeAction(runtimeDecision.action)
     ? consentMessageTemplates[runtimeDecision.action]
+    : isIntakeRuntimeAction(runtimeDecision.action)
+      ? intakeMessageTemplates[runtimeDecision.action]
     : `Placeholder response prepared for ${routingDecision.targetRuntime} runtime.`;
 
   return OutputPlan.parse({

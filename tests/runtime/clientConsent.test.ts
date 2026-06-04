@@ -73,13 +73,13 @@ describe("client consent runtime", () => {
     expect(canPersistClientContent(result.consentState)).toBe(false);
   });
 
-  it("returns a safe non-intake placeholder after consent is already granted", () => {
+  it("returns a granted consent acknowledgement for already-granted state", () => {
     const result = resolveConsentRuntimeDecision({
       consentState: "granted"
     });
 
-    expect(result.runtimeDecision.action).toBe("intake_not_implemented");
-    expect(result.messageTemplate).toBe(consentMessageTemplates.intake_not_implemented);
+    expect(result.runtimeDecision.action).toBe("consent_granted_ack");
+    expect(result.messageTemplate).toBe(consentMessageTemplates.consent_granted_ack);
   });
 
   it("keeps consent templates free from legal advice language", () => {
