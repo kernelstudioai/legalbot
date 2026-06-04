@@ -1,6 +1,14 @@
 import type { AuditEventRecord, AuditLogStore } from "./auditLogStore.ts";
 import type { CaseRecord, CaseStore, CreateCaseInput } from "./caseStore.ts";
 import type {
+  AppendConsentEventInput,
+  ConsentEventRecord,
+  ConsentState,
+  ConsentStateRecord,
+  ConsentStore
+} from "./consentStore.ts";
+import { sanitizePersistenceMetadata } from "./metadataSanitizer.ts";
+import type {
   MarkProcessedMessageResult,
   ProcessedMessageRecord,
   ProcessedMessageStore
@@ -10,16 +18,17 @@ import {
   type OpenSqliteDatabaseOptions,
   SqliteAuditLogStore,
   SqliteCaseStore,
+  SqliteConsentStore,
   SqliteProcessedMessageStore
 } from "./sqlite/index.ts";
 import {
   InMemoryAuditLogStore,
   InMemoryCaseStore,
+  InMemoryConsentStore,
   InMemoryProcessedMessageStore
 } from "./testing/inMemoryStores.ts";
 
 const defaultChannel = "whatsapp" as const;
-const forbiddenContentKeys = new Set(["body", "content", "messagebody", "message_body", "text"]);
 
 export interface MarkMessageProcessedMetadata {
   senderId: string;
@@ -43,6 +52,16 @@ export interface PersistenceAuditEventInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface SetConsentStateMetadata {
+  updatedAt?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PersistenceConsentStateResult {
+  record: ConsentStateRecord;
+  sanitizedMetadata?: Record<string, unknown>;
+}
+
 export interface PersistenceService {
   isMessageProcessed(messageId: string): Promise<boolean>;
   markMessageProcessed(
@@ -50,6 +69,13 @@ export interface PersistenceService {
     metadata: MarkMessageProcessedMetadata
   ): Promise<PersistenceProcessedMessageResult>;
   appendAuditEvent(event: PersistenceAuditEventInput): Promise<AuditEventRecord>;
+  getConsentState(subjectId: string): Promise<ConsentState>;
+  setConsentState(
+    subjectId: string,
+    state: ConsentState,
+    metadata?: SetConsentStateMetadata
+  ): Promise<PersistenceConsentStateResult>;
+  appendConsentEvent(event: AppendConsentEventInput): Promise<ConsentEventRecord>;
   createCase(input: CreateCaseInput): Promise<CaseRecord>;
   getCase(caseId: string): Promise<CaseRecord | null>;
   updateCaseStatus(caseId: string, status: string): Promise<CaseRecord | null>;
@@ -59,6 +85,7 @@ export interface CreatePersistenceServiceOptions {
   caseStore: CaseStore;
   processedMessageStore: ProcessedMessageStore;
   auditLogStore: AuditLogStore;
+  consentStore: ConsentStore;
   now?: () => string;
 }
 
@@ -67,49 +94,11 @@ export interface SqlitePersistenceService extends PersistenceService {
   close(): void;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const sanitizeValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) {
-    return value.map((item) => sanitizeValue(item));
-  }
-
-  if (!isRecord(value)) {
-    return value;
-  }
-
-  const sanitizedEntries = Object.entries(value).flatMap(([key, entryValue]) => {
-    if (forbiddenContentKeys.has(key.toLowerCase())) {
-      return [];
-    }
-
-    return [[key, sanitizeValue(entryValue)]];
-  });
-
-  return Object.fromEntries(sanitizedEntries);
-};
-
-const sanitizeMetadata = (
-  metadata: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined => {
-  if (!metadata) {
-    return undefined;
-  }
-
-  const sanitized = sanitizeValue(metadata);
-
-  if (!isRecord(sanitized) || Object.keys(sanitized).length === 0) {
-    return undefined;
-  }
-
-  return sanitized;
-};
-
 export const createPersistenceService = ({
   caseStore,
   processedMessageStore,
   auditLogStore,
+  consentStore,
   now = () => new Date().toISOString()
 }: CreatePersistenceServiceOptions): PersistenceService => ({
   async isMessageProcessed(messageId) {
@@ -124,7 +113,7 @@ export const createPersistenceService = ({
       transportChatId: metadata.transportChatId,
       processedAt: metadata.processedAt ?? now()
     };
-    const sanitizedMetadata = sanitizeMetadata(metadata.metadata);
+    const sanitizedMetadata = sanitizePersistenceMetadata(metadata.metadata);
     const result = await processedMessageStore.markProcessed(record);
 
     return sanitizedMetadata
@@ -133,7 +122,7 @@ export const createPersistenceService = ({
   },
 
   async appendAuditEvent(event) {
-    const sanitizedMetadata = sanitizeMetadata(event.metadata);
+    const sanitizedMetadata = sanitizePersistenceMetadata(event.metadata);
     const storedEvent: AuditEventRecord = {
       eventId: event.eventId,
       eventType: event.eventType,
@@ -148,6 +137,35 @@ export const createPersistenceService = ({
     };
 
     await auditLogStore.append(storedEvent);
+    return storedEvent;
+  },
+
+  async getConsentState(subjectId) {
+    return consentStore.getConsentState(subjectId);
+  },
+
+  async setConsentState(subjectId, state, metadata) {
+    const sanitizedMetadata = sanitizePersistenceMetadata(metadata?.metadata);
+    const record = await consentStore.setConsentState(subjectId, state, {
+      updatedAt: metadata?.updatedAt ?? now(),
+      ...(sanitizedMetadata ? { metadata: sanitizedMetadata } : {})
+    });
+
+    return sanitizedMetadata ? { record, sanitizedMetadata } : { record };
+  },
+
+  async appendConsentEvent(event) {
+    const sanitizedMetadata = sanitizePersistenceMetadata(event.metadata);
+    const storedEvent: ConsentEventRecord = {
+      eventId: event.eventId,
+      subjectId: event.subjectId,
+      state: event.state,
+      eventType: event.eventType,
+      occurredAt: event.occurredAt ?? now(),
+      ...(sanitizedMetadata ? { metadata: sanitizedMetadata } : {})
+    };
+
+    await consentStore.appendConsentEvent(storedEvent);
     return storedEvent;
   },
 
@@ -175,7 +193,8 @@ export const createSqlitePersistenceService = (
   const service = createPersistenceService({
     caseStore: new SqliteCaseStore(database),
     processedMessageStore: new SqliteProcessedMessageStore(database),
-    auditLogStore: new SqliteAuditLogStore(database)
+    auditLogStore: new SqliteAuditLogStore(database),
+    consentStore: new SqliteConsentStore(database)
   });
 
   return {
@@ -191,5 +210,6 @@ export const createInMemoryPersistenceService = (): PersistenceService =>
   createPersistenceService({
     caseStore: new InMemoryCaseStore(),
     processedMessageStore: new InMemoryProcessedMessageStore(),
-    auditLogStore: new InMemoryAuditLogStore()
+    auditLogStore: new InMemoryAuditLogStore(),
+    consentStore: new InMemoryConsentStore()
   });

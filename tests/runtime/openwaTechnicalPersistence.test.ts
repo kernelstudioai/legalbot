@@ -53,6 +53,22 @@ describe("openwa technical persistence", () => {
           ...(event.metadata ? { metadata: event.metadata } : {})
         };
       },
+      getConsentState: async () => "unknown",
+      setConsentState: async () => ({
+        record: {
+          subjectId: "subject-1",
+          state: "unknown",
+          updatedAt: "2026-06-04T12:00:00.000Z"
+        }
+      }),
+      appendConsentEvent: async (event) => ({
+        eventId: event.eventId,
+        subjectId: event.subjectId,
+        state: event.state,
+        eventType: event.eventType,
+        occurredAt: event.occurredAt ?? "2026-06-04T12:00:00.000Z",
+        ...(event.metadata ? { metadata: event.metadata } : {})
+      }),
       createCase: async () => {
         throw new Error("not used");
       },
@@ -145,7 +161,9 @@ describe("openwa technical persistence", () => {
       appliedMigrationIds: [
         "0001_create_cases",
         "0002_create_processed_messages",
-        "0003_create_audit_events"
+        "0003_create_audit_events",
+        "0004_create_consent_states",
+        "0005_create_consent_events"
       ],
       databasePath: path.join(tempDir, "data", "legalbot.sqlite")
     });

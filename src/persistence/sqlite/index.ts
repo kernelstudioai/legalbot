@@ -22,4 +22,5 @@ export {
 export { sqliteMigrations, type SqliteMigration } from "./migrations.ts";
 export { SqliteAuditLogStore } from "./sqliteAuditLogStore.ts";
 export { SqliteCaseStore } from "./sqliteCaseStore.ts";
+export { SqliteConsentStore } from "./sqliteConsentStore.ts";
 export { SqliteProcessedMessageStore } from "./sqliteProcessedMessageStore.ts";

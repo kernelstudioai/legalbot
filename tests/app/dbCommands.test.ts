@@ -51,11 +51,13 @@ describe("db bootstrap commands", () => {
       migrations_enabled: true
     });
     expect(logger.info).toHaveBeenCalledWith("db_migration_complete", {
-      applied_migration_count: 3,
+      applied_migration_count: 5,
       applied_migration_ids: [
         "0001_create_cases",
         "0002_create_processed_messages",
-        "0003_create_audit_events"
+        "0003_create_audit_events",
+        "0004_create_consent_states",
+        "0005_create_consent_events"
       ],
       database_path: databasePath,
       migrations_enabled: true,
@@ -85,11 +87,13 @@ describe("db bootstrap commands", () => {
       applied_migration_ids: [],
       database_path: databasePath,
       migrations_enabled: false,
-      pending_migration_count: 3,
+      pending_migration_count: 5,
       pending_migration_ids: [
         "0001_create_cases",
         "0002_create_processed_messages",
-        "0003_create_audit_events"
+        "0003_create_audit_events",
+        "0004_create_consent_states",
+        "0005_create_consent_events"
       ]
     });
   });
@@ -114,11 +118,13 @@ describe("db bootstrap commands", () => {
       applied_migration_ids: [],
       database_path: databasePath,
       migrations_enabled: true,
-      pending_migration_count: 3,
+      pending_migration_count: 5,
       pending_migration_ids: [
         "0001_create_cases",
         "0002_create_processed_messages",
-        "0003_create_audit_events"
+        "0003_create_audit_events",
+        "0004_create_consent_states",
+        "0005_create_consent_events"
       ]
     });
 
@@ -148,11 +154,13 @@ describe("db bootstrap commands", () => {
 
     expect(appliedSummary.exitCode).toBe(0);
     expect(statusLogger.info).toHaveBeenCalledWith("db_status_checked", {
-      applied_migration_count: 3,
+      applied_migration_count: 5,
       applied_migration_ids: [
         "0001_create_cases",
         "0002_create_processed_messages",
-        "0003_create_audit_events"
+        "0003_create_audit_events",
+        "0004_create_consent_states",
+        "0005_create_consent_events"
       ],
       database_path: databasePath,
       migrations_enabled: true,

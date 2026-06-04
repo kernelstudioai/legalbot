@@ -41,5 +41,29 @@ export const sqliteMigrations: SqliteMigration[] = [
         metadata_json TEXT
       );
     `
+  },
+  {
+    id: "0004_create_consent_states",
+    sql: `
+      CREATE TABLE IF NOT EXISTS consent_states (
+        subject_id TEXT PRIMARY KEY,
+        consent_state TEXT NOT NULL CHECK (consent_state IN ('unknown', 'requested', 'granted', 'denied')),
+        updated_at TEXT NOT NULL,
+        metadata_json TEXT
+      );
+    `
+  },
+  {
+    id: "0005_create_consent_events",
+    sql: `
+      CREATE TABLE IF NOT EXISTS consent_events (
+        event_id TEXT PRIMARY KEY,
+        subject_id TEXT NOT NULL,
+        consent_state TEXT NOT NULL CHECK (consent_state IN ('unknown', 'requested', 'granted', 'denied')),
+        event_type TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        metadata_json TEXT
+      );
+    `
   }
 ];

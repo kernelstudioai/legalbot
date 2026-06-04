@@ -2,28 +2,34 @@
 
 ## Scope
 
-M10 adds optional technical runtime persistence for the OpenWA smoke runtime. It remains opt-in, keeps transport dedupe process-local first, and stores only restart-safe processed-message markers plus sanitized technical audit events. It does not add legal-intake persistence.
+M10 adds optional technical runtime persistence for the OpenWA smoke runtime. It remains opt-in, keeps transport dedupe process-local first, and stores only restart-safe processed-message markers plus sanitized technical audit events.
+
+M12 adds a consent-state persistence boundary only. It stores the current consent state plus sanitized consent metadata and append-only consent events. It still does not persist message transcripts, message bodies, legal facts, or full legal-intake records.
 
 ## Interfaces
 
 - `CaseStore`: minimal create/get/update support for case metadata only.
+- `ConsentStore`: current consent-state lookup, consent-state upsert, and append-only consent event history.
 - `ProcessedMessageStore`: duplicate-detection markers keyed by transport message id.
 - `AuditLogStore`: append-only audit events with optional JSON metadata.
 - `PersistenceService`: the only application boundary that future intake/runtime code should use when it needs persistence.
 
 ## Persistence Service Boundary
 
-- `src/persistence/persistenceService.ts` composes `CaseStore`, `ProcessedMessageStore`, and `AuditLogStore`.
+- `src/persistence/persistenceService.ts` composes `CaseStore`, `ConsentStore`, `ProcessedMessageStore`, and `AuditLogStore`.
 - Supported service methods:
   - `isMessageProcessed(messageId)`
   - `markMessageProcessed(messageId, metadata)`
   - `appendAuditEvent(event)`
+  - `getConsentState(subjectId)`
+  - `setConsentState(subjectId, state, metadata)`
+  - `appendConsentEvent(event)`
   - `createCase(input)`
   - `getCase(caseId)`
   - `updateCaseStatus(caseId, status)`
 - `createSqlitePersistenceService(config)` opens a SQLite-backed service against an explicit `file:` database path.
 - `createInMemoryPersistenceService()` provides a process-local service for tests and non-SQLite callers.
-- The service sanitizes processed-message metadata and audit payloads by stripping body/content/text fields before they can cross the boundary.
+- The service sanitizes processed-message metadata, audit payloads, and consent metadata before they can cross the boundary.
 - The OpenWA smoke runtime can inject an existing `PersistenceService` or create a SQLite-backed one only when `TECHNICAL_PERSISTENCE_ENABLED=true`.
 
 ## SQLite Foundation
@@ -37,6 +43,8 @@ M10 adds optional technical runtime persistence for the OpenWA smoke runtime. It
 - Technical runtime startup never runs migrations. When `TECHNICAL_PERSISTENCE_ENABLED=true`, startup requires `npm run db:migrate` to have been completed already or it fails safely with a clear error.
 - Current tables:
   - `cases`
+  - `consent_states`
+  - `consent_events`
   - `processed_messages`
   - `audit_events`
   - `schema_migrations`
@@ -47,9 +55,15 @@ M10 adds optional technical runtime persistence for the OpenWA smoke runtime. It
 - No WhatsApp message bodies are persisted.
 - OpenWA runtime dedupe persists only processed `messageId` markers plus redacted technical metadata needed by the current store contract.
 - Technical audit events are sanitized before persistence and must not include message bodies, legal facts, full phone numbers, browser paths, session paths, tokens, or QR data.
+- Consent-state persistence stores only:
+  - a generic `subjectId`
+  - the consent state (`unknown`, `requested`, `granted`, or `denied`)
+  - timestamps
+  - sanitized metadata with forbidden content fields removed and phone numbers, tokens, and browser/session/QR paths redacted
+- Consent-state persistence does not store transcripts, message bodies, legal facts, or case records.
 - Live WhatsApp runtime writes never create or update cases in M10.
-- No consent-gated legal-intake persistence is enabled yet.
-- Any future runtime usage of `PersistenceService` still requires an explicit consent/intake gate before live message content or legal-intake state is written.
+- No live OpenWA consent persistence wiring is enabled yet.
+- Any future intake writes through `PersistenceService` still require explicit `granted` consent before live message content or legal-intake state is written.
 
 ## File Location And Backups
 

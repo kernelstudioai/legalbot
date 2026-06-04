@@ -3,10 +3,15 @@ import type {
   AuditLogStore,
   CaseRecord,
   CaseStore,
+  ConsentEventRecord,
+  ConsentState,
+  ConsentStateRecord,
+  ConsentStore,
   CreateCaseInput,
   MarkProcessedMessageResult,
   ProcessedMessageRecord,
   ProcessedMessageStore,
+  SetConsentStateOptions,
   UpdateCaseInput
 } from "../index.ts";
 
@@ -78,5 +83,42 @@ export class InMemoryAuditLogStore implements AuditLogStore {
 
   snapshot(): AuditEventRecord[] {
     return [...this.events];
+  }
+}
+
+export class InMemoryConsentStore implements ConsentStore {
+  private readonly consentStates = new Map<string, ConsentStateRecord>();
+  private readonly consentEvents: ConsentEventRecord[] = [];
+
+  async getConsentState(subjectId: string): Promise<ConsentState> {
+    return this.consentStates.get(subjectId)?.state ?? "unknown";
+  }
+
+  async setConsentState(
+    subjectId: string,
+    state: ConsentState,
+    options: SetConsentStateOptions = {}
+  ): Promise<ConsentStateRecord> {
+    const record: ConsentStateRecord = {
+      subjectId,
+      state,
+      updatedAt: options.updatedAt ?? new Date().toISOString(),
+      ...(options.metadata ? { metadata: options.metadata } : {})
+    };
+
+    this.consentStates.set(subjectId, record);
+    return record;
+  }
+
+  async appendConsentEvent(event: ConsentEventRecord): Promise<void> {
+    this.consentEvents.push(event);
+  }
+
+  snapshotStates(): ConsentStateRecord[] {
+    return [...this.consentStates.values()];
+  }
+
+  snapshotEvents(): ConsentEventRecord[] {
+    return [...this.consentEvents];
   }
 }

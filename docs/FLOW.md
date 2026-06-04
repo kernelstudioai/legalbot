@@ -16,8 +16,10 @@
 - Routing is placeholder logic based on a minimal inbound shape.
 - Runtime decisions are intentionally stubbed.
 - The consent/privacy boundary is implemented as an isolated client runtime module with `unknown`, `requested`, `granted`, and `denied` states plus strict explicit-consent parsing.
+- M12 adds persistence support for that consent state only through a separate `ConsentStore` and `PersistenceService` boundary. It stores only the state plus sanitized metadata and append-only consent events.
 - Before consent is `granted`, the runtime may request consent or clarification, but it must not persist message transcripts, message bodies, legal facts, or create cases.
 - M10 technical dedupe and sanitized audit persistence remain separate from consent-gated client content persistence.
+- Live OpenWA messages are still not wired to consent persistence, so runtime behavior and smoke responses stay unchanged.
 - Dispatcher is a thin transport boundary around `client.sendText`.
 - OpenWA startup emits `openwa_client_starting`, drives the supervisor through `starting -> ready|degraded`, and exposes readiness through `getHealth()`.
 - Bounded startup retry is controlled by `OPENWA_STARTUP_MAX_ATTEMPTS` and `OPENWA_STARTUP_RETRY_DELAY_SECONDS`.

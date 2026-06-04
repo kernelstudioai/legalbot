@@ -35,6 +35,22 @@ const createPersistenceService = (): PersistenceService => ({
     occurredAt: event.occurredAt ?? "2026-06-04T12:00:00.000Z",
     ...(event.metadata ? { metadata: event.metadata } : {})
   })),
+  getConsentState: vi.fn().mockResolvedValue("unknown"),
+  setConsentState: vi.fn().mockResolvedValue({
+    record: {
+      subjectId: "subject-1",
+      state: "unknown",
+      updatedAt: "2026-06-04T12:00:00.000Z"
+    }
+  }),
+  appendConsentEvent: vi.fn().mockImplementation(async (event) => ({
+    eventId: event.eventId,
+    subjectId: event.subjectId,
+    state: event.state,
+    eventType: event.eventType,
+    occurredAt: event.occurredAt ?? "2026-06-04T12:00:00.000Z",
+    ...(event.metadata ? { metadata: event.metadata } : {})
+  })),
   createCase: vi.fn(),
   getCase: vi.fn(),
   updateCaseStatus: vi.fn()

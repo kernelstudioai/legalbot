@@ -7,6 +7,7 @@ import {
   runSqliteMigrations,
   SqliteAuditLogStore,
   SqliteCaseStore,
+  SqliteConsentStore,
   SqliteProcessedMessageStore
 } from "../../src/persistence/sqlite/index.ts";
 
@@ -46,7 +47,9 @@ describe("sqlite persistence foundation", () => {
     expect(migrationResult.appliedMigrationIds).toEqual([
       "0001_create_cases",
       "0002_create_processed_messages",
-      "0003_create_audit_events"
+      "0003_create_audit_events",
+      "0004_create_consent_states",
+      "0005_create_consent_events"
     ]);
     expect(migrationResult.pendingMigrationIds).toEqual([]);
     expect(migrationResult.databasePath.startsWith(tempDir)).toBe(true);
@@ -74,6 +77,8 @@ describe("sqlite persistence foundation", () => {
       expect(tableNames).toEqual([
         "audit_events",
         "cases",
+        "consent_events",
+        "consent_states",
         "processed_messages",
         "schema_migrations"
       ]);
@@ -196,6 +201,113 @@ describe("sqlite persistence foundation", () => {
         entity_type: "case",
         entity_id: "case-1",
         occurred_at: "2026-06-04T10:05:00.000Z",
+        metadata_json: JSON.stringify({ source: "test" })
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("stores consent state snapshots and consent events", async () => {
+    const { tempDir, databaseUrl } = createTempDatabaseConfig();
+    runSqliteMigrations({ databaseUrl, cwd: tempDir, enabled: true });
+
+    const { database } = openSqliteDatabase({
+      databaseUrl,
+      cwd: tempDir
+    });
+
+    try {
+      const store = new SqliteConsentStore(database);
+
+      expect(await store.getConsentState("subject-1")).toBe("unknown");
+
+      const stateRecord = await store.setConsentState("subject-1", "granted", {
+        updatedAt: "2026-06-04T10:06:00.000Z",
+        metadata: {
+          source: "test"
+        }
+      });
+
+      expect(stateRecord).toEqual({
+        subjectId: "subject-1",
+        state: "granted",
+        updatedAt: "2026-06-04T10:06:00.000Z",
+        metadata: {
+          source: "test"
+        }
+      });
+      expect(await store.getConsentState("subject-1")).toBe("granted");
+
+      await store.appendConsentEvent({
+        eventId: "consent-event-1",
+        subjectId: "subject-1",
+        state: "granted",
+        eventType: "consent_granted",
+        occurredAt: "2026-06-04T10:07:00.000Z",
+        metadata: {
+          source: "test"
+        }
+      });
+
+      const stateRow = database
+        .prepare(
+          `
+            SELECT
+              subject_id,
+              consent_state,
+              updated_at,
+              metadata_json
+            FROM consent_states
+            WHERE subject_id = ?
+          `
+        )
+        .get("subject-1") as
+        | {
+            subject_id: string;
+            consent_state: string;
+            updated_at: string;
+            metadata_json: string | null;
+          }
+        | undefined;
+
+      const eventRow = database
+        .prepare(
+          `
+            SELECT
+              event_id,
+              subject_id,
+              consent_state,
+              event_type,
+              occurred_at,
+              metadata_json
+            FROM consent_events
+            WHERE event_id = ?
+          `
+        )
+        .get("consent-event-1") as
+        | {
+            event_id: string;
+            subject_id: string;
+            consent_state: string;
+            event_type: string;
+            occurred_at: string;
+            metadata_json: string | null;
+          }
+        | undefined;
+
+      expect(stateRow).toEqual({
+        subject_id: "subject-1",
+        consent_state: "granted",
+        updated_at: "2026-06-04T10:06:00.000Z",
+        metadata_json: JSON.stringify({ source: "test" })
+      });
+      expect(eventRow).toEqual({
+        event_id: "consent-event-1",
+        subject_id: "subject-1",
+        consent_state: "granted",
+        event_type: "consent_granted",
+        occurred_at: "2026-06-04T10:07:00.000Z",
         metadata_json: JSON.stringify({ source: "test" })
       });
     } finally {
