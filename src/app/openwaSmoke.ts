@@ -1,10 +1,10 @@
 import { pathToFileURL } from "node:url";
-import { loadSmokeRuntimeEnv, type SmokeRuntimeEnv } from "../config/env";
-import { consoleLogger, type Logger } from "../logging/logger";
-import { createOpenWaClient, createOpenWaConfig } from "../transport/openwa/client";
-import { createOpenWaDispatcher } from "../transport/openwa/dispatcher";
-import { registerOpenWaListener } from "../transport/openwa/listener";
-import type { OpenWaRuntimeClient } from "../transport/openwa/types";
+import { loadSmokeRuntimeEnv, type SmokeRuntimeEnv } from "../config/env.ts";
+import { consoleLogger, type Logger } from "../logging/logger.ts";
+import { createOpenWaClient, createOpenWaConfig } from "../transport/openwa/client.ts";
+import { createOpenWaDispatcher } from "../transport/openwa/dispatcher.ts";
+import { registerOpenWaListener } from "../transport/openwa/listener.ts";
+import type { OpenWaRuntimeClient } from "../transport/openwa/types.ts";
 
 export interface OpenWaSmokeApp {
   env: SmokeRuntimeEnv;

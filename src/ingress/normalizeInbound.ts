@@ -1,7 +1,7 @@
-import { CanonicalEnvelope } from "../contracts";
-import type { CanonicalEnvelopeType } from "../contracts";
-import { sanitizeInboundBody } from "../security/sanitize";
-import type { OpenWaMessage } from "../transport/openwa/types";
+import { CanonicalEnvelope } from "../contracts/index.ts";
+import type { CanonicalEnvelopeType } from "../contracts/index.ts";
+import { sanitizeInboundBody } from "../security/sanitize.ts";
+import type { OpenWaMessage } from "../transport/openwa/types.ts";
 
 export const normalizeInbound = (rawMessage: OpenWaMessage): CanonicalEnvelopeType =>
   CanonicalEnvelope.parse({

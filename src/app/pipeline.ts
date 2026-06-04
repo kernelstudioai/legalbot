@@ -3,13 +3,13 @@ import type {
   OutputPlanType,
   RoutingDecisionType,
   RuntimeDecisionType
-} from "../contracts";
-import { normalizeInbound } from "../ingress/normalizeInbound";
-import { buildOutputPlan } from "../output/buildOutputPlan";
-import { resolveRouting } from "../routing/resolveRouting";
-import { decideNextAction } from "../runtime/shared/decideNextAction";
-import { deriveRuntimeContext } from "../runtime/shared/runtimeContext";
-import type { OpenWaMessage } from "../transport/openwa/types";
+} from "../contracts/index.ts";
+import { normalizeInbound } from "../ingress/normalizeInbound.ts";
+import { buildOutputPlan } from "../output/buildOutputPlan.ts";
+import { resolveRouting } from "../routing/resolveRouting.ts";
+import { decideNextAction } from "../runtime/shared/decideNextAction.ts";
+import { deriveRuntimeContext } from "../runtime/shared/runtimeContext.ts";
+import type { OpenWaMessage } from "../transport/openwa/types.ts";
 
 export interface PipelineResult {
   envelope: CanonicalEnvelopeType;

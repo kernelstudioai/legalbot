@@ -1,8 +1,8 @@
-import { loadEnv } from "../config/env";
-import { consoleLogger } from "../logging/logger";
-import { createNoopDispatcher } from "../transport/openwa/dispatcher";
-import { handleOpenWaMessage } from "../transport/openwa/listener";
-import type { OpenWaMessage } from "../transport/openwa/types";
+import { loadEnv } from "../config/env.ts";
+import { consoleLogger } from "../logging/logger.ts";
+import { createNoopDispatcher } from "../transport/openwa/dispatcher.ts";
+import { handleOpenWaMessage } from "../transport/openwa/listener.ts";
+import type { OpenWaMessage } from "../transport/openwa/types.ts";
 
 export const bootstrapApplication = () => {
   const env = loadEnv();

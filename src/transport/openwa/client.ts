@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { create, type Client, type ConfigObject, type Message } from "@open-wa/wa-automate";
-import type { OpenWaRawMessage, OpenWaRuntimeClient } from "./types";
+import type { OpenWaRawMessage, OpenWaRuntimeClient } from "./types.ts";
 
 export interface OpenWaConfig {
   sessionId: string;

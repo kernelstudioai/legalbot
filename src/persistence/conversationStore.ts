@@ -1,4 +1,4 @@
-import type { CanonicalEnvelopeType, OutputPlanType, RuntimeDecisionType } from "../contracts";
+import type { CanonicalEnvelopeType, OutputPlanType, RuntimeDecisionType } from "../contracts/index.ts";
 
 export interface ConversationRecord {
   envelope: CanonicalEnvelopeType;

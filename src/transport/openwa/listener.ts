@@ -1,7 +1,7 @@
-import type { Logger } from "../../logging/logger";
-import type { OpenWaDispatcher } from "./dispatcher";
-import type { OpenWaMessage, OpenWaRawMessage, OpenWaRuntimeClient } from "./types";
-import { runInboundPipeline } from "../../app/pipeline";
+import type { Logger } from "../../logging/logger.ts";
+import type { OpenWaDispatcher } from "./dispatcher.ts";
+import type { OpenWaMessage, OpenWaRawMessage, OpenWaRuntimeClient } from "./types.ts";
+import { runInboundPipeline } from "../../app/pipeline.ts";
 
 export interface OpenWaListenerDependencies {
   dispatcher: OpenWaDispatcher;

@@ -1,6 +1,6 @@
-import { RuntimeDecision } from "../../contracts";
-import type { CanonicalEnvelopeType, RoutingDecisionType, RuntimeDecisionType } from "../../contracts";
-import type { RuntimeContext } from "./runtimeContext";
+import { RuntimeDecision } from "../../contracts/index.ts";
+import type { CanonicalEnvelopeType, RoutingDecisionType, RuntimeDecisionType } from "../../contracts/index.ts";
+import type { RuntimeContext } from "./runtimeContext.ts";
 
 export interface DecideNextActionInput {
   envelope: CanonicalEnvelopeType;

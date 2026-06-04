@@ -1,5 +1,5 @@
-import type { OutputPlanType } from "../../contracts";
-import type { OpenWaDispatchResult, OpenWaRuntimeClient } from "./types";
+import type { OutputPlanType } from "../../contracts/index.ts";
+import type { OpenWaDispatchResult, OpenWaRuntimeClient } from "./types.ts";
 
 export interface OpenWaDispatcher {
   dispatch(plan: OutputPlanType): Promise<OpenWaDispatchResult>;

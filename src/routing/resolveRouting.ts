@@ -1,5 +1,5 @@
-import { RoutingDecision } from "../contracts";
-import type { CanonicalEnvelopeType, RoutingDecisionType } from "../contracts";
+import { RoutingDecision } from "../contracts/index.ts";
+import type { CanonicalEnvelopeType, RoutingDecisionType } from "../contracts/index.ts";
 
 export const resolveRouting = (
   envelope: CanonicalEnvelopeType

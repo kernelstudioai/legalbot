@@ -1,4 +1,4 @@
-import type { RoutingDecisionType } from "../../contracts";
+import type { RoutingDecisionType } from "../../contracts/index.ts";
 
 export interface RuntimeContext {
   runtime: "client" | "lawyer" | "shared";

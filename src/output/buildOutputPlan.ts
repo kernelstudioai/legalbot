@@ -1,10 +1,10 @@
-import { OutputPlan } from "../contracts";
+import { OutputPlan } from "../contracts/index.ts";
 import type {
   CanonicalEnvelopeType,
   OutputPlanType,
   RoutingDecisionType,
   RuntimeDecisionType
-} from "../contracts";
+} from "../contracts/index.ts";
 
 export interface BuildOutputPlanInput {
   envelope: CanonicalEnvelopeType;
