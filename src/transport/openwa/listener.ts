@@ -19,7 +19,9 @@ export const handleOpenWaMessage = async (
   const pipelineResult = runInboundPipeline(rawMessage);
   const dispatchResult = await dependencies.dispatcher.dispatch(pipelineResult.outputPlan);
 
-  dependencies.logger.info("Dispatched OpenWA output plan", dispatchResult);
+  dependencies.logger.info("Dispatched OpenWA output plan", {
+    dispatchResult
+  });
 
   return {
     ...pipelineResult,
