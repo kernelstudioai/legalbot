@@ -5,6 +5,10 @@ import type {
   RoutingDecisionType,
   RuntimeDecisionType
 } from "../contracts/index.ts";
+import {
+  consentMessageTemplates,
+  isConsentRuntimeAction
+} from "../runtime/client/consent.ts";
 
 export interface BuildOutputPlanInput {
   envelope: CanonicalEnvelopeType;
@@ -16,17 +20,26 @@ export const buildOutputPlan = ({
   envelope,
   routingDecision,
   runtimeDecision
-}: BuildOutputPlanInput): OutputPlanType =>
-  OutputPlan.parse({
-    messages:
-      runtimeDecision.action === "ignore"
-        ? []
-        : [
-            {
-              kind: "text",
-              to: envelope.transportMetadata.chatId,
-              body: `Placeholder response prepared for ${routingDecision.targetRuntime} runtime.`
-            }
-          ],
+}: BuildOutputPlanInput): OutputPlanType => {
+  if (runtimeDecision.action === "ignore") {
+    return OutputPlan.parse({
+      messages: [],
+      auditNote: `Built output plan for ${envelope.messageId} using action ${runtimeDecision.action}`
+    });
+  }
+
+  const body = isConsentRuntimeAction(runtimeDecision.action)
+    ? consentMessageTemplates[runtimeDecision.action]
+    : `Placeholder response prepared for ${routingDecision.targetRuntime} runtime.`;
+
+  return OutputPlan.parse({
+    messages: [
+      {
+        kind: "text",
+        to: envelope.transportMetadata.chatId,
+        body
+      }
+    ],
     auditNote: `Built output plan for ${envelope.messageId} using action ${runtimeDecision.action}`
   });
+};

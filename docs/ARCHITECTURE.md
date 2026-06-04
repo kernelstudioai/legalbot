@@ -15,6 +15,7 @@ This project is a Node.js 22 + TypeScript strict foundation for a WhatsApp legal
 - `src/security`: sanitization and boundary helpers.
 - `src/logging`: logger abstraction.
 - `src/app`: application orchestration, smoke runtime wiring, and operator-facing local status surface.
+- `src/runtime/client/consent.ts`: isolated consent/privacy boundary for future client-content persistence decisions.
 
 ## OpenWA Smoke Transport
 
@@ -32,6 +33,7 @@ This project is a Node.js 22 + TypeScript strict foundation for a WhatsApp legal
 
 - `src/persistence/caseStore.ts`, `src/persistence/processedMessageStore.ts`, and `src/persistence/auditLogStore.ts` define the M7 storage contracts.
 - `src/persistence/persistenceService.ts` is the M9 application boundary that composes the store contracts. Future intake/runtime code should depend on this service instead of calling stores directly.
+- `src/runtime/client/consent.ts` is the M11 application boundary that decides whether future client content may be persisted. `canPersistClientContent()` returns `true` only for `granted`.
 - `src/persistence/testing/inMemoryStores.ts` provides process-local test doubles so domain tests can stay detached from SQLite and OpenWA runtime wiring.
 - `src/persistence/sqlite/database.ts` resolves `DATABASE_URL` values that use the `file:` scheme and creates parent directories only when an explicit migration or store-opening path is invoked.
 - `src/persistence/sqlite/migrationRunner.ts` is the explicit, testable migration boundary. It creates `schema_migrations`, reports applied versus pending migration ids, applies the committed migration list, and can be skipped when `DATABASE_MIGRATIONS_ENABLED=false`.
@@ -39,6 +41,7 @@ This project is a Node.js 22 + TypeScript strict foundation for a WhatsApp legal
 - `src/app/dbMigrate.ts` and `src/app/dbStatus.ts` are operator-only entrypoints for explicit schema bootstrap and status checks. They use the shared env loader, never print table contents, and remain detached from the OpenWA smoke runtime.
 - The SQLite schema currently persists minimal case metadata, processed-message dedupe markers, and audit events. It does not persist WhatsApp message bodies, browser/session state, attachments, PDFs, or consent-gated intake data.
 - Persistence payload sanitization strips message body/content/text fields before processed-message metadata or audit payloads reach storage, and future live writes still require an explicit consent/intake gate.
+- The consent gate is not wired into the live OpenWA listener yet. Current smoke behavior stays placeholder-only while the consent module is exercised in isolated tests.
 
 ## Verified Baseline
 
