@@ -88,7 +88,7 @@ describe("openwa listener", () => {
       }
     );
     const logger = createLogger();
-    runInboundPipeline.mockReturnValue(pipelineResult);
+    runInboundPipeline.mockResolvedValue(pipelineResult);
 
     await registerOpenWaListener(
       {
@@ -125,7 +125,7 @@ describe("openwa listener", () => {
       messageCount: 1,
       unsupportedCount: 0
     });
-    runInboundPipeline.mockReturnValue(createPipelineResult());
+    runInboundPipeline.mockResolvedValue(createPipelineResult());
 
     await handleOpenWaMessage(createRawMessage(), {
       dispatcher: { dispatch },
@@ -172,7 +172,7 @@ describe("openwa listener", () => {
       unsupportedCount: 0
     };
     const dispatch = vi.fn().mockResolvedValue(dispatchResult);
-    runInboundPipeline.mockReturnValue(createPipelineResult());
+    runInboundPipeline.mockResolvedValue(createPipelineResult());
 
     await handleOpenWaMessage(createRawMessage(), {
       dispatcher: { dispatch },
@@ -193,7 +193,7 @@ describe("openwa listener", () => {
   it("appends audit events for received, duplicate, dispatched, and failed dispatch flows", async () => {
     const logger = createLogger();
     const pipelineResult = createPipelineResult();
-    runInboundPipeline.mockReturnValue(pipelineResult);
+    runInboundPipeline.mockResolvedValue(pipelineResult);
 
     const successPersistence = createTechnicalPersistence();
     const successDispatch = vi.fn().mockResolvedValue({

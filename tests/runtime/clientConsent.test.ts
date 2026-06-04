@@ -73,6 +73,15 @@ describe("client consent runtime", () => {
     expect(canPersistClientContent(result.consentState)).toBe(false);
   });
 
+  it("returns a safe non-intake placeholder after consent is already granted", () => {
+    const result = resolveConsentRuntimeDecision({
+      consentState: "granted"
+    });
+
+    expect(result.runtimeDecision.action).toBe("intake_not_implemented");
+    expect(result.messageTemplate).toBe(consentMessageTemplates.intake_not_implemented);
+  });
+
   it("keeps consent templates free from legal advice language", () => {
     for (const template of Object.values(consentMessageTemplates)) {
       expect(template.toLowerCase()).not.toContain("consiglio legale");

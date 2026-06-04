@@ -102,4 +102,53 @@ describe("openwa listener", () => {
       error: "send_failed"
     });
   });
+
+  it("accepts an injected pipeline runner so transport stays separate from consent persistence", async () => {
+    const logger = createLogger();
+    const dispatcher = {
+      dispatch: vi.fn().mockResolvedValue({
+        delivered: true,
+        messageCount: 1,
+        unsupportedCount: 0
+      })
+    };
+    const pipelineRunner = vi.fn().mockResolvedValue({
+      envelope: {
+        messageId: "wamid.test-1"
+      },
+      routingDecision: {
+        targetRuntime: "client"
+      },
+      runtimeDecision: {
+        action: "request_consent"
+      },
+      outputPlan: {
+        messages: [
+          {
+            kind: "text",
+            to: "client-123@c.us",
+            body: "request consent"
+          }
+        ],
+        auditNote: "built"
+      }
+    });
+
+    await handleOpenWaMessage(createRawMessage(), {
+      dispatcher,
+      logger,
+      processedMessageIds: new Set<string>(),
+      pipelineRunner
+    });
+
+    expect(pipelineRunner).toHaveBeenCalledWith({
+      id: "wamid.test-1",
+      from: "client-123@c.us",
+      chatId: "client-123@c.us",
+      body: "Hello, I need a lawyer",
+      fromMe: false,
+      timestamp: Date.parse("2026-06-04T12:00:00.000Z")
+    });
+    expect(dispatcher.dispatch).toHaveBeenCalledTimes(1);
+  });
 });

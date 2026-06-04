@@ -35,4 +35,32 @@ describe("buildOutputPlan", () => {
       }
     ]);
   });
+
+  it("uses the safe placeholder when intake is not implemented", () => {
+    const plan = buildOutputPlan({
+      envelope: {
+        messageId: "msg-2",
+        channel: "whatsapp",
+        senderId: "client-123@c.us",
+        body: "Vorrei aprire una pratica",
+        receivedAt: "2026-06-04T12:05:00.000Z",
+        transportMetadata: {
+          chatId: "client-123@c.us",
+          fromMe: false
+        }
+      },
+      routingDecision: {
+        targetRuntime: "client",
+        reason: "consent granted",
+        labels: ["consent"]
+      },
+      runtimeDecision: {
+        actor: "client",
+        action: "intake_not_implemented",
+        rationale: "intake pending"
+      }
+    });
+
+    expect(plan.messages[0]?.body).toContain("intake non e ancora attivo");
+  });
 });

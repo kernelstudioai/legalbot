@@ -6,6 +6,8 @@ M10 adds optional technical runtime persistence for the OpenWA smoke runtime. It
 
 M12 adds a consent-state persistence boundary only. It stores the current consent state plus sanitized consent metadata and append-only consent events. It still does not persist message transcripts, message bodies, legal facts, or full legal-intake records.
 
+M13 wires that consent-state boundary into the live client runtime path without enabling intake persistence. The runtime may read consent state, upsert `requested` / `granted` / `denied`, and append consent events, but it still must not persist message bodies, legal facts, or create cases.
+
 ## Interfaces
 
 - `CaseStore`: minimal create/get/update support for case metadata only.
@@ -31,6 +33,7 @@ M12 adds a consent-state persistence boundary only. It stores the current consen
 - `createInMemoryPersistenceService()` provides a process-local service for tests and non-SQLite callers.
 - The service sanitizes processed-message metadata, audit payloads, and consent metadata before they can cross the boundary.
 - The OpenWA smoke runtime can inject an existing `PersistenceService` or create a SQLite-backed one only when `TECHNICAL_PERSISTENCE_ENABLED=true`.
+- Consent runtime wiring uses a narrower consent-only adapter in the application layer so M13 client consent writes stay separate from M10 technical dedupe and audit wiring.
 
 ## SQLite Foundation
 
@@ -60,9 +63,10 @@ M12 adds a consent-state persistence boundary only. It stores the current consen
   - the consent state (`unknown`, `requested`, `granted`, or `denied`)
   - timestamps
   - sanitized metadata with forbidden content fields removed and phone numbers, tokens, and browser/session/QR paths redacted
+- In the live runtime path, `subjectId` is derived narrowly from the canonical sender/chat id and used only for state lookup and updates. Consent metadata stores channel, message id, runtime, and subject-id source markers, not the full phone number.
 - Consent-state persistence does not store transcripts, message bodies, legal facts, or case records.
 - Live WhatsApp runtime writes never create or update cases in M10.
-- No live OpenWA consent persistence wiring is enabled yet.
+- M13 live consent wiring never stores inbound message body text in consent state metadata or consent events.
 - Any future intake writes through `PersistenceService` still require explicit `granted` consent before live message content or legal-intake state is written.
 
 ## File Location And Backups
@@ -94,3 +98,12 @@ M12 adds a consent-state persistence boundary only. It stores the current consen
   - `openwa_output_dispatched`
   - `openwa_dispatch_failed`
   - `openwa_runtime_stopped`
+- Client consent runtime behavior is separate:
+  - optional application-layer consent persistence injection can read current consent state before the client runtime decides the response
+  - `unknown` -> output `request_consent`, optionally persist `requested`
+  - `requested` + explicit grant -> persist `granted`, append `consent_granted`, output `consent_granted_ack`
+  - `requested` + explicit denial -> persist `denied`, append `consent_denied`, output `consent_denied_close`
+  - `requested` + ambiguous reply -> output `consent_clarification` without granting consent
+  - `granted` -> output a safe `intake_not_implemented` placeholder
+  - `denied` -> output the safe no-processing close response
+- M13 does not create cases, store legal facts, or persist message bodies even when consent is granted.

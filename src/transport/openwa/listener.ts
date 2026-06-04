@@ -15,6 +15,7 @@ export interface OpenWaListenerDependencies {
   logger: Logger;
   processedMessageIds?: Set<string>;
   technicalPersistence?: OpenWaTechnicalPersistence;
+  pipelineRunner?: (message: OpenWaMessage) => Promise<PipelineResult>;
 }
 
 export interface OpenWaHandledMessageResult {
@@ -125,7 +126,8 @@ export const handleOpenWaMessage = async (
 
   dependencies.processedMessageIds?.add(rawMessage.id);
 
-  const pipelineResult = runInboundPipeline(mapOpenWaMessage(rawMessage));
+  const pipelineResult = await (dependencies.pipelineRunner ??
+    ((message: OpenWaMessage) => runInboundPipeline(message)))(mapOpenWaMessage(rawMessage));
 
   try {
     const dispatchResult = await dependencies.dispatcher.dispatch(pipelineResult.outputPlan);

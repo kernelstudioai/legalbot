@@ -6,8 +6,10 @@ import {
   type PersistenceService,
   type SqlitePersistenceService
 } from "../persistence/index.ts";
+import type { ClientConsentPersistence } from "../runtime/client/clientRuntime.ts";
 import { assertSqliteMigrationsApplied } from "../persistence/sqlite/index.ts";
 import { createOpenWaTechnicalPersistence } from "../runtime/openwa/technicalPersistence.ts";
+import { registerOpenWaListener } from "../transport/openwa/listener.ts";
 import {
   startOpenWaStatusServer,
   type OpenWaStatusServerAddress
@@ -23,6 +25,7 @@ import {
   type OpenWaSupervisorHealth
 } from "../transport/openwa/supervisor.ts";
 import type { OpenWaRuntimeClient } from "../transport/openwa/types.ts";
+import { runInboundPipeline } from "./pipeline.ts";
 
 export interface OpenWaSmokeApp {
   env: SmokeRuntimeEnv;
@@ -42,6 +45,7 @@ export interface StartOpenWaSmokeAppOptions {
   logger?: Logger;
   createClient?: (config: OpenWaConfig) => Promise<OpenWaRuntimeClient>;
   persistenceService?: PersistenceService;
+  clientConsentPersistence?: ClientConsentPersistence;
   createSqlitePersistence?: (config: {
     databaseUrl: string;
     cwd?: string;
@@ -74,6 +78,7 @@ export const startOpenWaSmokeApp = async ({
   logger = consoleLogger,
   createClient = createDefaultClient,
   persistenceService,
+  clientConsentPersistence,
   createSqlitePersistence = createSqlitePersistenceService
 }: StartOpenWaSmokeAppOptions = {}): Promise<OpenWaSmokeApp> => {
   const env = loadSmokeRuntimeEnv(envSource);
@@ -143,6 +148,18 @@ export const startOpenWaSmokeApp = async ({
     recoveryMode: env.OPENWA_RECOVERY_MODE,
     recoveryMaxAttempts: env.OPENWA_RECOVERY_MAX_ATTEMPTS,
     recoveryRetryDelaySeconds: env.OPENWA_RECOVERY_RETRY_DELAY_SECONDS,
+    registerListener: (client, dependencies) =>
+      registerOpenWaListener(client, {
+        ...dependencies,
+        pipelineRunner: (message) =>
+          runInboundPipeline(message, {
+            ...(clientConsentPersistence
+              ? {
+                  clientConsentPersistence
+                }
+              : {})
+          })
+      }),
     ...(technicalPersistence ? { technicalPersistence } : {})
   });
   const statusServer = await startOpenWaStatusServer({

@@ -14,7 +14,9 @@ export const consentMessageTemplates = {
   consent_denied_close:
     "Ricevuto. Senza consenso non conservero contenuti dei messaggi. La conversazione si chiude qui.",
   consent_clarification:
-    'Non posso interpretare la tua risposta come consenso esplicito. Rispondi solo con "Acconsento al trattamento dei miei dati personali" oppure "Non acconsento al trattamento dei miei dati personali".'
+    'Non posso interpretare la tua risposta come consenso esplicito. Rispondi solo con "Acconsento al trattamento dei miei dati personali" oppure "Non acconsento al trattamento dei miei dati personali".',
+  intake_not_implemented:
+    "Il consenso risulta registrato, ma il flusso di intake non e ancora attivo su WhatsApp in questa fase."
 } as const;
 
 export type ConsentRuntimeAction = keyof typeof consentMessageTemplates;
@@ -105,10 +107,10 @@ export const resolveConsentRuntimeDecision = ({
     return {
       consentState,
       runtimeDecision: createConsentRuntimeDecision(
-        "consent_granted_ack",
-        "Consent already granted for client content persistence gate"
+        "intake_not_implemented",
+        "Consent already granted, but client intake runtime is not implemented yet"
       ),
-      messageTemplate: consentMessageTemplates.consent_granted_ack
+      messageTemplate: consentMessageTemplates.intake_not_implemented
     };
   }
 
