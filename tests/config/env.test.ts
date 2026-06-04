@@ -22,6 +22,8 @@ describe("smoke runtime env", () => {
     expect(env.OPENWA_STATUS_SERVER_ENABLED).toBe(false);
     expect(env.OPENWA_STATUS_SERVER_HOST).toBe("127.0.0.1");
     expect(env.OPENWA_STATUS_SERVER_PORT).toBe(3001);
+    expect(env.DATABASE_URL).toBe("file:./data/legalbot.sqlite");
+    expect(env.DATABASE_MIGRATIONS_ENABLED).toBe(true);
   });
 
   it("accepts an optional browser executable path", () => {
@@ -54,6 +56,8 @@ describe("smoke runtime env", () => {
       OPENWA_STATUS_SERVER_ENABLED: "true",
       OPENWA_STATUS_SERVER_HOST: "127.0.0.1",
       OPENWA_STATUS_SERVER_PORT: "3009",
+      DATABASE_URL: "file:./data/test.sqlite",
+      DATABASE_MIGRATIONS_ENABLED: "false",
       LAWYER_PHONE_E164: "+15551234567"
     });
 
@@ -69,6 +73,8 @@ describe("smoke runtime env", () => {
     expect(env.OPENWA_STATUS_SERVER_ENABLED).toBe(true);
     expect(env.OPENWA_STATUS_SERVER_HOST).toBe("127.0.0.1");
     expect(env.OPENWA_STATUS_SERVER_PORT).toBe(3009);
+    expect(env.DATABASE_URL).toBe("file:./data/test.sqlite");
+    expect(env.DATABASE_MIGRATIONS_ENABLED).toBe(false);
   });
 
   it("defaults restart_client recovery attempts to one when not explicitly set", () => {

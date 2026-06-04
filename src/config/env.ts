@@ -56,6 +56,11 @@ const RecoveryModeSchema = z.preprocess(
   z.enum(["manual", "restart_client"])
 );
 
+const DatabaseUrlSchema = z.preprocess(
+  (value) => (value === undefined ? "file:./data/legalbot.sqlite" : value),
+  z.string().min(1)
+);
+
 const OptionalRecoveryMaxAttemptsSchema = z.preprocess(
   (value) => {
     if (value === undefined) {
@@ -74,7 +79,9 @@ const OptionalRecoveryMaxAttemptsSchema = z.preprocess(
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
-  OPENWA_HEADLESS: createBooleanEnvSchema("true")
+  OPENWA_HEADLESS: createBooleanEnvSchema("true"),
+  DATABASE_URL: DatabaseUrlSchema,
+  DATABASE_MIGRATIONS_ENABLED: createBooleanEnvSchema("true")
 });
 
 export type AppEnv = z.infer<typeof EnvSchema>;

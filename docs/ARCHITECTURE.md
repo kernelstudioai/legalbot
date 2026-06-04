@@ -11,7 +11,7 @@ This project is a Node.js 22 + TypeScript strict foundation for a WhatsApp legal
 - `src/routing`: routing decisions based on canonical envelopes.
 - `src/runtime/*`: isolated runtime decision logic for client, lawyer, and shared concerns.
 - `src/output`: output plan construction before transport dispatch.
-- `src/persistence`: storage interfaces only in this phase.
+- `src/persistence`: persistence interfaces, in-memory test doubles, and the SQLite foundation used by explicit migrations and storage skeletons.
 - `src/security`: sanitization and boundary helpers.
 - `src/logging`: logger abstraction.
 - `src/app`: application orchestration, smoke runtime wiring, and operator-facing local status surface.
@@ -27,6 +27,15 @@ This project is a Node.js 22 + TypeScript strict foundation for a WhatsApp legal
 - `OPENWA_BROWSER_EXECUTABLE_PATH` is an optional smoke-only env override that maps to the OpenWA launch `executablePath` and also enables `useChrome: true` when Windows needs to use a system Chrome binary.
 - `src/transport/openwa/listener.ts` only logs receipt, ignores self-authored and duplicate transport messages, maps raw transport data into the existing pipeline input, runs the pipeline, and hands the resulting `OutputPlan` to the dispatcher.
 - `src/transport/openwa/dispatcher.ts` only sends supported text actions and ignores unsupported actions without introducing domain behavior.
+
+## Persistence Foundation
+
+- `src/persistence/caseStore.ts`, `src/persistence/processedMessageStore.ts`, and `src/persistence/auditLogStore.ts` define the M7 storage contracts.
+- `src/persistence/testing/inMemoryStores.ts` provides process-local test doubles so domain tests can stay detached from SQLite and OpenWA runtime wiring.
+- `src/persistence/sqlite/database.ts` resolves `DATABASE_URL` values that use the `file:` scheme and creates parent directories only when an explicit migration or store-opening path is invoked.
+- `src/persistence/sqlite/migrationRunner.ts` is the explicit, testable migration boundary. It creates `schema_migrations`, applies the committed migration list, and can be skipped when `DATABASE_MIGRATIONS_ENABLED=false`.
+- `src/persistence/sqlite/sqliteCaseStore.ts`, `src/persistence/sqlite/sqliteProcessedMessageStore.ts`, and `src/persistence/sqlite/sqliteAuditLogStore.ts` are skeleton implementations only. They are not wired into the live OpenWA listener yet.
+- The SQLite schema currently persists minimal case metadata, processed-message dedupe markers, and audit events. It does not persist WhatsApp message bodies, browser/session state, attachments, PDFs, or consent-gated intake data.
 
 ## Verified Baseline
 
@@ -82,4 +91,4 @@ This project is a Node.js 22 + TypeScript strict foundation for a WhatsApp legal
 - No attachments or PDFs.
 - No LLM integration.
 - No external SaaS integration.
-- SQLite remains interface-only.
+- SQLite is available only through explicit migrations and storage skeletons, not through live WhatsApp runtime writes.
