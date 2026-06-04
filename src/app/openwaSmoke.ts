@@ -7,12 +7,15 @@ import {
   toOpenWaStartupMeta,
   type OpenWaConfig
 } from "../transport/openwa/client.ts";
-import { createOpenWaDispatcher } from "../transport/openwa/dispatcher.ts";
-import { registerOpenWaListener } from "../transport/openwa/listener.ts";
+import {
+  createOpenWaSupervisor,
+  type OpenWaSupervisorHealth
+} from "../transport/openwa/supervisor.ts";
 import type { OpenWaRuntimeClient } from "../transport/openwa/types.ts";
 
 export interface OpenWaSmokeApp {
   env: SmokeRuntimeEnv;
+  getHealth(): OpenWaSupervisorHealth;
   stop(reason?: string): Promise<void>;
 }
 
@@ -62,20 +65,26 @@ export const startOpenWaSmokeApp = async ({
     openwa_browser_executable_path_set: startupMeta.openwa_browser_executable_path_set,
     openwa_use_chrome: startupMeta.openwa_use_chrome,
     openwa_headless: startupMeta.openwa_headless,
-    session_id: startupMeta.session_id
+    session_id: startupMeta.session_id,
+    openwa_startup_max_attempts: env.OPENWA_STARTUP_MAX_ATTEMPTS,
+    openwa_startup_retry_delay_seconds: env.OPENWA_STARTUP_RETRY_DELAY_SECONDS
   });
 
   logger.info("openwa_client_starting", {
     bot_mode: env.BOT_MODE,
-    ...startupMeta
+    ...startupMeta,
+    openwa_startup_max_attempts: env.OPENWA_STARTUP_MAX_ATTEMPTS,
+    openwa_startup_retry_delay_seconds: env.OPENWA_STARTUP_RETRY_DELAY_SECONDS
   });
 
-  const client = await createClient(config);
-  const dispatcher = createOpenWaDispatcher(client);
-  await registerOpenWaListener(client, {
-    dispatcher,
-    logger
+  const supervisor = createOpenWaSupervisor({
+    config,
+    logger,
+    createClient,
+    startupMaxAttempts: env.OPENWA_STARTUP_MAX_ATTEMPTS,
+    startupRetryDelaySeconds: env.OPENWA_STARTUP_RETRY_DELAY_SECONDS
   });
+  const client = await supervisor.start();
 
   logger.info("openwa_client_ready", {
     bot_mode: env.BOT_MODE,
@@ -88,6 +97,9 @@ export const startOpenWaSmokeApp = async ({
 
   return {
     env,
+    getHealth() {
+      return supervisor.getHealth();
+    },
     async stop(reason = "shutdown") {
       if (shutdownPromise) {
         return shutdownPromise;
@@ -100,9 +112,7 @@ export const startOpenWaSmokeApp = async ({
         });
 
         try {
-          if (clientCleanupAvailable) {
-            await client.kill?.(reason);
-          }
+          await supervisor.stop(reason);
 
           logger.info("openwa_shutdown_complete", {
             reason,

@@ -15,5 +15,6 @@
 - Routing is placeholder logic based on a minimal inbound shape.
 - Runtime decisions are intentionally stubbed.
 - Dispatcher is a thin transport boundary around `client.sendText`.
-- OpenWA startup emits `openwa_client_starting` and `openwa_client_ready`.
+- OpenWA startup emits `openwa_client_starting`, drives the supervisor through `starting -> ready|degraded`, and exposes readiness through `getHealth()`.
+- Bounded startup retry is controlled by `OPENWA_STARTUP_MAX_ATTEMPTS` and `OPENWA_STARTUP_RETRY_DELAY_SECONDS`.
 - Shutdown emits `openwa_shutdown_starting`, `openwa_shutdown_complete`, and `openwa_shutdown_failed`.

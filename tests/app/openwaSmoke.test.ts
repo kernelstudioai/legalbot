@@ -32,6 +32,8 @@ describe("openwa smoke startup", () => {
         OPENWA_HEADLESS: "false",
         OPENWA_QR_TIMEOUT_SECONDS: "240",
         OPENWA_AUTH_TIMEOUT_SECONDS: "180",
+        OPENWA_STARTUP_MAX_ATTEMPTS: "2",
+        OPENWA_STARTUP_RETRY_DELAY_SECONDS: "9",
         LAWYER_PHONE_E164: "+15551234567"
       },
       logger,
@@ -55,7 +57,9 @@ describe("openwa smoke startup", () => {
       openwa_browser_executable_path_set: true,
       openwa_use_chrome: true,
       openwa_headless: false,
-      session_id: "legalbot-smoke"
+      session_id: "legalbot-smoke",
+      openwa_startup_max_attempts: 2,
+      openwa_startup_retry_delay_seconds: 9
     });
     expect(logger.info).toHaveBeenCalledWith(
       "openwa_client_starting",
@@ -67,13 +71,36 @@ describe("openwa smoke startup", () => {
         openwa_use_chrome: true,
         openwa_headless: false,
         openwa_qr_timeout_seconds: 240,
-        openwa_auth_timeout_seconds: 180
+        openwa_auth_timeout_seconds: 180,
+        openwa_startup_max_attempts: 2,
+        openwa_startup_retry_delay_seconds: 9
       })
     );
+    expect(logger.info).toHaveBeenCalledWith("openwa_supervisor_state_changed", {
+      previous_state: "starting",
+      state: "ready",
+      startup_attempt: 1,
+      startup_max_attempts: 2
+    });
+    expect(logger.info).toHaveBeenCalledWith("openwa_supervisor_ready", {
+      startup_attempt: 1,
+      startup_max_attempts: 2
+    });
     expect(logger.info).toHaveBeenCalledWith("openwa_client_ready", {
       bot_mode: "smoke",
       session_id: "legalbot-smoke",
       lawyer_phone_configured: true
+    });
+    expect(app.getHealth()).toMatchObject({
+      state: "ready",
+      ready: true,
+      startupAttempts: 1,
+      startupMaxAttempts: 2,
+      startupRetryDelaySeconds: 9,
+      remainingStartupAttempts: 1,
+      shutdownRequested: false,
+      clientActive: true,
+      listenerRegistered: true
     });
 
     await app.stop("test_shutdown");
@@ -85,6 +112,21 @@ describe("openwa smoke startup", () => {
     expect(logger.info).toHaveBeenCalledWith("openwa_shutdown_complete", {
       reason: "test_shutdown",
       client_cleanup_available: true
+    });
+    expect(logger.info).toHaveBeenCalledWith("openwa_supervisor_state_changed", {
+      previous_state: "ready",
+      state: "shutting_down",
+      reason: "test_shutdown"
+    });
+    expect(logger.info).toHaveBeenCalledWith("openwa_supervisor_state_changed", {
+      previous_state: "shutting_down",
+      state: "stopped",
+      reason: "test_shutdown"
+    });
+    expect(logger.info).toHaveBeenCalledWith("openwa_supervisor_stopped", {
+      reason: "test_shutdown",
+      client_cleanup_available: true,
+      startup_attempts: 1
     });
     expect(kill).toHaveBeenCalledWith("test_shutdown");
   });

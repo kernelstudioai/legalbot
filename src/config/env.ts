@@ -21,6 +21,16 @@ const OptionalTimeoutSecondsSchema = z.preprocess(
   z.coerce.number().int().min(0).optional()
 );
 
+const RetryDelaySecondsSchema = z.preprocess(
+  (value) => (value === undefined ? "5" : value),
+  z.coerce.number().int().min(0)
+);
+
+const StartupMaxAttemptsSchema = z.preprocess(
+  (value) => (value === undefined ? "1" : value),
+  z.coerce.number().int().min(1)
+);
+
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
@@ -38,7 +48,9 @@ export const SmokeRuntimeEnvSchema = EnvSchema.omit({
   OPENWA_BROWSER_EXECUTABLE_PATH: z.string().min(1).optional(),
   OPENWA_HEADLESS: createBooleanEnvSchema("false"),
   OPENWA_QR_TIMEOUT_SECONDS: OptionalTimeoutSecondsSchema,
-  OPENWA_AUTH_TIMEOUT_SECONDS: OptionalTimeoutSecondsSchema
+  OPENWA_AUTH_TIMEOUT_SECONDS: OptionalTimeoutSecondsSchema,
+  OPENWA_STARTUP_MAX_ATTEMPTS: StartupMaxAttemptsSchema,
+  OPENWA_STARTUP_RETRY_DELAY_SECONDS: RetryDelaySecondsSchema
 });
 
 export type SmokeRuntimeEnv = z.infer<typeof SmokeRuntimeEnvSchema>;

@@ -12,6 +12,8 @@ describe("smoke runtime env", () => {
     expect(env.OPENWA_HEADLESS).toBe(false);
     expect(env.OPENWA_QR_TIMEOUT_SECONDS).toBeUndefined();
     expect(env.OPENWA_AUTH_TIMEOUT_SECONDS).toBeUndefined();
+    expect(env.OPENWA_STARTUP_MAX_ATTEMPTS).toBe(1);
+    expect(env.OPENWA_STARTUP_RETRY_DELAY_SECONDS).toBe(5);
   });
 
   it("accepts an optional browser executable path", () => {
@@ -34,11 +36,15 @@ describe("smoke runtime env", () => {
       OPENWA_SESSION_ID: "legalbot-smoke",
       OPENWA_QR_TIMEOUT_SECONDS: "240",
       OPENWA_AUTH_TIMEOUT_SECONDS: "180",
+      OPENWA_STARTUP_MAX_ATTEMPTS: "3",
+      OPENWA_STARTUP_RETRY_DELAY_SECONDS: "7",
       LAWYER_PHONE_E164: "+15551234567"
     });
 
     expect(env.OPENWA_QR_TIMEOUT_SECONDS).toBe(240);
     expect(env.OPENWA_AUTH_TIMEOUT_SECONDS).toBe(180);
+    expect(env.OPENWA_STARTUP_MAX_ATTEMPTS).toBe(3);
+    expect(env.OPENWA_STARTUP_RETRY_DELAY_SECONDS).toBe(7);
   });
 
   it("rejects an empty browser executable path", () => {
@@ -58,6 +64,26 @@ describe("smoke runtime env", () => {
         BOT_MODE: "smoke",
         OPENWA_SESSION_ID: "legalbot-smoke",
         OPENWA_QR_TIMEOUT_SECONDS: "-1",
+        LAWYER_PHONE_E164: "+15551234567"
+      })
+    ).toThrow();
+  });
+
+  it("rejects invalid startup retry settings", () => {
+    expect(() =>
+      loadSmokeRuntimeEnv({
+        BOT_MODE: "smoke",
+        OPENWA_SESSION_ID: "legalbot-smoke",
+        OPENWA_STARTUP_MAX_ATTEMPTS: "0",
+        LAWYER_PHONE_E164: "+15551234567"
+      })
+    ).toThrow();
+
+    expect(() =>
+      loadSmokeRuntimeEnv({
+        BOT_MODE: "smoke",
+        OPENWA_SESSION_ID: "legalbot-smoke",
+        OPENWA_STARTUP_RETRY_DELAY_SECONDS: "-1",
         LAWYER_PHONE_E164: "+15551234567"
       })
     ).toThrow();
