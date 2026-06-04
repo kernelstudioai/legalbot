@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createServer } from "node:http";
 import type { Logger } from "../../src/logging/logger";
 import {
   installOpenWaSignalHandlers,
@@ -14,6 +15,37 @@ const createLogger = (): Logger => ({
 });
 
 describe("openwa smoke startup", () => {
+  it("keeps the status server disabled by default", async () => {
+    const logger = createLogger();
+    const createClient = vi.fn().mockResolvedValue({
+      onMessage: vi.fn().mockResolvedValue(undefined),
+      sendText: vi.fn(),
+      kill: vi.fn().mockResolvedValue(true)
+    });
+
+    const app = await startOpenWaSmokeApp({
+      envSource: {
+        BOT_MODE: "smoke",
+        OPENWA_SESSION_ID: "legalbot-smoke",
+        OPENWA_HEADLESS: "false",
+        OPENWA_LIVENESS_INTERVAL_SECONDS: "30",
+        OPENWA_LIVENESS_FAILURE_THRESHOLD: "3",
+        OPENWA_RECOVERY_MODE: "manual",
+        LAWYER_PHONE_E164: "+15551234567"
+      },
+      logger,
+      createClient
+    });
+
+    expect(app.getStatusServerAddress()).toBeUndefined();
+    expect(logger.info).not.toHaveBeenCalledWith(
+      "openwa_status_server_ready",
+      expect.anything()
+    );
+
+    await app.stop("test_shutdown");
+  });
+
   it("logs sanitized startup diagnostics and passes the resolved OpenWA config", async () => {
     const logger = createLogger();
     const kill = vi.fn().mockResolvedValue(true);
@@ -39,6 +71,9 @@ describe("openwa smoke startup", () => {
         OPENWA_RECOVERY_MODE: "restart_client",
         OPENWA_RECOVERY_MAX_ATTEMPTS: "2",
         OPENWA_RECOVERY_RETRY_DELAY_SECONDS: "11",
+        OPENWA_STATUS_SERVER_ENABLED: "true",
+        OPENWA_STATUS_SERVER_HOST: "127.0.0.1",
+        OPENWA_STATUS_SERVER_PORT: "0",
         LAWYER_PHONE_E164: "+15551234567"
       },
       logger,
@@ -101,10 +136,22 @@ describe("openwa smoke startup", () => {
       startup_attempt: 1,
       startup_max_attempts: 2
     });
+    expect(logger.info).toHaveBeenCalledWith("openwa_status_server_starting", {
+      host: "127.0.0.1",
+      port: 0
+    });
+    expect(logger.info).toHaveBeenCalledWith("openwa_status_server_ready", {
+      host: "127.0.0.1",
+      port: expect.any(Number)
+    });
     expect(logger.info).toHaveBeenCalledWith("openwa_client_ready", {
       bot_mode: "smoke",
       session_id: "legalbot-smoke",
       lawyer_phone_configured: true
+    });
+    expect(app.getStatusServerAddress()).toEqual({
+      host: "127.0.0.1",
+      port: expect.any(Number)
     });
     expect(app.getHealth()).toMatchObject({
       state: "ready",
@@ -153,6 +200,10 @@ describe("openwa smoke startup", () => {
       client_cleanup_available: true,
       startup_attempts: 1
     });
+    expect(logger.info).toHaveBeenCalledWith("openwa_status_server_stopped", {
+      host: "127.0.0.1",
+      port: app.getStatusServerAddress()?.port
+    });
     expect(kill).toHaveBeenCalledWith("test_shutdown");
   });
 
@@ -194,5 +245,58 @@ describe("openwa smoke startup", () => {
 
     expect(kill).toHaveBeenCalledWith("SIGTERM");
     expect(processLike.exit).toHaveBeenCalledWith(0);
+  });
+
+  it("does not start WhatsApp when the enabled status server cannot bind", async () => {
+    const reservedServer = createServer();
+    await new Promise<void>((resolve, reject) => {
+      reservedServer.once("error", reject);
+      reservedServer.listen(0, "127.0.0.1", () => resolve());
+    });
+
+    const address = reservedServer.address();
+
+    try {
+      const logger = createLogger();
+      const createClient = vi.fn();
+
+      await expect(
+        startOpenWaSmokeApp({
+          envSource: {
+            BOT_MODE: "smoke",
+            OPENWA_SESSION_ID: "legalbot-smoke",
+            OPENWA_HEADLESS: "false",
+            OPENWA_LIVENESS_INTERVAL_SECONDS: "30",
+            OPENWA_LIVENESS_FAILURE_THRESHOLD: "3",
+            OPENWA_RECOVERY_MODE: "manual",
+            OPENWA_STATUS_SERVER_ENABLED: "true",
+            OPENWA_STATUS_SERVER_HOST: "127.0.0.1",
+            OPENWA_STATUS_SERVER_PORT:
+              typeof address === "object" && address ? String(address.port) : "3001",
+            LAWYER_PHONE_E164: "+15551234567"
+          },
+          logger,
+          createClient
+        })
+      ).rejects.toThrow();
+
+      expect(createClient).not.toHaveBeenCalled();
+      expect(logger.error).toHaveBeenCalledWith("openwa_status_server_failed", {
+        host: "127.0.0.1",
+        port: typeof address === "object" && address ? address.port : 3001,
+        error: expect.any(String)
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        reservedServer.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+    }
   });
 });

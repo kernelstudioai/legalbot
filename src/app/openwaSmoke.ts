@@ -2,6 +2,10 @@ import { pathToFileURL } from "node:url";
 import { loadSmokeRuntimeEnv, type SmokeRuntimeEnv } from "../config/env.ts";
 import { consoleLogger, type Logger } from "../logging/logger.ts";
 import {
+  startOpenWaStatusServer,
+  type OpenWaStatusServerAddress
+} from "./openwaStatusServer.ts";
+import {
   createOpenWaClient,
   createOpenWaConfig,
   toOpenWaStartupMeta,
@@ -16,6 +20,7 @@ import type { OpenWaRuntimeClient } from "../transport/openwa/types.ts";
 export interface OpenWaSmokeApp {
   env: SmokeRuntimeEnv;
   getHealth(): OpenWaSupervisorHealth;
+  getStatusServerAddress(): OpenWaStatusServerAddress | undefined;
   stop(reason?: string): Promise<void>;
 }
 
@@ -99,7 +104,24 @@ export const startOpenWaSmokeApp = async ({
     recoveryMaxAttempts: env.OPENWA_RECOVERY_MAX_ATTEMPTS,
     recoveryRetryDelaySeconds: env.OPENWA_RECOVERY_RETRY_DELAY_SECONDS
   });
-  const client = await supervisor.start();
+  const statusServer = await startOpenWaStatusServer({
+    config: {
+      enabled: env.OPENWA_STATUS_SERVER_ENABLED,
+      host: env.OPENWA_STATUS_SERVER_HOST,
+      port: env.OPENWA_STATUS_SERVER_PORT
+    },
+    logger,
+    getHealth: () => supervisor.getHealth()
+  });
+
+  let client: OpenWaRuntimeClient;
+
+  try {
+    client = await supervisor.start();
+  } catch (error) {
+    await statusServer.stop();
+    throw error;
+  }
 
   logger.info("openwa_client_ready", {
     bot_mode: env.BOT_MODE,
@@ -115,6 +137,9 @@ export const startOpenWaSmokeApp = async ({
     getHealth() {
       return supervisor.getHealth();
     },
+    getStatusServerAddress() {
+      return statusServer.address;
+    },
     async stop(reason = "shutdown") {
       if (shutdownPromise) {
         return shutdownPromise;
@@ -128,12 +153,14 @@ export const startOpenWaSmokeApp = async ({
 
         try {
           await supervisor.stop(reason);
+          await statusServer.stop();
 
           logger.info("openwa_shutdown_complete", {
             reason,
             client_cleanup_available: clientCleanupAvailable
           });
         } catch (error) {
+          await statusServer.stop();
           logger.error("openwa_shutdown_failed", {
             reason,
             client_cleanup_available: clientCleanupAvailable,

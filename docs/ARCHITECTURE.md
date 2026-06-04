@@ -14,11 +14,12 @@ This project is a Node.js 22 + TypeScript strict foundation for a WhatsApp legal
 - `src/persistence`: storage interfaces only in this phase.
 - `src/security`: sanitization and boundary helpers.
 - `src/logging`: logger abstraction.
-- `src/app`: application orchestration and bootstrap wiring.
+- `src/app`: application orchestration, smoke runtime wiring, and operator-facing local status surface.
 
 ## OpenWA Smoke Transport
 
 - `src/app/openwaSmoke.ts` is the executable smoke entrypoint that validates runtime env, starts the OpenWA client, installs signal handlers, and wires transport dependencies.
+- `src/app/openwaStatusServer.ts` owns the localhost-only read-only operator status surface and sanitizes supervisor health responses before they leave the process.
 - Retry the smoke startup with `npm run smoke:openwa` so the documented command stays aligned with the repo script.
 - `src/transport/openwa/client.ts` owns OpenWA bootstrap, runtime session path setup, and raw OpenWA message adaptation.
 - `src/transport/openwa/supervisor.ts` owns M5 transport supervision state, bounded startup retry, post-ready liveness supervision, bounded recovery policy, readiness reporting, and listener-singleton startup orchestration.
@@ -45,6 +46,9 @@ This project is a Node.js 22 + TypeScript strict foundation for a WhatsApp legal
 - M5 adds recovery policy controls with `OPENWA_RECOVERY_MODE`, `OPENWA_RECOVERY_MAX_ATTEMPTS`, and `OPENWA_RECOVERY_RETRY_DELAY_SECONDS`.
 - M5 keeps startup retry and recovery retry separate, never sends a WhatsApp recovery probe, and never deletes session data automatically during recovery.
 - M5 adds `openwa_recovery_required`, `openwa_recovery_starting`, `openwa_recovery_attempt_failed`, `openwa_recovery_succeeded`, and `openwa_recovery_exhausted`.
+- M6 adds an optional localhost status server with `OPENWA_STATUS_SERVER_ENABLED`, `OPENWA_STATUS_SERVER_HOST`, and `OPENWA_STATUS_SERVER_PORT`.
+- M6 keeps the status surface read-only, sourced from `supervisor.getHealth()`, and sanitized so browser paths, phone numbers, message bodies, and private runtime details do not leave the process.
+- M6 adds `GET /health`, `GET /ready`, and `GET /status` for operator smoke checks, and it aborts smoke startup if the required enabled status server cannot bind.
 - The runtime listener keeps a process-local in-memory `messageId` guard so duplicate OpenWA deliveries do not trigger duplicate placeholder replies during one process lifetime.
 - Self-authored transport events are ignored in the OpenWA listener and logged as `openwa_message_ignored_from_self`.
 - Duplicate transport events are ignored in the OpenWA listener and logged as `openwa_message_ignored_duplicate`.
@@ -70,7 +74,7 @@ This project is a Node.js 22 + TypeScript strict foundation for a WhatsApp legal
 - Keep `openwa-session/` ignored and never commit runtime, browser, or WhatsApp session state.
 - If Chrome shows an outdated browser screen, verify the committed `patch-package` patch under `patches/@open-wa+wa-automate+4.76.0.patch` is applied.
 - If the session corrupts, delete only `openwa-session/_IGNORE_<sessionId>` after operator review confirms the session must be discarded.
-- Use [OPENWA_SUPERVISION_RUNBOOK.md](/C:/Users/Jacopo/Documents/legalbot/docs/OPENWA_SUPERVISION_RUNBOOK.md) for the M5 supervisor state, liveness, recovery, health, retry, and shutdown procedures.
+- Use [OPENWA_SUPERVISION_RUNBOOK.md](/C:/Users/Jacopo/Documents/legalbot/docs/OPENWA_SUPERVISION_RUNBOOK.md) for the M6 supervisor state, liveness, recovery, status surface, health, retry, and shutdown procedures.
 
 ## Current Constraints
 

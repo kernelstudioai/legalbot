@@ -31,6 +31,11 @@ const RecoveryRetryDelaySecondsSchema = z.preprocess(
   z.coerce.number().int().min(0)
 );
 
+const StatusServerPortSchema = z.preprocess(
+  (value) => (value === undefined ? "3001" : value),
+  z.coerce.number().int().min(0).max(65535)
+);
+
 const StartupMaxAttemptsSchema = z.preprocess(
   (value) => (value === undefined ? "1" : value),
   z.coerce.number().int().min(1)
@@ -90,7 +95,10 @@ export const SmokeRuntimeEnvSchema = EnvSchema.omit({
   OPENWA_LIVENESS_FAILURE_THRESHOLD: LivenessFailureThresholdSchema,
   OPENWA_RECOVERY_MODE: RecoveryModeSchema,
   OPENWA_RECOVERY_MAX_ATTEMPTS: OptionalRecoveryMaxAttemptsSchema,
-  OPENWA_RECOVERY_RETRY_DELAY_SECONDS: RecoveryRetryDelaySecondsSchema
+  OPENWA_RECOVERY_RETRY_DELAY_SECONDS: RecoveryRetryDelaySecondsSchema,
+  OPENWA_STATUS_SERVER_ENABLED: createBooleanEnvSchema("false"),
+  OPENWA_STATUS_SERVER_HOST: z.string().min(1).default("127.0.0.1"),
+  OPENWA_STATUS_SERVER_PORT: StatusServerPortSchema
 }).transform((env) => ({
   ...env,
   OPENWA_RECOVERY_MAX_ATTEMPTS:

@@ -2,7 +2,7 @@
 
 ## Scope
 
-This runbook covers M5 transport supervision for the smoke OpenWA runtime only.
+This runbook covers M6 transport supervision for the smoke OpenWA runtime only.
 
 ## Supervisor State Model
 
@@ -35,6 +35,15 @@ This runbook covers M5 transport supervision for the smoke OpenWA runtime only.
 - `OPENWA_RECOVERY_RETRY_DELAY_SECONDS`
   Default: `10`
   Delay before a scheduled recovery attempt runs after the transport enters persistent liveness degradation.
+- `OPENWA_STATUS_SERVER_ENABLED`
+  Default: `false`
+  Enables the local read-only operator status surface for smoke mode.
+- `OPENWA_STATUS_SERVER_HOST`
+  Default: `127.0.0.1`
+  Host interface for the local status server. Keep the default localhost bind unless an operator explicitly needs another local interface.
+- `OPENWA_STATUS_SERVER_PORT`
+  Default: `3001`
+  Port used by the local status server.
 
 ## Recovery Policy
 
@@ -49,6 +58,14 @@ This runbook covers M5 transport supervision for the smoke OpenWA runtime only.
 
 - `startOpenWaSmokeApp()` exposes `getHealth()`.
 - `getHealth().ready === true` only when the supervisor state is `ready`.
+- When `OPENWA_STATUS_SERVER_ENABLED=true`, the smoke runtime also exposes a local read-only HTTP surface:
+  - `GET /health`
+    Always returns `200` while the process is alive with `{ alive: true, transport: { ...sanitized summary... } }`.
+  - `GET /ready`
+    Returns `200` only when the supervisor is `ready`; returns `503` for `starting`, `degraded`, `shutting_down`, or `stopped`.
+  - `GET /status`
+    Returns `200` with the full sanitized supervisor health object.
+- The status surface never returns secrets, tokens, full phone numbers, message bodies, QR/session data, browser paths, or private config values.
 - `getHealth()` returns:
   - `state`
   - `ready`
@@ -104,6 +121,14 @@ This runbook covers M5 transport supervision for the smoke OpenWA runtime only.
   Emitted when a recovery restart attempt returns the supervisor to `ready`.
 - `openwa_recovery_exhausted`
   Emitted when the bounded recovery retry budget is exhausted and the supervisor remains `degraded`.
+- `openwa_status_server_starting`
+  Emitted before the local status server attempts to bind.
+- `openwa_status_server_ready`
+  Emitted after the local status server is listening.
+- `openwa_status_server_failed`
+  Emitted when the enabled status server cannot bind. In this case the smoke runtime does not start WhatsApp.
+- `openwa_status_server_stopped`
+  Emitted after the local status server closes during runtime shutdown.
 
 ## Operator Guidance
 
@@ -112,6 +137,11 @@ This runbook covers M5 transport supervision for the smoke OpenWA runtime only.
 3. After `openwa_supervisor_ready`, watch `openwa_liveness_check_ok` for steady-state transport health. No WhatsApp message is sent as part of the heartbeat.
 4. If the runtime reaches `degraded` after readiness in `manual` mode, inspect the last liveness failure, browser state, and OpenWA connection state, then restart the smoke runtime manually when appropriate.
 5. If `OPENWA_RECOVERY_MODE=restart_client`, watch `openwa_recovery_starting`, `openwa_recovery_attempt_failed`, `openwa_recovery_succeeded`, and `openwa_recovery_exhausted` to confirm whether automatic recovery succeeded or stalled.
-6. Manually delete `_IGNORE_<sessionId>` only when OpenWA session metadata is stuck across repeated restarts, a fresh QR re-link is intentionally planned, and the operator has decided to discard the existing session state. Do not delete it as a first response to ordinary liveness degradation.
-7. If shutdown is requested during startup retry, liveness supervision, or recovery delay, rely on the supervisor to cancel pending timers and prevent new recovery work instead of repeatedly restarting the process.
-8. Keep `openwa-session/`, browser profiles, and other runtime artifacts untracked.
+6. If `OPENWA_STATUS_SERVER_ENABLED=true`, keep the status surface bound to `127.0.0.1` unless there is a deliberate operator-only reason to expose another local interface. Use:
+   - `curl http://127.0.0.1:3001/health`
+   - `curl http://127.0.0.1:3001/ready`
+   - `curl http://127.0.0.1:3001/status`
+7. If the enabled status server fails to bind, fix the local host or port conflict before retrying `npm run smoke:openwa`. Do not continue into WhatsApp startup without the required operator surface.
+8. Manually delete `_IGNORE_<sessionId>` only when OpenWA session metadata is stuck across repeated restarts, a fresh QR re-link is intentionally planned, and the operator has decided to discard the existing session state. Do not delete it as a first response to ordinary liveness degradation.
+9. If shutdown is requested during startup retry, liveness supervision, or recovery delay, rely on the supervisor to cancel pending timers and prevent new recovery work instead of repeatedly restarting the process.
+10. Keep `openwa-session/`, browser profiles, and other runtime artifacts untracked.

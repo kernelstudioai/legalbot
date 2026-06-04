@@ -19,6 +19,9 @@ describe("smoke runtime env", () => {
     expect(env.OPENWA_RECOVERY_MODE).toBe("manual");
     expect(env.OPENWA_RECOVERY_MAX_ATTEMPTS).toBe(0);
     expect(env.OPENWA_RECOVERY_RETRY_DELAY_SECONDS).toBe(10);
+    expect(env.OPENWA_STATUS_SERVER_ENABLED).toBe(false);
+    expect(env.OPENWA_STATUS_SERVER_HOST).toBe("127.0.0.1");
+    expect(env.OPENWA_STATUS_SERVER_PORT).toBe(3001);
   });
 
   it("accepts an optional browser executable path", () => {
@@ -48,6 +51,9 @@ describe("smoke runtime env", () => {
       OPENWA_RECOVERY_MODE: "restart_client",
       OPENWA_RECOVERY_MAX_ATTEMPTS: "2",
       OPENWA_RECOVERY_RETRY_DELAY_SECONDS: "11",
+      OPENWA_STATUS_SERVER_ENABLED: "true",
+      OPENWA_STATUS_SERVER_HOST: "127.0.0.1",
+      OPENWA_STATUS_SERVER_PORT: "3009",
       LAWYER_PHONE_E164: "+15551234567"
     });
 
@@ -60,6 +66,9 @@ describe("smoke runtime env", () => {
     expect(env.OPENWA_RECOVERY_MODE).toBe("restart_client");
     expect(env.OPENWA_RECOVERY_MAX_ATTEMPTS).toBe(2);
     expect(env.OPENWA_RECOVERY_RETRY_DELAY_SECONDS).toBe(11);
+    expect(env.OPENWA_STATUS_SERVER_ENABLED).toBe(true);
+    expect(env.OPENWA_STATUS_SERVER_HOST).toBe("127.0.0.1");
+    expect(env.OPENWA_STATUS_SERVER_PORT).toBe(3009);
   });
 
   it("defaults restart_client recovery attempts to one when not explicitly set", () => {
@@ -122,6 +131,15 @@ describe("smoke runtime env", () => {
         OPENWA_SESSION_ID: "legalbot-smoke",
         OPENWA_RECOVERY_MODE: "restart_client",
         OPENWA_RECOVERY_MAX_ATTEMPTS: "-1",
+        LAWYER_PHONE_E164: "+15551234567"
+      })
+    ).toThrow();
+
+    expect(() =>
+      loadSmokeRuntimeEnv({
+        BOT_MODE: "smoke",
+        OPENWA_SESSION_ID: "legalbot-smoke",
+        OPENWA_STATUS_SERVER_PORT: "70000",
         LAWYER_PHONE_E164: "+15551234567"
       })
     ).toThrow();
