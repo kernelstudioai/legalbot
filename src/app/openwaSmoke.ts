@@ -66,6 +66,8 @@ export const startOpenWaSmokeApp = async ({
     openwa_use_chrome: startupMeta.openwa_use_chrome,
     openwa_headless: startupMeta.openwa_headless,
     session_id: startupMeta.session_id,
+    openwa_liveness_interval_seconds: env.OPENWA_LIVENESS_INTERVAL_SECONDS,
+    openwa_liveness_failure_threshold: env.OPENWA_LIVENESS_FAILURE_THRESHOLD,
     openwa_startup_max_attempts: env.OPENWA_STARTUP_MAX_ATTEMPTS,
     openwa_startup_retry_delay_seconds: env.OPENWA_STARTUP_RETRY_DELAY_SECONDS
   });
@@ -73,6 +75,8 @@ export const startOpenWaSmokeApp = async ({
   logger.info("openwa_client_starting", {
     bot_mode: env.BOT_MODE,
     ...startupMeta,
+    openwa_liveness_interval_seconds: env.OPENWA_LIVENESS_INTERVAL_SECONDS,
+    openwa_liveness_failure_threshold: env.OPENWA_LIVENESS_FAILURE_THRESHOLD,
     openwa_startup_max_attempts: env.OPENWA_STARTUP_MAX_ATTEMPTS,
     openwa_startup_retry_delay_seconds: env.OPENWA_STARTUP_RETRY_DELAY_SECONDS
   });
@@ -82,7 +86,9 @@ export const startOpenWaSmokeApp = async ({
     logger,
     createClient,
     startupMaxAttempts: env.OPENWA_STARTUP_MAX_ATTEMPTS,
-    startupRetryDelaySeconds: env.OPENWA_STARTUP_RETRY_DELAY_SECONDS
+    startupRetryDelaySeconds: env.OPENWA_STARTUP_RETRY_DELAY_SECONDS,
+    livenessIntervalSeconds: env.OPENWA_LIVENESS_INTERVAL_SECONDS,
+    livenessFailureThreshold: env.OPENWA_LIVENESS_FAILURE_THRESHOLD
   });
   const client = await supervisor.start();
 

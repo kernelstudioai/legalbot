@@ -29,10 +29,19 @@ export interface OpenWaDispatchResult {
   unsupportedCount: number;
 }
 
+export interface OpenWaLivenessCheckMeta {
+  mode: "read_only" | "noop";
+  connected?: boolean;
+  connectionState?: string;
+}
+
+export type OpenWaLivenessCheck = () => Promise<OpenWaLivenessCheckMeta>;
+
 export interface OpenWaRuntimeClient {
   onMessage(
     listener: (message: OpenWaRawMessage) => Promise<void> | void
   ): Promise<unknown>;
   sendText(to: string, body: string): Promise<unknown>;
+  checkLiveness?(): Promise<OpenWaLivenessCheckMeta>;
   kill?(reason?: string): Promise<boolean>;
 }

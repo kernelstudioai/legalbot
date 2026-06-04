@@ -14,6 +14,9 @@ const createLogger = (): Logger => ({
 const createRuntimeClient = (): OpenWaRuntimeClient => ({
   onMessage: vi.fn().mockResolvedValue(undefined),
   sendText: vi.fn().mockResolvedValue(undefined),
+  checkLiveness: vi.fn().mockResolvedValue({
+    mode: "noop"
+  }),
   kill: vi.fn().mockResolvedValue(true)
 });
 
@@ -30,19 +33,26 @@ describe("openwa supervisor", () => {
       logger: createLogger(),
       createClient: vi.fn(),
       startupMaxAttempts: 1,
-      startupRetryDelaySeconds: 5
+      startupRetryDelaySeconds: 5,
+      livenessIntervalSeconds: 30,
+      livenessFailureThreshold: 3
     });
 
     expect(supervisor.getHealth()).toMatchObject({
       state: "starting",
       ready: false,
+      startupAttempt: 0,
       startupAttempts: 0,
       startupMaxAttempts: 1,
       startupRetryDelaySeconds: 5,
       remainingStartupAttempts: 1,
       shutdownRequested: false,
       clientActive: false,
-      listenerRegistered: false
+      listenerRegistered: false,
+      livenessEnabled: true,
+      livenessIntervalSeconds: 30,
+      livenessFailureThreshold: 3,
+      livenessFailureCount: 0
     });
   });
 
@@ -57,6 +67,8 @@ describe("openwa supervisor", () => {
       createClient: vi.fn().mockResolvedValue(createRuntimeClient()),
       startupMaxAttempts: 1,
       startupRetryDelaySeconds: 5,
+      livenessIntervalSeconds: 30,
+      livenessFailureThreshold: 3,
       registerListener
     });
 
@@ -65,10 +77,15 @@ describe("openwa supervisor", () => {
     expect(supervisor.getHealth()).toMatchObject({
       state: "ready",
       ready: true,
+      startupAttempt: 1,
       startupAttempts: 1,
       remainingStartupAttempts: 0,
       clientActive: true,
-      listenerRegistered: true
+      listenerRegistered: true,
+      livenessEnabled: true,
+      livenessIntervalSeconds: 30,
+      livenessFailureThreshold: 3,
+      livenessFailureCount: 0
     });
     expect(registerListener).toHaveBeenCalledTimes(1);
     expect(logger.info).toHaveBeenCalledWith("openwa_supervisor_ready", {
@@ -86,7 +103,9 @@ describe("openwa supervisor", () => {
       logger,
       createClient: vi.fn().mockRejectedValue(new Error("openwa_boot_failed")),
       startupMaxAttempts: 1,
-      startupRetryDelaySeconds: 5
+      startupRetryDelaySeconds: 5,
+      livenessIntervalSeconds: 30,
+      livenessFailureThreshold: 3
     });
 
     await expect(supervisor.start()).rejects.toThrow("openwa_boot_failed");
@@ -94,10 +113,15 @@ describe("openwa supervisor", () => {
     expect(supervisor.getHealth()).toMatchObject({
       state: "degraded",
       ready: false,
+      startupAttempt: 1,
       startupAttempts: 1,
       remainingStartupAttempts: 0,
       clientActive: false,
       listenerRegistered: false,
+      livenessEnabled: true,
+      livenessIntervalSeconds: 30,
+      livenessFailureThreshold: 3,
+      livenessFailureCount: 0,
       lastError: "openwa_boot_failed"
     });
     expect(logger.warn).toHaveBeenCalledWith("openwa_supervisor_degraded", {
@@ -120,7 +144,9 @@ describe("openwa supervisor", () => {
       logger: createLogger(),
       createClient,
       startupMaxAttempts: 3,
-      startupRetryDelaySeconds: 5
+      startupRetryDelaySeconds: 5,
+      livenessIntervalSeconds: 30,
+      livenessFailureThreshold: 3
     });
 
     const startPromise = supervisor.start();
@@ -144,7 +170,9 @@ describe("openwa supervisor", () => {
       logger: createLogger(),
       createClient,
       startupMaxAttempts: 3,
-      startupRetryDelaySeconds: 5
+      startupRetryDelaySeconds: 5,
+      livenessIntervalSeconds: 30,
+      livenessFailureThreshold: 3
     });
 
     const startPromise = supervisor.start();
@@ -180,12 +208,14 @@ describe("openwa supervisor", () => {
       createClient,
       startupMaxAttempts: 2,
       startupRetryDelaySeconds: 5,
+      livenessIntervalSeconds: 30,
+      livenessFailureThreshold: 3,
       registerListener
     });
 
     const startPromise = supervisor.start();
 
-    await vi.runAllTimersAsync();
+    await vi.advanceTimersByTimeAsync(5_000);
     await startPromise;
 
     expect(createClient).toHaveBeenCalledTimes(2);
@@ -195,5 +225,195 @@ describe("openwa supervisor", () => {
       startupAttempts: 2,
       listenerRegistered: true
     });
+  });
+
+  it("starts liveness checks after ready and keeps the supervisor ready when heartbeat succeeds", async () => {
+    vi.useFakeTimers();
+
+    const logger = createLogger();
+    const checkLiveness = vi.fn().mockResolvedValue({
+      mode: "read_only",
+      connectionState: "CONNECTED",
+      connected: true
+    });
+    const supervisor = createOpenWaSupervisor({
+      config: createOpenWaConfig({
+        sessionId: "legalbot-smoke"
+      }),
+      logger,
+      createClient: vi.fn().mockResolvedValue({
+        ...createRuntimeClient(),
+        checkLiveness
+      }),
+      startupMaxAttempts: 1,
+      startupRetryDelaySeconds: 5,
+      livenessIntervalSeconds: 30,
+      livenessFailureThreshold: 3
+    });
+
+    await supervisor.start();
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(checkLiveness).toHaveBeenCalledTimes(1);
+    expect(supervisor.getHealth()).toMatchObject({
+      state: "ready",
+      ready: true,
+      livenessFailureCount: 0
+    });
+    expect(supervisor.getHealth().lastLivenessOkAt).toEqual(expect.any(String));
+    expect(logger.info).toHaveBeenCalledWith("openwa_liveness_check_ok", {
+      mode: "read_only",
+      connectionState: "CONNECTED",
+      connected: true,
+      liveness_failure_count: 0,
+      liveness_failure_threshold: 3,
+      last_liveness_ok_at: expect.any(String)
+    });
+  });
+
+  it("increments liveness failures and transitions from ready to degraded at the threshold", async () => {
+    vi.useFakeTimers();
+
+    const logger = createLogger();
+    const checkLiveness = vi.fn().mockRejectedValue(new Error("openwa_not_connected"));
+    const supervisor = createOpenWaSupervisor({
+      config: createOpenWaConfig({
+        sessionId: "legalbot-smoke"
+      }),
+      logger,
+      createClient: vi.fn().mockResolvedValue({
+        ...createRuntimeClient(),
+        checkLiveness
+      }),
+      startupMaxAttempts: 1,
+      startupRetryDelaySeconds: 5,
+      livenessIntervalSeconds: 30,
+      livenessFailureThreshold: 3
+    });
+
+    await supervisor.start();
+    await vi.advanceTimersByTimeAsync(90_000);
+
+    expect(checkLiveness).toHaveBeenCalledTimes(3);
+    expect(supervisor.getHealth()).toMatchObject({
+      state: "degraded",
+      ready: false,
+      livenessFailureCount: 3
+    });
+    expect(supervisor.getHealth().lastLivenessFailureAt).toEqual(expect.any(String));
+    expect(logger.warn).toHaveBeenCalledWith("openwa_liveness_degraded", {
+      error: "openwa_not_connected",
+      liveness_failure_count: 3,
+      liveness_failure_threshold: 3,
+      last_liveness_failure_at: expect.any(String)
+    });
+  });
+
+  it("recovers from degraded to ready after a successful liveness check", async () => {
+    vi.useFakeTimers();
+
+    const logger = createLogger();
+    const checkLiveness = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("openwa_not_connected"))
+      .mockRejectedValueOnce(new Error("openwa_not_connected"))
+      .mockResolvedValueOnce({
+        mode: "read_only",
+        connectionState: "CONNECTED",
+        connected: true
+      });
+    const supervisor = createOpenWaSupervisor({
+      config: createOpenWaConfig({
+        sessionId: "legalbot-smoke"
+      }),
+      logger,
+      createClient: vi.fn().mockResolvedValue({
+        ...createRuntimeClient(),
+        checkLiveness
+      }),
+      startupMaxAttempts: 1,
+      startupRetryDelaySeconds: 5,
+      livenessIntervalSeconds: 30,
+      livenessFailureThreshold: 2
+    });
+
+    await supervisor.start();
+    await vi.advanceTimersByTimeAsync(90_000);
+
+    expect(supervisor.getHealth()).toMatchObject({
+      state: "ready",
+      ready: true,
+      livenessFailureCount: 0
+    });
+    expect(logger.info).toHaveBeenCalledWith("openwa_liveness_recovered", {
+      mode: "read_only",
+      connectionState: "CONNECTED",
+      connected: true,
+      last_liveness_ok_at: expect.any(String)
+    });
+  });
+
+  it("stops the liveness timer on shutdown", async () => {
+    vi.useFakeTimers();
+
+    const checkLiveness = vi.fn().mockResolvedValue({
+      mode: "noop"
+    });
+    const supervisor = createOpenWaSupervisor({
+      config: createOpenWaConfig({
+        sessionId: "legalbot-smoke"
+      }),
+      logger: createLogger(),
+      createClient: vi.fn().mockResolvedValue({
+        ...createRuntimeClient(),
+        checkLiveness
+      }),
+      startupMaxAttempts: 1,
+      startupRetryDelaySeconds: 5,
+      livenessIntervalSeconds: 30,
+      livenessFailureThreshold: 3
+    });
+
+    await supervisor.start();
+    await supervisor.stop("test_shutdown");
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(checkLiveness).not.toHaveBeenCalled();
+  });
+
+  it("does not duplicate the liveness timer after a retry succeeds", async () => {
+    vi.useFakeTimers();
+
+    const checkLiveness = vi.fn().mockResolvedValue({
+      mode: "noop"
+    });
+    const createClient = vi
+      .fn<() => Promise<OpenWaRuntimeClient>>()
+      .mockRejectedValueOnce(new Error("openwa_boot_failed"))
+      .mockResolvedValueOnce({
+        ...createRuntimeClient(),
+        checkLiveness
+      });
+    const supervisor = createOpenWaSupervisor({
+      config: createOpenWaConfig({
+        sessionId: "legalbot-smoke"
+      }),
+      logger: createLogger(),
+      createClient,
+      startupMaxAttempts: 2,
+      startupRetryDelaySeconds: 5,
+      livenessIntervalSeconds: 30,
+      livenessFailureThreshold: 3
+    });
+
+    const startPromise = supervisor.start();
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await startPromise;
+
+    checkLiveness.mockClear();
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(checkLiveness).toHaveBeenCalledTimes(1);
   });
 });

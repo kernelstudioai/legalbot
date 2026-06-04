@@ -34,6 +34,8 @@ describe("openwa smoke startup", () => {
         OPENWA_AUTH_TIMEOUT_SECONDS: "180",
         OPENWA_STARTUP_MAX_ATTEMPTS: "2",
         OPENWA_STARTUP_RETRY_DELAY_SECONDS: "9",
+        OPENWA_LIVENESS_INTERVAL_SECONDS: "45",
+        OPENWA_LIVENESS_FAILURE_THRESHOLD: "4",
         LAWYER_PHONE_E164: "+15551234567"
       },
       logger,
@@ -58,6 +60,8 @@ describe("openwa smoke startup", () => {
       openwa_use_chrome: true,
       openwa_headless: false,
       session_id: "legalbot-smoke",
+      openwa_liveness_interval_seconds: 45,
+      openwa_liveness_failure_threshold: 4,
       openwa_startup_max_attempts: 2,
       openwa_startup_retry_delay_seconds: 9
     });
@@ -72,6 +76,8 @@ describe("openwa smoke startup", () => {
         openwa_headless: false,
         openwa_qr_timeout_seconds: 240,
         openwa_auth_timeout_seconds: 180,
+        openwa_liveness_interval_seconds: 45,
+        openwa_liveness_failure_threshold: 4,
         openwa_startup_max_attempts: 2,
         openwa_startup_retry_delay_seconds: 9
       })
@@ -94,13 +100,18 @@ describe("openwa smoke startup", () => {
     expect(app.getHealth()).toMatchObject({
       state: "ready",
       ready: true,
+      startupAttempt: 1,
       startupAttempts: 1,
       startupMaxAttempts: 2,
       startupRetryDelaySeconds: 9,
       remainingStartupAttempts: 1,
       shutdownRequested: false,
       clientActive: true,
-      listenerRegistered: true
+      listenerRegistered: true,
+      livenessEnabled: true,
+      livenessIntervalSeconds: 45,
+      livenessFailureThreshold: 4,
+      livenessFailureCount: 0
     });
 
     await app.stop("test_shutdown");
@@ -152,6 +163,8 @@ describe("openwa smoke startup", () => {
         BOT_MODE: "smoke",
         OPENWA_SESSION_ID: "legalbot-smoke",
         OPENWA_HEADLESS: "false",
+        OPENWA_LIVENESS_INTERVAL_SECONDS: "30",
+        OPENWA_LIVENESS_FAILURE_THRESHOLD: "3",
         LAWYER_PHONE_E164: "+15551234567"
       },
       logger,

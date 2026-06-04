@@ -6,12 +6,15 @@ export {
   toOpenWaRawMessage,
   wrapOpenWaClient
 } from "./client.ts";
+export { createNoopOpenWaLivenessCheck, createOpenWaLivenessCheck } from "./liveness.ts";
 export { handleOpenWaMessage, mapOpenWaMessage, registerOpenWaListener } from "./listener.ts";
 export { createOpenWaSupervisor } from "./supervisor.ts";
 export type {
   OpenWaMessage,
   OpenWaRawMessage,
   OpenWaDispatchResult,
+  OpenWaLivenessCheck,
+  OpenWaLivenessCheckMeta,
   OpenWaRuntimeClient
 } from "./types.ts";
 export type { OpenWaSupervisor, OpenWaSupervisorHealth, OpenWaSupervisorState } from "./supervisor.ts";

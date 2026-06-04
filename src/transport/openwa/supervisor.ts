@@ -1,8 +1,9 @@
 import type { Logger } from "../../logging/logger.ts";
 import { createOpenWaDispatcher, type OpenWaDispatcher } from "./dispatcher.ts";
+import { createOpenWaLivenessCheck } from "./liveness.ts";
 import { registerOpenWaListener } from "./listener.ts";
 import type { OpenWaConfig } from "./client.ts";
-import type { OpenWaRuntimeClient } from "./types.ts";
+import type { OpenWaLivenessCheck, OpenWaRuntimeClient } from "./types.ts";
 
 export type OpenWaSupervisorState =
   | "starting"
@@ -14,6 +15,7 @@ export type OpenWaSupervisorState =
 export interface OpenWaSupervisorHealth {
   state: OpenWaSupervisorState;
   ready: boolean;
+  startupAttempt: number;
   startupAttempts: number;
   startupMaxAttempts: number;
   startupRetryDelaySeconds: number;
@@ -21,6 +23,12 @@ export interface OpenWaSupervisorHealth {
   shutdownRequested: boolean;
   clientActive: boolean;
   listenerRegistered: boolean;
+  livenessEnabled: boolean;
+  livenessIntervalSeconds: number;
+  livenessFailureThreshold: number;
+  livenessFailureCount: number;
+  lastLivenessOkAt?: string;
+  lastLivenessFailureAt?: string;
   lastError?: string;
 }
 
@@ -36,7 +44,10 @@ export interface OpenWaSupervisorDependencies {
   createClient: (config: OpenWaConfig) => Promise<OpenWaRuntimeClient>;
   startupMaxAttempts: number;
   startupRetryDelaySeconds: number;
+  livenessIntervalSeconds: number;
+  livenessFailureThreshold: number;
   createDispatcher?: (client: Pick<OpenWaRuntimeClient, "sendText">) => OpenWaDispatcher;
+  createLivenessCheck?: (client: OpenWaRuntimeClient) => OpenWaLivenessCheck;
   registerListener?: (
     client: Pick<OpenWaRuntimeClient, "onMessage">,
     dependencies: {
@@ -57,9 +68,13 @@ export const createOpenWaSupervisor = ({
   createClient,
   startupMaxAttempts,
   startupRetryDelaySeconds,
+  livenessIntervalSeconds,
+  livenessFailureThreshold,
   createDispatcher = createOpenWaDispatcher,
+  createLivenessCheck = (client) => client.checkLiveness ?? createOpenWaLivenessCheck({}),
   registerListener = registerOpenWaListener
 }: OpenWaSupervisorDependencies): OpenWaSupervisor => {
+  const livenessEnabled = livenessIntervalSeconds > 0 && livenessFailureThreshold > 0;
   let state: OpenWaSupervisorState = "starting";
   let startupAttempts = 0;
   let shutdownRequested = false;
@@ -70,6 +85,11 @@ export const createOpenWaSupervisor = ({
   let stopPromise: Promise<void> | undefined;
   let retryTimer: NodeJS.Timeout | undefined;
   let resolveRetryDelay: (() => void) | undefined;
+  let livenessTimer: NodeJS.Timeout | undefined;
+  let livenessCheck: OpenWaLivenessCheck | undefined;
+  let livenessFailureCount = 0;
+  let lastLivenessOkAt: string | undefined;
+  let lastLivenessFailureAt: string | undefined;
 
   const logStateChange = (
     previousState: OpenWaSupervisorState,
@@ -106,6 +126,15 @@ export const createOpenWaSupervisor = ({
     }
   };
 
+  const clearLivenessTimer = () => {
+    if (!livenessTimer) {
+      return;
+    }
+
+    clearTimeout(livenessTimer);
+    livenessTimer = undefined;
+  };
+
   const waitForRetryDelay = async (): Promise<void> =>
     new Promise((resolve) => {
       resolveRetryDelay = () => {
@@ -133,6 +162,7 @@ export const createOpenWaSupervisor = ({
   const getHealth = (): OpenWaSupervisorHealth => ({
     state,
     ready: state === "ready",
+    startupAttempt: startupAttempts,
     startupAttempts,
     startupMaxAttempts,
     startupRetryDelaySeconds,
@@ -140,6 +170,12 @@ export const createOpenWaSupervisor = ({
     shutdownRequested,
     clientActive: activeClient !== undefined,
     listenerRegistered: listenerRegisteredForActiveClient,
+    livenessEnabled,
+    livenessIntervalSeconds,
+    livenessFailureThreshold,
+    livenessFailureCount,
+    ...(lastLivenessOkAt ? { lastLivenessOkAt } : {}),
+    ...(lastLivenessFailureAt ? { lastLivenessFailureAt } : {}),
     ...(lastError ? { lastError } : {})
   });
 
@@ -152,6 +188,94 @@ export const createOpenWaSupervisor = ({
 
     await disposeClient(candidateClient, STOPPED_DURING_STARTUP_ERROR);
     throw new Error(STOPPED_DURING_STARTUP_ERROR);
+  };
+
+  const scheduleNextLivenessCheck = (): void => {
+    if (!livenessEnabled || shutdownRequested || activeClient === undefined || livenessCheck === undefined) {
+      return;
+    }
+
+    clearLivenessTimer();
+    livenessTimer = setTimeout(() => {
+      livenessTimer = undefined;
+      void runLivenessCheck();
+    }, livenessIntervalSeconds * 1000);
+  };
+
+  const runLivenessCheck = async (): Promise<void> => {
+    if (!livenessEnabled || shutdownRequested || activeClient === undefined || livenessCheck === undefined) {
+      return;
+    }
+
+    try {
+      const meta = await livenessCheck();
+
+      if (shutdownRequested) {
+        return;
+      }
+
+      livenessFailureCount = 0;
+      lastLivenessOkAt = new Date().toISOString();
+      lastError = undefined;
+
+      logger.info("openwa_liveness_check_ok", {
+        liveness_failure_count: livenessFailureCount,
+        liveness_failure_threshold: livenessFailureThreshold,
+        last_liveness_ok_at: lastLivenessOkAt,
+        ...meta
+      });
+
+      if (state === "degraded" && activeClient !== undefined) {
+        setState("ready", {
+          reason: "liveness_recovered"
+        });
+        logger.info("openwa_liveness_recovered", {
+          last_liveness_ok_at: lastLivenessOkAt,
+          ...meta
+        });
+      }
+    } catch (error) {
+      if (shutdownRequested) {
+        return;
+      }
+
+      const errorMessage = toErrorMessage(error);
+      livenessFailureCount += 1;
+      lastLivenessFailureAt = new Date().toISOString();
+      lastError = errorMessage;
+
+      logger.warn("openwa_liveness_check_failed", {
+        error: errorMessage,
+        liveness_failure_count: livenessFailureCount,
+        liveness_failure_threshold: livenessFailureThreshold,
+        last_liveness_failure_at: lastLivenessFailureAt
+      });
+
+      if (livenessFailureCount >= livenessFailureThreshold && state === "ready") {
+        setState("degraded", {
+          reason: "liveness_threshold_reached",
+          liveness_failure_count: livenessFailureCount,
+          liveness_failure_threshold: livenessFailureThreshold
+        });
+        logger.warn("openwa_liveness_degraded", {
+          error: errorMessage,
+          liveness_failure_count: livenessFailureCount,
+          liveness_failure_threshold: livenessFailureThreshold,
+          last_liveness_failure_at: lastLivenessFailureAt
+        });
+      }
+    } finally {
+      scheduleNextLivenessCheck();
+    }
+  };
+
+  const startLivenessMonitoring = (client: OpenWaRuntimeClient): void => {
+    clearLivenessTimer();
+    livenessCheck = createLivenessCheck(client);
+    livenessFailureCount = 0;
+    lastLivenessOkAt = undefined;
+    lastLivenessFailureAt = undefined;
+    scheduleNextLivenessCheck();
   };
 
   const start = async (): Promise<OpenWaRuntimeClient> => {
@@ -190,6 +314,7 @@ export const createOpenWaSupervisor = ({
             startup_attempt: startupAttempts,
             startup_max_attempts: startupMaxAttempts
           });
+          startLivenessMonitoring(candidateClient);
 
           return candidateClient;
         } catch (error) {
@@ -246,6 +371,7 @@ export const createOpenWaSupervisor = ({
 
     shutdownRequested = true;
     clearRetryDelay();
+    clearLivenessTimer();
     setState("shutting_down", { reason });
 
     stopPromise = (async () => {
@@ -263,6 +389,7 @@ export const createOpenWaSupervisor = ({
         });
       } finally {
         clearRetryDelay();
+        clearLivenessTimer();
       }
     })();
 

@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { create, type Client, type ConfigObject, type Message } from "@open-wa/wa-automate";
+import { createOpenWaLivenessCheck } from "./liveness.ts";
 import type { OpenWaRawMessage, OpenWaRuntimeClient } from "./types.ts";
 
 export interface OpenWaConfig {
@@ -111,12 +112,13 @@ export const toOpenWaStartupMeta = (config: OpenWaConfig) => ({
 });
 
 export const wrapOpenWaClient = (
-  client: Pick<Client, "onMessage" | "sendText" | "kill">
+  client: Pick<Client, "onMessage" | "sendText" | "kill" | "getConnectionState" | "isConnected">
 ): OpenWaRuntimeClient => ({
   onMessage: (listener) =>
     client.onMessage((message) => listener(toOpenWaRawMessage(message))),
   sendText: (to, body) =>
     client.sendText(to as Parameters<Client["sendText"]>[0], body),
+  checkLiveness: createOpenWaLivenessCheck(client),
   kill: (reason) => client.kill(reason)
 });
 

@@ -31,6 +31,16 @@ const StartupMaxAttemptsSchema = z.preprocess(
   z.coerce.number().int().min(1)
 );
 
+const LivenessIntervalSecondsSchema = z.preprocess(
+  (value) => (value === undefined ? "30" : value),
+  z.coerce.number().int().min(1)
+);
+
+const LivenessFailureThresholdSchema = z.preprocess(
+  (value) => (value === undefined ? "3" : value),
+  z.coerce.number().int().min(1)
+);
+
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
@@ -50,7 +60,9 @@ export const SmokeRuntimeEnvSchema = EnvSchema.omit({
   OPENWA_QR_TIMEOUT_SECONDS: OptionalTimeoutSecondsSchema,
   OPENWA_AUTH_TIMEOUT_SECONDS: OptionalTimeoutSecondsSchema,
   OPENWA_STARTUP_MAX_ATTEMPTS: StartupMaxAttemptsSchema,
-  OPENWA_STARTUP_RETRY_DELAY_SECONDS: RetryDelaySecondsSchema
+  OPENWA_STARTUP_RETRY_DELAY_SECONDS: RetryDelaySecondsSchema,
+  OPENWA_LIVENESS_INTERVAL_SECONDS: LivenessIntervalSecondsSchema,
+  OPENWA_LIVENESS_FAILURE_THRESHOLD: LivenessFailureThresholdSchema
 });
 
 export type SmokeRuntimeEnv = z.infer<typeof SmokeRuntimeEnvSchema>;

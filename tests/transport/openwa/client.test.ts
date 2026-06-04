@@ -5,7 +5,8 @@ import {
   createOpenWaConfig,
   OPENWA_DEFAULT_AUTH_TIMEOUT_SECONDS,
   OPENWA_DEFAULT_QR_TIMEOUT_SECONDS,
-  OPENWA_SESSION_PATH
+  OPENWA_SESSION_PATH,
+  wrapOpenWaClient
 } from "../../../src/transport/openwa/client";
 
 const { create } = vi.hoisted(() => ({
@@ -13,6 +14,9 @@ const { create } = vi.hoisted(() => ({
 }));
 
 vi.mock("@open-wa/wa-automate", () => ({
+  STATE: {
+    CONNECTED: "CONNECTED"
+  },
   create
 }));
 
@@ -22,6 +26,8 @@ describe("openwa client config", () => {
     create.mockResolvedValue({
       onMessage: vi.fn(),
       sendText: vi.fn(),
+      getConnectionState: vi.fn().mockResolvedValue("CONNECTED"),
+      isConnected: vi.fn().mockResolvedValue(true),
       kill: vi.fn()
     });
   });
@@ -77,5 +83,25 @@ describe("openwa client config", () => {
         useChrome: expect.anything()
       })
     );
+  });
+
+  it("wraps a read-only liveness check without sending transport messages", async () => {
+    const sendText = vi.fn();
+    const getConnectionState = vi.fn().mockResolvedValue("CONNECTED");
+    const isConnected = vi.fn().mockResolvedValue(true);
+    const client = wrapOpenWaClient({
+      onMessage: vi.fn(),
+      sendText,
+      getConnectionState,
+      isConnected,
+      kill: vi.fn()
+    });
+
+    await expect(client.checkLiveness?.()).resolves.toEqual({
+      mode: "read_only",
+      connectionState: "CONNECTED",
+      connected: true
+    });
+    expect(sendText).not.toHaveBeenCalled();
   });
 });
