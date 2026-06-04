@@ -2,7 +2,7 @@
 
 ## Scope
 
-M7 adds a persistence skeleton only. It introduces storage interfaces, an explicit SQLite migration runner, and SQLite store skeletons without wiring database writes into the live OpenWA listener.
+M8 keeps persistence bootstrap operator-only. It adds explicit database bootstrap and status commands on top of the M7 SQLite skeleton without wiring database writes into the live OpenWA listener.
 
 ## Interfaces
 
@@ -14,7 +14,9 @@ M7 adds a persistence skeleton only. It introduces storage interfaces, an explic
 
 - `DATABASE_URL` defaults to `file:./data/legalbot.sqlite`.
 - `DATABASE_MIGRATIONS_ENABLED` defaults to `true`.
-- The SQLite migration runner is explicit and testable through `runSqliteMigrations(...)` and `SqliteMigrationRunner`.
+- Operators can run `npm run db:migrate` to apply the committed SQLite schema explicitly.
+- Operators can run `npm run db:status` to inspect applied and pending migration ids without dumping table contents.
+- The SQLite migration runner is explicit and testable through `runSqliteMigrations(...)`, `getSqliteMigrationStatus(...)`, and `SqliteMigrationRunner`.
 - Current tables:
   - `cases`
   - `processed_messages`
@@ -24,18 +26,20 @@ M7 adds a persistence skeleton only. It introduces storage interfaces, an explic
 ## Data Boundaries
 
 - `data/` stays ignored by git, and runtime/session/browser/database artifacts must not be committed.
-- No WhatsApp message bodies are persisted in M7.
+- No WhatsApp message bodies are persisted.
 - No database writes occur in live message handling yet.
-- No persistence is introduced before future privacy and consent gates for legal intake.
+- No live WhatsApp persistence is enabled yet, and no persistence is introduced before future privacy and consent gates for legal intake.
 
 ## File Location And Backups
 
 - The default database file location is [data/legalbot.sqlite](/C:/Users/Jacopo/Documents/legalbot/data/legalbot.sqlite) when persistence is explicitly opened outside tests.
 - Test coverage uses temp directories so database files are created only under ephemeral test paths.
-- Backups are an operator concern for later milestones. M7 does not add automated backup or retention jobs, so any future production use must define backup frequency, encryption, and restore verification before enabling real writes.
+- `data/` remains git-ignored because it may contain local SQLite files created by `npm run db:migrate` or `npm run db:status`.
+- Backups remain an operator concern. M8 does not add automated backup or retention jobs, so any future production use must define backup frequency, encryption, and restore verification before enabling real writes.
 
 ## Migration Control
 
-- When `DATABASE_MIGRATIONS_ENABLED=true`, an explicit migration run can create or update the SQLite schema.
-- When `DATABASE_MIGRATIONS_ENABLED=false`, callers can skip schema changes while still deciding separately whether to open SQLite at all.
+- When `DATABASE_MIGRATIONS_ENABLED=true`, `npm run db:migrate` creates parent directories as needed and applies the committed migration list.
+- When `DATABASE_MIGRATIONS_ENABLED=false`, `npm run db:migrate` reports pending migrations and skips schema changes.
+- `npm run db:status` reports applied and pending migration ids and counts without reading or printing table contents.
 - The migration boundary is intentionally separate from OpenWA startup so transport smoke behavior remains unchanged.

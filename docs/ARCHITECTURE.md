@@ -33,8 +33,9 @@ This project is a Node.js 22 + TypeScript strict foundation for a WhatsApp legal
 - `src/persistence/caseStore.ts`, `src/persistence/processedMessageStore.ts`, and `src/persistence/auditLogStore.ts` define the M7 storage contracts.
 - `src/persistence/testing/inMemoryStores.ts` provides process-local test doubles so domain tests can stay detached from SQLite and OpenWA runtime wiring.
 - `src/persistence/sqlite/database.ts` resolves `DATABASE_URL` values that use the `file:` scheme and creates parent directories only when an explicit migration or store-opening path is invoked.
-- `src/persistence/sqlite/migrationRunner.ts` is the explicit, testable migration boundary. It creates `schema_migrations`, applies the committed migration list, and can be skipped when `DATABASE_MIGRATIONS_ENABLED=false`.
+- `src/persistence/sqlite/migrationRunner.ts` is the explicit, testable migration boundary. It creates `schema_migrations`, reports applied versus pending migration ids, applies the committed migration list, and can be skipped when `DATABASE_MIGRATIONS_ENABLED=false`.
 - `src/persistence/sqlite/sqliteCaseStore.ts`, `src/persistence/sqlite/sqliteProcessedMessageStore.ts`, and `src/persistence/sqlite/sqliteAuditLogStore.ts` are skeleton implementations only. They are not wired into the live OpenWA listener yet.
+- `src/app/dbMigrate.ts` and `src/app/dbStatus.ts` are operator-only entrypoints for explicit schema bootstrap and status checks. They use the shared env loader, never print table contents, and remain detached from the OpenWA smoke runtime.
 - The SQLite schema currently persists minimal case metadata, processed-message dedupe markers, and audit events. It does not persist WhatsApp message bodies, browser/session state, attachments, PDFs, or consent-gated intake data.
 
 ## Verified Baseline

@@ -13,6 +13,11 @@ export interface SqliteMigrationRunResult {
   skipped: boolean;
 }
 
+export interface SqliteMigrationStatusResult {
+  appliedMigrationIds: string[];
+  pendingMigrationIds: string[];
+}
+
 export class SqliteMigrationRunner {
   constructor(
     private readonly database: DatabaseSync,
@@ -58,6 +63,15 @@ export class SqliteMigrationRunner {
     };
   }
 
+  status(): SqliteMigrationStatusResult {
+    this.ensureMigrationsTable();
+
+    return {
+      appliedMigrationIds: this.getAppliedMigrationIds(),
+      pendingMigrationIds: this.getPendingMigrationIds()
+    };
+  }
+
   private ensureMigrationsTable(): void {
     this.database.exec(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -67,11 +81,16 @@ export class SqliteMigrationRunner {
     `);
   }
 
-  private getPendingMigrationIds(): string[] {
+  private getAppliedMigrationIds(): string[] {
     const rows = this.database
       .prepare("SELECT migration_id FROM schema_migrations ORDER BY migration_id ASC")
       .all() as Array<{ migration_id: string }>;
-    const applied = new Set(rows.map((row) => row.migration_id));
+
+    return rows.map((row) => row.migration_id);
+  }
+
+  private getPendingMigrationIds(): string[] {
+    const applied = new Set(this.getAppliedMigrationIds());
     return this.migrations
       .filter((migration) => !applied.has(migration.id))
       .map((migration) => migration.id);
@@ -88,6 +107,15 @@ export interface RunSqliteMigrationsResult extends SqliteMigrationRunResult {
   databasePath: string;
 }
 
+export interface GetSqliteMigrationStatusOptions {
+  databaseUrl: string;
+  cwd?: string;
+}
+
+export interface GetSqliteMigrationStatusResult extends SqliteMigrationStatusResult {
+  databasePath: string;
+}
+
 export const runSqliteMigrations = ({
   databaseUrl,
   cwd = process.cwd(),
@@ -100,6 +128,26 @@ export const runSqliteMigrations = ({
 
   try {
     const result = new SqliteMigrationRunner(database).run({ enabled });
+    return {
+      ...result,
+      databasePath
+    };
+  } finally {
+    database.close();
+  }
+};
+
+export const getSqliteMigrationStatus = ({
+  databaseUrl,
+  cwd = process.cwd()
+}: GetSqliteMigrationStatusOptions): GetSqliteMigrationStatusResult => {
+  const { database, databasePath } = openSqliteDatabase({
+    databaseUrl,
+    cwd
+  });
+
+  try {
+    const result = new SqliteMigrationRunner(database).status();
     return {
       ...result,
       databasePath

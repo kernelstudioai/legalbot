@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { loadSmokeRuntimeEnv } from "../../src/config/env";
+import { loadEnv, loadSmokeRuntimeEnv } from "../../src/config/env";
+
+describe("base app env", () => {
+  it("loads persistence defaults without OpenWA-specific env vars", () => {
+    const env = loadEnv({});
+
+    expect(env.NODE_ENV).toBe("development");
+    expect(env.LOG_LEVEL).toBe("info");
+    expect(env.OPENWA_HEADLESS).toBe(true);
+    expect(env.DATABASE_URL).toBe("file:./data/legalbot.sqlite");
+    expect(env.DATABASE_MIGRATIONS_ENABLED).toBe(true);
+  });
+});
 
 describe("smoke runtime env", () => {
   it("defaults smoke headless mode to false", () => {
