@@ -1,11 +1,17 @@
 node_modules/
 coverage/
 dist/
+build/
 *.log
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
 
 # local environment
 .env
 .env.*
+!.env.example
 
 # runtime/session state
 sessions/
@@ -14,6 +20,10 @@ data/
 logs/
 *.data.json
 *.node-persist*
+*.sqlite
+*.db
+dump.sql
+backup.zip
 
 # browser profiles
 .openwa/
@@ -22,6 +32,16 @@ logs/
 .chromium/
 chrome-profile/
 user-data/
+
+# sensitive materials
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.*
+credentials.*
+token.*
+service-account*.json
 
 # managed
 **_IGNORE_**

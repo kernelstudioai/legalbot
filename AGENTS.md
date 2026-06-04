@@ -3,7 +3,7 @@
 ## Startup Context
 
 - Use `docs/AGENT_CONTEXT.md` for repo startup context.
-- Treat `README.md` as public reference, not as operating context.
+- `README.md` is public reference only and not startup context.
 
 ## Boundaries
 

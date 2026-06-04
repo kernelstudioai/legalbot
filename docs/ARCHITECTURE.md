@@ -16,6 +16,13 @@ This project is a Node.js 22 + TypeScript strict foundation for a WhatsApp legal
 - `src/logging`: logger abstraction.
 - `src/app`: application orchestration and bootstrap wiring.
 
+## OpenWA Smoke Transport
+
+- `src/app/openwaSmoke.ts` is the executable smoke entrypoint that validates runtime env, starts the OpenWA client, installs signal handlers, and wires transport dependencies.
+- `src/transport/openwa/client.ts` owns OpenWA bootstrap, runtime session path setup, and raw OpenWA message adaptation.
+- `src/transport/openwa/listener.ts` only logs receipt, maps raw transport data into the existing pipeline input, runs the pipeline, and hands the resulting `OutputPlan` to the dispatcher.
+- `src/transport/openwa/dispatcher.ts` only sends supported text actions and ignores unsupported actions without introducing domain behavior.
+
 ## Current Constraints
 
 - No real intake flow yet.

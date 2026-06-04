@@ -3,7 +3,6 @@ import { z } from "zod";
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
-  OPENWA_SESSION_NAME: z.string().min(1).default("legalbot-foundation"),
   OPENWA_HEADLESS: z
     .enum(["true", "false"])
     .default("true")
@@ -12,7 +11,19 @@ const EnvSchema = z.object({
 
 export type AppEnv = z.infer<typeof EnvSchema>;
 
+export const SmokeRuntimeEnvSchema = EnvSchema.extend({
+  BOT_MODE: z.literal("smoke"),
+  OPENWA_SESSION_ID: z.string().min(1),
+  LAWYER_PHONE_E164: z.string().regex(/^\+[1-9]\d{7,14}$/)
+});
+
+export type SmokeRuntimeEnv = z.infer<typeof SmokeRuntimeEnvSchema>;
+
 export const loadEnv = (source: NodeJS.ProcessEnv = process.env): AppEnv =>
   EnvSchema.parse(source);
+
+export const loadSmokeRuntimeEnv = (
+  source: NodeJS.ProcessEnv = process.env
+): SmokeRuntimeEnv => SmokeRuntimeEnvSchema.parse(source);
 
 export { EnvSchema };
