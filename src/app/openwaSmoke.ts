@@ -20,7 +20,14 @@ export interface StartOpenWaSmokeAppOptions {
 const createDefaultClient = async (
   env: SmokeRuntimeEnv
 ): Promise<OpenWaRuntimeClient> =>
-  createOpenWaClient(createOpenWaConfig(env.OPENWA_SESSION_ID));
+  createOpenWaClient(
+    createOpenWaConfig({
+      sessionId: env.OPENWA_SESSION_ID,
+      ...(env.OPENWA_BROWSER_EXECUTABLE_PATH
+        ? { browserExecutablePath: env.OPENWA_BROWSER_EXECUTABLE_PATH }
+        : {})
+    })
+  );
 
 export const startOpenWaSmokeApp = async ({
   envSource = process.env,

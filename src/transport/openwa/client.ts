@@ -9,6 +9,7 @@ export interface OpenWaConfig {
   sessionDataPath: string;
   authTimeout: number;
   qrTimeout: number;
+  browserExecutablePath?: string;
 }
 
 export const OPENWA_SESSION_PATH = "openwa-session";
@@ -45,13 +46,29 @@ export const toOpenWaRawMessage = (
   };
 };
 
-export const createOpenWaConfig = (sessionId: string): OpenWaConfig => ({
+export interface CreateOpenWaConfigOptions {
+  sessionId: string;
+  browserExecutablePath?: string;
+}
+
+export const createOpenWaConfig = ({
   sessionId,
-  headless: true,
-  sessionDataPath: path.join(process.cwd(), OPENWA_SESSION_PATH),
-  authTimeout: 0,
-  qrTimeout: 0
-});
+  browserExecutablePath
+}: CreateOpenWaConfigOptions): OpenWaConfig => {
+  const config: OpenWaConfig = {
+    sessionId,
+    headless: true,
+    sessionDataPath: path.join(process.cwd(), OPENWA_SESSION_PATH),
+    authTimeout: 0,
+    qrTimeout: 0
+  };
+
+  if (browserExecutablePath) {
+    config.browserExecutablePath = browserExecutablePath;
+  }
+
+  return config;
+};
 
 const toOpenWaConfigObject = (config: OpenWaConfig): ConfigObject => {
   mkdirSync(config.sessionDataPath, { recursive: true });
@@ -61,7 +78,12 @@ const toOpenWaConfigObject = (config: OpenWaConfig): ConfigObject => {
     headless: config.headless,
     sessionDataPath: config.sessionDataPath,
     authTimeout: config.authTimeout,
-    qrTimeout: config.qrTimeout
+    qrTimeout: config.qrTimeout,
+    ...(config.browserExecutablePath
+      ? {
+          executablePath: config.browserExecutablePath
+        }
+      : {})
   };
 };
 

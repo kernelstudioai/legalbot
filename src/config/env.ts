@@ -14,7 +14,8 @@ export type AppEnv = z.infer<typeof EnvSchema>;
 export const SmokeRuntimeEnvSchema = EnvSchema.extend({
   BOT_MODE: z.literal("smoke"),
   OPENWA_SESSION_ID: z.string().min(1),
-  LAWYER_PHONE_E164: z.string().regex(/^\+[1-9]\d{7,14}$/)
+  LAWYER_PHONE_E164: z.string().regex(/^\+[1-9]\d{7,14}$/),
+  OPENWA_BROWSER_EXECUTABLE_PATH: z.string().min(1).optional()
 });
 
 export type SmokeRuntimeEnv = z.infer<typeof SmokeRuntimeEnvSchema>;
