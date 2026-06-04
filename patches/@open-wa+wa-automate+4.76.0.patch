@@ -1,0 +1,53 @@
+diff --git a/node_modules/@open-wa/wa-automate/dist/config/puppeteer.config.js b/node_modules/@open-wa/wa-automate/dist/config/puppeteer.config.js
+index aed8a9e..e578824 100644
+--- a/node_modules/@open-wa/wa-automate/dist/config/puppeteer.config.js
++++ b/node_modules/@open-wa/wa-automate/dist/config/puppeteer.config.js
+@@ -58,7 +58,7 @@ const puppeteerConfig = {
+     ]
+ };
+ exports.puppeteerConfig = puppeteerConfig;
+-const createUserAgent = (waVersion) => `WhatsApp/${waVersion} Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36`;
++const createUserAgent = (waVersion) => `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36`;
+ exports.createUserAgent = createUserAgent;
+ exports.useragent = (0, exports.createUserAgent)('2.2147.16');
+ exports.width = puppeteerConfig.width;
+diff --git a/node_modules/@open-wa/wa-automate/dist/controllers/initializer.js b/node_modules/@open-wa/wa-automate/dist/controllers/initializer.js
+index 86c6d3a..cfc7ae0 100644
+--- a/node_modules/@open-wa/wa-automate/dist/controllers/initializer.js
++++ b/node_modules/@open-wa/wa-automate/dist/controllers/initializer.js
+@@ -130,8 +130,13 @@ function create(config = {}) {
+             //try to infer config variables from process.env
+             config = Object.assign(Object.assign({}, config), (0, tools_1.getConfigFromProcessEnv)(exports.configWithCases));
+             config.chromiumArgs = (config === null || config === void 0 ? void 0 : config.chromiumArgs) || [];
+-            customUserAgent = config.customUserAgent;
+         }
++        /**
++         * Always honor explicit config.customUserAgent.
++         * Previously this was only applied inside the inDocker branch, causing
++         * customUserAgent to be ignored for normal (non-docker) usage.
++         */
++        customUserAgent = (config === null || config === void 0 ? void 0 : config.customUserAgent) || customUserAgent;
+         if (sessionId === '' || (config === null || config === void 0 ? void 0 : config.sessionId))
+             sessionId = (config === null || config === void 0 ? void 0 : config.sessionId) || 'session';
+         const prettyFont = cfonts_1.default.render(('@OPEN-WA|WHATSAPP|AUTOMATOR'), {
+@@ -162,6 +167,20 @@ function create(config = {}) {
+         const PPTR_VERSION = ((_a = (0, fs_extra_1.readJsonSync)(require.resolve("puppeteer/package.json"), { throws: false })) === null || _a === void 0 ? void 0 : _a.version) || "UNKNOWN";
+         logging_1.log.info("PPTR VERSION INFO", PPTR_VERSION);
+         try {
++            console.log(`
++================================================================================
++========================== @OPEN-WA IMPORTANT NOTICE ===========================
++================================================================================
++
++  @open-wa/wa-automate v4.76.0 is the latest current v4 release.
++
++  The v4 line will no longer be maintained or updated.
++
++  V5 is coming soon. Please keep an eye on the releases page for when it drops:
++  https://github.com/open-wa/wa-automate-nodejs/releases
++
++================================================================================
++`);
+             if (typeof config === 'string')
+                 console.error("AS OF VERSION 3+ YOU CAN NO LONGER SET THE SESSION ID AS THE FIRST PARAMETER OF CREATE. CREATE CAN ONLY TAKE A CONFIG OBJECT. IF YOU STILL HAVE CONFIGS AS A SECOND PARAMETER, THEY WILL HAVE NO EFFECT! PLEASE SEE DOCS.");
+             spinner.start('Starting');
