@@ -8,19 +8,22 @@ M12 adds a consent-state persistence boundary only. It stores the current consen
 
 M13 wires that consent-state boundary into the live client runtime path without enabling intake persistence. The runtime may read consent state, upsert `requested` / `granted` / `denied`, and append consent events, but it still must not persist message bodies, legal facts, or create cases.
 
-M14 adds a client-intake state machine, but it does not introduce durable intake persistence yet. Accepted intake fields can remain only in an injected in-memory runtime store unless a future dedicated intake persistence boundary is added.
+M14 adds a client-intake state machine.
+
+M15 adds consent-gated intake persistence for state plus accepted structured fields only. It still does not persist raw message bodies, full transcripts, rejected replies, legal facts, attachments, or case records.
 
 ## Interfaces
 
 - `CaseStore`: minimal create/get/update support for case metadata only.
 - `ConsentStore`: current consent-state lookup, consent-state upsert, and append-only consent event history.
+- `IntakeStore`: current intake-state lookup, accepted-field upsert, snapshot reads, and append-only intake event history.
 - `ProcessedMessageStore`: duplicate-detection markers keyed by transport message id.
 - `AuditLogStore`: append-only audit events with optional JSON metadata.
 - `PersistenceService`: the only application boundary that future intake/runtime code should use when it needs persistence.
 
 ## Persistence Service Boundary
 
-- `src/persistence/persistenceService.ts` composes `CaseStore`, `ConsentStore`, `ProcessedMessageStore`, and `AuditLogStore`.
+- `src/persistence/persistenceService.ts` composes `CaseStore`, `ConsentStore`, `IntakeStore`, `ProcessedMessageStore`, and `AuditLogStore`.
 - Supported service methods:
   - `isMessageProcessed(messageId)`
   - `markMessageProcessed(messageId, metadata)`
@@ -28,14 +31,19 @@ M14 adds a client-intake state machine, but it does not introduce durable intake
   - `getConsentState(subjectId)`
   - `setConsentState(subjectId, state, metadata)`
   - `appendConsentEvent(event)`
+  - `getIntakeState(subjectId)`
+  - `setIntakeState(subjectId, state, metadata)`
+  - `setIntakeField(subjectId, fieldName, value, metadata)`
+  - `getIntakeSnapshot(subjectId)`
+  - `appendIntakeEvent(event)`
   - `createCase(input)`
   - `getCase(caseId)`
   - `updateCaseStatus(caseId, status)`
 - `createSqlitePersistenceService(config)` opens a SQLite-backed service against an explicit `file:` database path.
 - `createInMemoryPersistenceService()` provides a process-local service for tests and non-SQLite callers.
-- The service sanitizes processed-message metadata, audit payloads, and consent metadata before they can cross the boundary.
+- The service sanitizes processed-message metadata, audit payloads, consent metadata, and intake metadata before they can cross the boundary.
 - The OpenWA smoke runtime can inject an existing `PersistenceService` or create a SQLite-backed one only when `TECHNICAL_PERSISTENCE_ENABLED=true`.
-- Consent runtime wiring uses a narrower consent-only adapter in the application layer so M13 client consent writes stay separate from M10 technical dedupe and audit wiring.
+- Client runtime wiring uses narrow application-layer adapters so consent-gated intake writes stay separate from M10 technical dedupe and audit wiring.
 
 ## SQLite Foundation
 
@@ -50,6 +58,9 @@ M14 adds a client-intake state machine, but it does not introduce durable intake
   - `cases`
   - `consent_states`
   - `consent_events`
+  - `intake_states`
+  - `intake_fields`
+  - `intake_events`
   - `processed_messages`
   - `audit_events`
   - `schema_migrations`
@@ -67,14 +78,16 @@ M14 adds a client-intake state machine, but it does not introduce durable intake
   - sanitized metadata with forbidden content fields removed and phone numbers, tokens, and browser/session/QR paths redacted
 - In the live runtime path, `subjectId` is derived narrowly from the canonical sender/chat id and used only for state lookup and updates. Consent metadata stores channel, message id, runtime, and subject-id source markers, not the full phone number.
 - Consent-state persistence does not store transcripts, message bodies, legal facts, or case records.
-- M14 intake state is intentionally separate from the persistence service. This milestone does not add a durable intake store, transcript store, or case-creation write path.
-- If an in-memory intake adapter is injected, it may hold only explicitly accepted structured fields after consent is granted:
+- Intake persistence is consent-gated. Before consent is `granted`, runtime intake persistence must not write state, fields, or intake events.
+- Intake persistence stores only:
   - `name`
   - `problemSummary`
-- The in-memory intake adapter must not store raw inbound bodies, invalid replies, or full transcripts.
+- Intake persistence stores state transitions separately from accepted structured fields and may append intake events without duplicating raw message content.
+- Intake persistence must not store raw inbound bodies, invalid replies, rejected values, full transcripts, attachments, or live case records.
 - Live WhatsApp runtime writes never create or update cases in M10.
 - M13 live consent wiring never stores inbound message body text in consent state metadata or consent events.
-- Any future intake writes through `PersistenceService` still require explicit `granted` consent before live message content or legal-intake state is written.
+- M15 live intake wiring persists only accepted structured `name` and `problemSummary` values plus sanitized metadata after explicit `granted` consent.
+- Future case creation must remain a separate milestone with its own boundary and review.
 
 ## File Location And Backups
 
@@ -111,9 +124,9 @@ M14 adds a client-intake state machine, but it does not introduce durable intake
   - `requested` + explicit grant -> persist `granted`, append `consent_granted`, start intake with `intake_ask_name`
   - `requested` + explicit denial -> persist `denied`, append `consent_denied`, output `consent_denied_close`
   - `requested` + ambiguous reply -> output `consent_clarification` without granting consent
-  - `granted` + `not_started` -> keep intake state in the injected runtime adapter and output `intake_ask_name`
-  - `granted` + valid `asking_name` reply -> store only the accepted `name` field and output `intake_ask_problem_summary`
-  - `granted` + valid `asking_problem_summary` reply -> store only the accepted `problemSummary` field and output `intake_complete_ack`
+  - `granted` + `not_started` -> persist `asking_name` and output `intake_ask_name`
+  - `granted` + valid `asking_name` reply -> persist `asking_problem_summary`, store only the accepted `name` field, and output `intake_ask_problem_summary`
+  - `granted` + valid `asking_problem_summary` reply -> persist `intake_complete`, store only the accepted `problemSummary` field, and output `intake_complete_ack`
   - invalid intake values -> output `intake_invalid_response` without storing the raw reply
   - `denied` -> output the safe no-processing close response
-- M14 still does not create cases, store full transcripts, or persist raw message bodies even when consent is granted.
+- M15 still does not create cases, store full transcripts, or persist raw message bodies even when consent is granted.

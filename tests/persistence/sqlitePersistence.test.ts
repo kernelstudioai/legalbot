@@ -8,6 +8,7 @@ import {
   SqliteAuditLogStore,
   SqliteCaseStore,
   SqliteConsentStore,
+  SqliteIntakeStore,
   SqliteProcessedMessageStore
 } from "../../src/persistence/sqlite/index.ts";
 
@@ -49,7 +50,10 @@ describe("sqlite persistence foundation", () => {
       "0002_create_processed_messages",
       "0003_create_audit_events",
       "0004_create_consent_states",
-      "0005_create_consent_events"
+      "0005_create_consent_events",
+      "0006_create_intake_states",
+      "0007_create_intake_fields",
+      "0008_create_intake_events"
     ]);
     expect(migrationResult.pendingMigrationIds).toEqual([]);
     expect(migrationResult.databasePath.startsWith(tempDir)).toBe(true);
@@ -79,6 +83,9 @@ describe("sqlite persistence foundation", () => {
         "cases",
         "consent_events",
         "consent_states",
+        "intake_events",
+        "intake_fields",
+        "intake_states",
         "processed_messages",
         "schema_migrations"
       ]);
@@ -308,6 +315,202 @@ describe("sqlite persistence foundation", () => {
         consent_state: "granted",
         event_type: "consent_granted",
         occurred_at: "2026-06-04T10:07:00.000Z",
+        metadata_json: JSON.stringify({ source: "test" })
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("stores intake state snapshots, accepted fields, and intake events", async () => {
+    const { tempDir, databaseUrl } = createTempDatabaseConfig();
+    runSqliteMigrations({ databaseUrl, cwd: tempDir, enabled: true });
+
+    const { database } = openSqliteDatabase({
+      databaseUrl,
+      cwd: tempDir
+    });
+
+    try {
+      const store = new SqliteIntakeStore(database);
+
+      expect(await store.getIntakeState("subject-1")).toBe("not_started");
+      expect(await store.getIntakeSnapshot("subject-1")).toBeNull();
+
+      const stateRecord = await store.setIntakeState("subject-1", "asking_problem_summary", {
+        updatedAt: "2026-06-04T10:08:00.000Z",
+        metadata: {
+          source: "test"
+        }
+      });
+      const nameRecord = await store.setIntakeField("subject-1", "name", "Mario Rossi", {
+        updatedAt: "2026-06-04T10:08:30.000Z",
+        metadata: {
+          source: "test"
+        }
+      });
+      const summaryRecord = await store.setIntakeField(
+        "subject-1",
+        "problemSummary",
+        "Sintesi breve del problema",
+        {
+          updatedAt: "2026-06-04T10:09:00.000Z",
+          metadata: {
+            source: "test"
+          }
+        }
+      );
+
+      expect(stateRecord).toEqual({
+        subjectId: "subject-1",
+        state: "asking_problem_summary",
+        updatedAt: "2026-06-04T10:08:00.000Z",
+        metadata: {
+          source: "test"
+        }
+      });
+      expect(nameRecord).toEqual({
+        subjectId: "subject-1",
+        fieldName: "name",
+        value: "Mario Rossi",
+        updatedAt: "2026-06-04T10:08:30.000Z",
+        metadata: {
+          source: "test"
+        }
+      });
+      expect(summaryRecord).toEqual({
+        subjectId: "subject-1",
+        fieldName: "problemSummary",
+        value: "Sintesi breve del problema",
+        updatedAt: "2026-06-04T10:09:00.000Z",
+        metadata: {
+          source: "test"
+        }
+      });
+
+      await store.appendIntakeEvent({
+        eventId: "intake-event-1",
+        subjectId: "subject-1",
+        eventType: "intake_field_accepted",
+        state: "asking_problem_summary",
+        fieldName: "problemSummary",
+        occurredAt: "2026-06-04T10:09:30.000Z",
+        metadata: {
+          source: "test"
+        }
+      });
+
+      expect(await store.getIntakeState("subject-1")).toBe("asking_problem_summary");
+      expect(await store.getIntakeSnapshot("subject-1")).toEqual({
+        subjectId: "subject-1",
+        state: "asking_problem_summary",
+        updatedAt: "2026-06-04T10:08:00.000Z",
+        fields: {
+          name: "Mario Rossi",
+          problemSummary: "Sintesi breve del problema"
+        }
+      });
+      await expect(
+        store.setIntakeField("subject-1", "unknown" as "name", "bad")
+      ).rejects.toThrow("Unsupported intake field: unknown");
+
+      const stateRow = database
+        .prepare(
+          `
+            SELECT
+              subject_id,
+              intake_state,
+              updated_at,
+              metadata_json
+            FROM intake_states
+            WHERE subject_id = ?
+          `
+        )
+        .get("subject-1") as
+        | {
+            subject_id: string;
+            intake_state: string;
+            updated_at: string;
+            metadata_json: string | null;
+          }
+        | undefined;
+      const fieldRows = database
+        .prepare(
+          `
+            SELECT
+              subject_id,
+              field_name,
+              field_value,
+              updated_at,
+              metadata_json
+            FROM intake_fields
+            WHERE subject_id = ?
+            ORDER BY field_name ASC
+          `
+        )
+        .all("subject-1") as Array<{
+        subject_id: string;
+        field_name: string;
+        field_value: string;
+        updated_at: string;
+        metadata_json: string | null;
+      }>;
+      const eventRow = database
+        .prepare(
+          `
+            SELECT
+              event_id,
+              subject_id,
+              event_type,
+              intake_state,
+              field_name,
+              occurred_at,
+              metadata_json
+            FROM intake_events
+            WHERE event_id = ?
+          `
+        )
+        .get("intake-event-1") as
+        | {
+            event_id: string;
+            subject_id: string;
+            event_type: string;
+            intake_state: string | null;
+            field_name: string | null;
+            occurred_at: string;
+            metadata_json: string | null;
+          }
+        | undefined;
+
+      expect(stateRow).toEqual({
+        subject_id: "subject-1",
+        intake_state: "asking_problem_summary",
+        updated_at: "2026-06-04T10:08:00.000Z",
+        metadata_json: JSON.stringify({ source: "test" })
+      });
+      expect(fieldRows).toEqual([
+        {
+          subject_id: "subject-1",
+          field_name: "name",
+          field_value: "Mario Rossi",
+          updated_at: "2026-06-04T10:08:30.000Z",
+          metadata_json: JSON.stringify({ source: "test" })
+        },
+        {
+          subject_id: "subject-1",
+          field_name: "problemSummary",
+          field_value: "Sintesi breve del problema",
+          updated_at: "2026-06-04T10:09:00.000Z",
+          metadata_json: JSON.stringify({ source: "test" })
+        }
+      ]);
+      expect(eventRow).toEqual({
+        event_id: "intake-event-1",
+        subject_id: "subject-1",
+        event_type: "intake_field_accepted",
+        intake_state: "asking_problem_summary",
+        field_name: "problemSummary",
+        occurred_at: "2026-06-04T10:09:30.000Z",
         metadata_json: JSON.stringify({ source: "test" })
       });
     } finally {

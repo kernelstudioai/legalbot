@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { RuntimeDecision } from "../../contracts/index.ts";
 import type { RuntimeDecisionType } from "../../contracts/index.ts";
+import { InMemoryIntakeStore, type IntakeFieldName } from "../../persistence/index.ts";
 
 export const intakeStates = [
   "not_started",
@@ -36,27 +37,74 @@ export interface ClientIntakeStore {
 }
 
 export class InMemoryClientIntakeStore implements ClientIntakeStore {
-  private readonly records = new Map<string, ClientIntakeRecord>();
+  private readonly store = new InMemoryIntakeStore();
 
   async getIntakeRecord(subjectId: string): Promise<ClientIntakeRecord | null> {
-    return this.records.get(subjectId) ?? null;
+    const snapshot = await this.store.getIntakeSnapshot(subjectId);
+
+    if (!snapshot) {
+      return null;
+    }
+
+    return {
+      subjectId: snapshot.subjectId,
+      state: snapshot.state,
+      updatedAt: snapshot.updatedAt,
+      ...(snapshot.fields.name ? { name: snapshot.fields.name } : {}),
+      ...(snapshot.fields.problemSummary
+        ? {
+            problemSummary: snapshot.fields.problemSummary
+          }
+        : {})
+    };
   }
 
   async setIntakeRecord(input: SetClientIntakeRecordInput): Promise<ClientIntakeRecord> {
-    const record: ClientIntakeRecord = {
+    const updatedAt = input.updatedAt ?? new Date().toISOString();
+    await this.store.setIntakeState(input.subjectId, input.state, {
+      updatedAt
+    });
+
+    for (const fieldName of ["name", "problemSummary"] as const satisfies IntakeFieldName[]) {
+      const value = input[fieldName];
+
+      if (!value) {
+        continue;
+      }
+
+      await this.store.setIntakeField(input.subjectId, fieldName, value, {
+        updatedAt
+      });
+    }
+
+    return {
       subjectId: input.subjectId,
       state: input.state,
-      updatedAt: input.updatedAt ?? new Date().toISOString(),
+      updatedAt,
       ...(input.name ? { name: input.name } : {}),
       ...(input.problemSummary ? { problemSummary: input.problemSummary } : {})
     };
-
-    this.records.set(input.subjectId, record);
-    return record;
   }
 
   snapshot(): ClientIntakeRecord[] {
-    return [...this.records.values()];
+    const states = this.store.snapshotStates();
+    const fields = this.store.snapshotFields();
+
+    return states.map((stateRecord) => {
+      const subjectFields = fields.filter((field) => field.subjectId === stateRecord.subjectId);
+      const name = subjectFields.find((field) => field.fieldName === "name")?.value;
+      const problemSummary = subjectFields.find(
+        (field) => field.fieldName === "problemSummary"
+      )?.value;
+
+      return {
+        subjectId: stateRecord.subjectId,
+        state: stateRecord.state,
+        updatedAt: stateRecord.updatedAt,
+        ...(name ? { name } : {}),
+        ...(problemSummary ? { problemSummary } : {})
+      };
+    });
   }
 }
 

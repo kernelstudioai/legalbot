@@ -7,6 +7,16 @@ import type {
   ConsentStateRecord,
   ConsentStore
 } from "./consentStore.ts";
+import type {
+  AppendIntakeEventInput,
+  IntakeEventRecord,
+  IntakeFieldName,
+  IntakeFieldRecord,
+  IntakeSnapshot,
+  IntakeState,
+  IntakeStateRecord,
+  IntakeStore
+} from "./intakeStore.ts";
 import { sanitizePersistenceMetadata } from "./metadataSanitizer.ts";
 import type {
   MarkProcessedMessageResult,
@@ -19,12 +29,14 @@ import {
   SqliteAuditLogStore,
   SqliteCaseStore,
   SqliteConsentStore,
+  SqliteIntakeStore,
   SqliteProcessedMessageStore
 } from "./sqlite/index.ts";
 import {
   InMemoryAuditLogStore,
   InMemoryCaseStore,
   InMemoryConsentStore,
+  InMemoryIntakeStore,
   InMemoryProcessedMessageStore
 } from "./testing/inMemoryStores.ts";
 
@@ -62,6 +74,35 @@ export interface PersistenceConsentStateResult {
   sanitizedMetadata?: Record<string, unknown>;
 }
 
+export interface SetIntakeStateMetadata {
+  updatedAt?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PersistenceIntakeStateResult {
+  record: IntakeStateRecord;
+  sanitizedMetadata?: Record<string, unknown>;
+}
+
+export interface SetIntakeFieldMetadata {
+  updatedAt?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PersistenceIntakeFieldResult {
+  record: IntakeFieldRecord;
+  sanitizedMetadata?: Record<string, unknown>;
+}
+
+export interface PersistenceIntakeSnapshotResult {
+  snapshot: IntakeSnapshot | null;
+}
+
+export interface PersistenceIntakeEventResult {
+  event: IntakeEventRecord;
+  sanitizedMetadata?: Record<string, unknown>;
+}
+
 export interface PersistenceService {
   isMessageProcessed(messageId: string): Promise<boolean>;
   markMessageProcessed(
@@ -76,6 +117,20 @@ export interface PersistenceService {
     metadata?: SetConsentStateMetadata
   ): Promise<PersistenceConsentStateResult>;
   appendConsentEvent(event: AppendConsentEventInput): Promise<ConsentEventRecord>;
+  getIntakeState(subjectId: string): Promise<IntakeState>;
+  setIntakeState(
+    subjectId: string,
+    state: IntakeState,
+    metadata?: SetIntakeStateMetadata
+  ): Promise<PersistenceIntakeStateResult>;
+  setIntakeField(
+    subjectId: string,
+    fieldName: IntakeFieldName,
+    value: string,
+    metadata?: SetIntakeFieldMetadata
+  ): Promise<PersistenceIntakeFieldResult>;
+  getIntakeSnapshot(subjectId: string): Promise<IntakeSnapshot | null>;
+  appendIntakeEvent(event: AppendIntakeEventInput): Promise<PersistenceIntakeEventResult>;
   createCase(input: CreateCaseInput): Promise<CaseRecord>;
   getCase(caseId: string): Promise<CaseRecord | null>;
   updateCaseStatus(caseId: string, status: string): Promise<CaseRecord | null>;
@@ -86,6 +141,7 @@ export interface CreatePersistenceServiceOptions {
   processedMessageStore: ProcessedMessageStore;
   auditLogStore: AuditLogStore;
   consentStore: ConsentStore;
+  intakeStore: IntakeStore;
   now?: () => string;
 }
 
@@ -99,6 +155,7 @@ export const createPersistenceService = ({
   processedMessageStore,
   auditLogStore,
   consentStore,
+  intakeStore,
   now = () => new Date().toISOString()
 }: CreatePersistenceServiceOptions): PersistenceService => ({
   async isMessageProcessed(messageId) {
@@ -169,6 +226,50 @@ export const createPersistenceService = ({
     return storedEvent;
   },
 
+  async getIntakeState(subjectId) {
+    return intakeStore.getIntakeState(subjectId);
+  },
+
+  async setIntakeState(subjectId, state, metadata) {
+    const sanitizedMetadata = sanitizePersistenceMetadata(metadata?.metadata);
+    const record = await intakeStore.setIntakeState(subjectId, state, {
+      updatedAt: metadata?.updatedAt ?? now(),
+      ...(sanitizedMetadata ? { metadata: sanitizedMetadata } : {})
+    });
+
+    return sanitizedMetadata ? { record, sanitizedMetadata } : { record };
+  },
+
+  async setIntakeField(subjectId, fieldName, value, metadata) {
+    const sanitizedMetadata = sanitizePersistenceMetadata(metadata?.metadata);
+    const record = await intakeStore.setIntakeField(subjectId, fieldName, value, {
+      updatedAt: metadata?.updatedAt ?? now(),
+      ...(sanitizedMetadata ? { metadata: sanitizedMetadata } : {})
+    });
+
+    return sanitizedMetadata ? { record, sanitizedMetadata } : { record };
+  },
+
+  async getIntakeSnapshot(subjectId) {
+    return intakeStore.getIntakeSnapshot(subjectId);
+  },
+
+  async appendIntakeEvent(event) {
+    const sanitizedMetadata = sanitizePersistenceMetadata(event.metadata);
+    const storedEvent: IntakeEventRecord = {
+      eventId: event.eventId,
+      subjectId: event.subjectId,
+      eventType: event.eventType,
+      occurredAt: event.occurredAt ?? now(),
+      ...(event.state ? { state: event.state } : {}),
+      ...(event.fieldName ? { fieldName: event.fieldName } : {}),
+      ...(sanitizedMetadata ? { metadata: sanitizedMetadata } : {})
+    };
+
+    await intakeStore.appendIntakeEvent(storedEvent);
+    return sanitizedMetadata ? { event: storedEvent, sanitizedMetadata } : { event: storedEvent };
+  },
+
   async createCase(input) {
     return caseStore.create(input);
   },
@@ -194,7 +295,8 @@ export const createSqlitePersistenceService = (
     caseStore: new SqliteCaseStore(database),
     processedMessageStore: new SqliteProcessedMessageStore(database),
     auditLogStore: new SqliteAuditLogStore(database),
-    consentStore: new SqliteConsentStore(database)
+    consentStore: new SqliteConsentStore(database),
+    intakeStore: new SqliteIntakeStore(database)
   });
 
   return {
@@ -211,5 +313,6 @@ export const createInMemoryPersistenceService = (): PersistenceService =>
     caseStore: new InMemoryCaseStore(),
     processedMessageStore: new InMemoryProcessedMessageStore(),
     auditLogStore: new InMemoryAuditLogStore(),
-    consentStore: new InMemoryConsentStore()
+    consentStore: new InMemoryConsentStore(),
+    intakeStore: new InMemoryIntakeStore()
   });

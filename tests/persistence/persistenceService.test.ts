@@ -8,12 +8,19 @@ import type {
   CaseStore,
   ConsentEventRecord,
   ConsentStore,
+  IntakeEventRecord,
+  IntakeFieldName,
+  IntakeState,
+  IntakeStore,
   ProcessedMessageStore,
-  SetConsentStateOptions
+  SetConsentStateOptions,
+  SetIntakeFieldOptions,
+  SetIntakeStateOptions
 } from "../../src/persistence/index.ts";
 import {
   InMemoryCaseStore,
   InMemoryConsentStore,
+  InMemoryIntakeStore,
   createInMemoryPersistenceService,
   createPersistenceService,
   createSqlitePersistenceService
@@ -67,6 +74,104 @@ class CapturingConsentStore implements ConsentStore {
   }
 
   async appendConsentEvent(event: ConsentEventRecord): Promise<void> {
+    this.events.push(event);
+  }
+}
+
+class CapturingIntakeStore implements IntakeStore {
+  stateBySubject = new Map<
+    string,
+    {
+      state: "not_started" | "asking_name" | "asking_problem_summary" | "intake_complete";
+      updatedAt: string;
+      metadata?: Record<string, unknown>;
+    }
+  >();
+  fieldBySubject = new Map<
+    string,
+    Map<
+      IntakeFieldName,
+      {
+        value: string;
+        updatedAt: string;
+        metadata?: Record<string, unknown>;
+      }
+    >
+  >();
+  events: IntakeEventRecord[] = [];
+
+  async getIntakeState(subjectId: string) {
+    return this.stateBySubject.get(subjectId)?.state ?? "not_started";
+  }
+
+  async setIntakeState(
+    subjectId: string,
+    state: IntakeState,
+    options: SetIntakeStateOptions = {}
+  ) {
+    const record = {
+      subjectId,
+      state,
+      updatedAt: options.updatedAt ?? "2026-06-04T12:04:00.000Z",
+      ...(options.metadata ? { metadata: options.metadata } : {})
+    };
+
+    this.stateBySubject.set(subjectId, {
+      state,
+      updatedAt: record.updatedAt,
+      ...(record.metadata ? { metadata: record.metadata } : {})
+    });
+
+    return record;
+  }
+
+  async setIntakeField(
+    subjectId: string,
+    fieldName: IntakeFieldName,
+    value: string,
+    options: SetIntakeFieldOptions = {}
+  ) {
+    if (!["name", "problemSummary"].includes(fieldName)) {
+      throw new Error(`Unsupported intake field: ${fieldName}`);
+    }
+
+    const record = {
+      subjectId,
+      fieldName,
+      value,
+      updatedAt: options.updatedAt ?? "2026-06-04T12:04:00.000Z",
+      ...(options.metadata ? { metadata: options.metadata } : {})
+    };
+    const subjectFields = this.fieldBySubject.get(subjectId) ?? new Map();
+    subjectFields.set(fieldName, {
+      value,
+      updatedAt: record.updatedAt,
+      ...(record.metadata ? { metadata: record.metadata } : {})
+    });
+    this.fieldBySubject.set(subjectId, subjectFields);
+
+    return record;
+  }
+
+  async getIntakeSnapshot(subjectId: string) {
+    const state = this.stateBySubject.get(subjectId);
+    const fields = this.fieldBySubject.get(subjectId);
+
+    if (!state && !fields) {
+      return null;
+    }
+
+    return {
+      subjectId,
+      state: state?.state ?? "not_started",
+      updatedAt: state?.updatedAt ?? "2026-06-04T12:04:00.000Z",
+      fields: Object.fromEntries(
+        [...(fields?.entries() ?? [])].map(([fieldName, record]) => [fieldName, record.value])
+      )
+    };
+  }
+
+  async appendIntakeEvent(event: IntakeEventRecord): Promise<void> {
     this.events.push(event);
   }
 }
@@ -172,6 +277,7 @@ describe("persistence service boundary", () => {
       processedMessageStore: new TrackingProcessedMessageStore(),
       auditLogStore,
       consentStore: new CapturingConsentStore(),
+      intakeStore: new CapturingIntakeStore(),
       now: () => "2026-06-04T12:03:00.000Z"
     });
 
@@ -212,6 +318,7 @@ describe("persistence service boundary", () => {
       processedMessageStore: new TrackingProcessedMessageStore(),
       auditLogStore: new CapturingAuditLogStore(),
       consentStore: new InMemoryConsentStore(),
+      intakeStore: new InMemoryIntakeStore(),
       now: () => "2026-06-04T12:05:00.000Z"
     });
 
@@ -315,6 +422,89 @@ describe("persistence service boundary", () => {
         eventType: "consent_requested",
         occurredAt: "2026-06-04T12:08:00.000Z",
         metadata: {
+          source: "sqlite-test"
+        }
+      });
+      await expect(service.getIntakeState("subject-sqlite-1")).resolves.toBe("not_started");
+      await expect(
+        service.setIntakeState("subject-sqlite-1", "asking_problem_summary", {
+          updatedAt: "2026-06-04T12:08:30.000Z",
+          metadata: {
+            source: "sqlite-test",
+            body: "remove me"
+          }
+        })
+      ).resolves.toEqual({
+        record: {
+          subjectId: "subject-sqlite-1",
+          state: "asking_problem_summary",
+          updatedAt: "2026-06-04T12:08:30.000Z",
+          metadata: {
+            source: "sqlite-test"
+          }
+        },
+        sanitizedMetadata: {
+          source: "sqlite-test"
+        }
+      });
+      await expect(
+        service.setIntakeField("subject-sqlite-1", "name", "Mario Rossi", {
+          updatedAt: "2026-06-04T12:09:00.000Z",
+          metadata: {
+            source: "sqlite-test",
+            content: "remove me"
+          }
+        })
+      ).resolves.toEqual({
+        record: {
+          subjectId: "subject-sqlite-1",
+          fieldName: "name",
+          value: "Mario Rossi",
+          updatedAt: "2026-06-04T12:09:00.000Z",
+          metadata: {
+            source: "sqlite-test"
+          }
+        },
+        sanitizedMetadata: {
+          source: "sqlite-test"
+        }
+      });
+      await expect(
+        service.getIntakeSnapshot("subject-sqlite-1")
+      ).resolves.toEqual({
+        subjectId: "subject-sqlite-1",
+        state: "asking_problem_summary",
+        updatedAt: "2026-06-04T12:08:30.000Z",
+        fields: {
+          name: "Mario Rossi"
+        }
+      });
+      await expect(
+        service.appendIntakeEvent({
+          eventId: "intake-event-sqlite-1",
+          subjectId: "subject-sqlite-1",
+          eventType: "intake_field_accepted",
+          state: "asking_problem_summary",
+          fieldName: "name",
+          occurredAt: "2026-06-04T12:09:30.000Z",
+          metadata: {
+            source: "sqlite-test",
+            text: "remove me"
+          }
+        })
+      ).resolves.toEqual({
+        event: {
+          eventId: "intake-event-sqlite-1",
+          subjectId: "subject-sqlite-1",
+          eventType: "intake_field_accepted",
+          state: "asking_problem_summary",
+          fieldName: "name",
+          occurredAt: "2026-06-04T12:09:30.000Z",
+          metadata: {
+            source: "sqlite-test"
+          }
+        },
+        sanitizedMetadata: {
           source: "sqlite-test"
         }
       });
@@ -424,6 +614,104 @@ describe("persistence service boundary", () => {
           source: "sqlite-test"
         })
       });
+
+      const intakeStateRow = database
+        .prepare(
+          `
+            SELECT
+              subject_id,
+              intake_state,
+              updated_at,
+              metadata_json
+            FROM intake_states
+            WHERE subject_id = ?
+          `
+        )
+        .get("subject-sqlite-1") as
+        | {
+            subject_id: string;
+            intake_state: string;
+            updated_at: string;
+            metadata_json: string | null;
+          }
+        | undefined;
+      const intakeFieldRow = database
+        .prepare(
+          `
+            SELECT
+              subject_id,
+              field_name,
+              field_value,
+              updated_at,
+              metadata_json
+            FROM intake_fields
+            WHERE subject_id = ? AND field_name = ?
+          `
+        )
+        .get("subject-sqlite-1", "name") as
+        | {
+            subject_id: string;
+            field_name: string;
+            field_value: string;
+            updated_at: string;
+            metadata_json: string | null;
+          }
+        | undefined;
+      const intakeEventRow = database
+        .prepare(
+          `
+            SELECT
+              event_id,
+              subject_id,
+              event_type,
+              intake_state,
+              field_name,
+              occurred_at,
+              metadata_json
+            FROM intake_events
+            WHERE event_id = ?
+          `
+        )
+        .get("intake-event-sqlite-1") as
+        | {
+            event_id: string;
+            subject_id: string;
+            event_type: string;
+            intake_state: string | null;
+            field_name: string | null;
+            occurred_at: string;
+            metadata_json: string | null;
+          }
+        | undefined;
+
+      expect(intakeStateRow).toEqual({
+        subject_id: "subject-sqlite-1",
+        intake_state: "asking_problem_summary",
+        updated_at: "2026-06-04T12:08:30.000Z",
+        metadata_json: JSON.stringify({
+          source: "sqlite-test"
+        })
+      });
+      expect(intakeFieldRow).toEqual({
+        subject_id: "subject-sqlite-1",
+        field_name: "name",
+        field_value: "Mario Rossi",
+        updated_at: "2026-06-04T12:09:00.000Z",
+        metadata_json: JSON.stringify({
+          source: "sqlite-test"
+        })
+      });
+      expect(intakeEventRow).toEqual({
+        event_id: "intake-event-sqlite-1",
+        subject_id: "subject-sqlite-1",
+        event_type: "intake_field_accepted",
+        intake_state: "asking_problem_summary",
+        field_name: "name",
+        occurred_at: "2026-06-04T12:09:30.000Z",
+        metadata_json: JSON.stringify({
+          source: "sqlite-test"
+        })
+      });
     } finally {
       database.close();
     }
@@ -442,6 +730,7 @@ describe("persistence service boundary", () => {
       clientPhoneE164: "+15557654321"
     });
     await expect(service.getConsentState("memory-subject")).resolves.toBe("unknown");
+    await expect(service.getIntakeState("memory-subject")).resolves.toBe("not_started");
   });
 
   it("strips forbidden content fields from processed metadata and audit payloads", async () => {
@@ -457,7 +746,8 @@ describe("persistence service boundary", () => {
       } satisfies CaseStore,
       processedMessageStore,
       auditLogStore,
-      consentStore: new CapturingConsentStore()
+      consentStore: new CapturingConsentStore(),
+      intakeStore: new CapturingIntakeStore()
     });
 
     const processedResult = await service.markMessageProcessed("wamid.sanitized-1", {
@@ -514,6 +804,7 @@ describe("persistence service boundary", () => {
 
   it("persists sanitized consent state metadata and events", async () => {
     const consentStore = new CapturingConsentStore();
+    const intakeStore = new CapturingIntakeStore();
     const service = createPersistenceService({
       caseStore: {
         create: async () => {
@@ -525,6 +816,7 @@ describe("persistence service boundary", () => {
       processedMessageStore: new TrackingProcessedMessageStore(),
       auditLogStore: new CapturingAuditLogStore(),
       consentStore,
+      intakeStore,
       now: () => "2026-06-04T12:08:00.000Z"
     });
 
@@ -611,6 +903,224 @@ describe("persistence service boundary", () => {
     });
     expect(consentStore.events).toEqual([eventResult]);
     await expect(service.getConsentState("subject-1")).resolves.toBe("granted");
+  });
+
+  it("persists sanitized intake state, fields, snapshots, and events", async () => {
+    const intakeStore = new CapturingIntakeStore();
+    const service = createPersistenceService({
+      caseStore: {
+        create: async () => {
+          throw new Error("not used");
+        },
+        getById: async () => null,
+        update: async () => null
+      } satisfies CaseStore,
+      processedMessageStore: new TrackingProcessedMessageStore(),
+      auditLogStore: new CapturingAuditLogStore(),
+      consentStore: new CapturingConsentStore(),
+      intakeStore,
+      now: () => "2026-06-04T12:11:00.000Z"
+    });
+
+    await expect(service.getIntakeState("subject-intake-1")).resolves.toBe("not_started");
+
+    const stateResult = await service.setIntakeState("subject-intake-1", "asking_name", {
+      metadata: {
+        source: "test",
+        messageBody: "remove me",
+        transportChatId: "15551234567@c.us",
+        browserPath: "C:\\openwa-session\\profile"
+      }
+    });
+    const fieldResult = await service.setIntakeField("subject-intake-1", "name", "Mario Rossi", {
+      metadata: {
+        source: "test",
+        content: "remove me",
+        phone: "+15551234567",
+        nested: {
+          text: "remove me",
+          ok: true
+        }
+      }
+    });
+    const eventResult = await service.appendIntakeEvent({
+      eventId: "intake-event-1",
+      subjectId: "subject-intake-1",
+      eventType: "intake_field_accepted",
+      state: "asking_name",
+      fieldName: "name",
+      metadata: {
+        body: "remove me",
+        sessionPath: "/tmp/openwa-session/profile",
+        safe: true
+      }
+    });
+
+    expect(stateResult).toEqual({
+      record: {
+        subjectId: "subject-intake-1",
+        state: "asking_name",
+        updatedAt: "2026-06-04T12:11:00.000Z",
+        metadata: {
+          source: "test",
+          transportChatId: "[redacted-phone]",
+          browserPath: "[redacted-path]"
+        }
+      },
+      sanitizedMetadata: {
+        source: "test",
+        transportChatId: "[redacted-phone]",
+        browserPath: "[redacted-path]"
+      }
+    });
+    expect(fieldResult).toEqual({
+      record: {
+        subjectId: "subject-intake-1",
+        fieldName: "name",
+        value: "Mario Rossi",
+        updatedAt: "2026-06-04T12:11:00.000Z",
+        metadata: {
+          source: "test",
+          phone: "[redacted-phone]",
+          nested: {
+            ok: true
+          }
+        }
+      },
+      sanitizedMetadata: {
+        source: "test",
+        phone: "[redacted-phone]",
+        nested: {
+          ok: true
+        }
+      }
+    });
+    expect(eventResult).toEqual({
+      event: {
+        eventId: "intake-event-1",
+        subjectId: "subject-intake-1",
+        eventType: "intake_field_accepted",
+        state: "asking_name",
+        fieldName: "name",
+        occurredAt: "2026-06-04T12:11:00.000Z",
+        metadata: {
+          sessionPath: "[redacted-path]",
+          safe: true
+        }
+      },
+      sanitizedMetadata: {
+        sessionPath: "[redacted-path]",
+        safe: true
+      }
+    });
+    await expect(service.getIntakeState("subject-intake-1")).resolves.toBe("asking_name");
+    await expect(service.getIntakeSnapshot("subject-intake-1")).resolves.toEqual({
+      subjectId: "subject-intake-1",
+      state: "asking_name",
+      updatedAt: "2026-06-04T12:11:00.000Z",
+      fields: {
+        name: "Mario Rossi"
+      }
+    });
+    await expect(
+      service.setIntakeField("subject-intake-1", "unknown" as IntakeFieldName, "nope")
+    ).rejects.toThrow("Unsupported intake field: unknown");
+    expect(intakeStore.events).toEqual([eventResult.event]);
+  });
+
+  it("in-memory intake store tracks state, accepted fields, and events", async () => {
+    const store = new InMemoryIntakeStore();
+
+    await expect(store.getIntakeState("subject-3")).resolves.toBe("not_started");
+    await expect(store.getIntakeSnapshot("subject-3")).resolves.toBeNull();
+    await expect(
+      store.setIntakeState("subject-3", "asking_problem_summary", {
+        updatedAt: "2026-06-04T12:12:00.000Z",
+        metadata: {
+          source: "memory"
+        }
+      })
+    ).resolves.toEqual({
+      subjectId: "subject-3",
+      state: "asking_problem_summary",
+      updatedAt: "2026-06-04T12:12:00.000Z",
+      metadata: {
+        source: "memory"
+      }
+    });
+    await expect(
+      store.setIntakeField("subject-3", "name", "Mario Rossi", {
+        updatedAt: "2026-06-04T12:12:00.000Z"
+      })
+    ).resolves.toEqual({
+      subjectId: "subject-3",
+      fieldName: "name",
+      value: "Mario Rossi",
+      updatedAt: "2026-06-04T12:12:00.000Z"
+    });
+    await expect(
+      store.setIntakeField("subject-3", "problemSummary", "Sintesi breve", {
+        updatedAt: "2026-06-04T12:13:00.000Z"
+      })
+    ).resolves.toEqual({
+      subjectId: "subject-3",
+      fieldName: "problemSummary",
+      value: "Sintesi breve",
+      updatedAt: "2026-06-04T12:13:00.000Z"
+    });
+    await store.appendIntakeEvent({
+      eventId: "intake-event-memory-1",
+      subjectId: "subject-3",
+      eventType: "intake_complete",
+      state: "intake_complete",
+      occurredAt: "2026-06-04T12:14:00.000Z"
+    });
+
+    await expect(store.getIntakeSnapshot("subject-3")).resolves.toEqual({
+      subjectId: "subject-3",
+      state: "asking_problem_summary",
+      updatedAt: "2026-06-04T12:12:00.000Z",
+      fields: {
+        name: "Mario Rossi",
+        problemSummary: "Sintesi breve"
+      }
+    });
+    await expect(
+      store.setIntakeField("subject-3", "unknown" as IntakeFieldName, "bad")
+    ).rejects.toThrow("Unsupported intake field: unknown");
+    expect(store.snapshotStates()).toEqual([
+      {
+        subjectId: "subject-3",
+        state: "asking_problem_summary",
+        updatedAt: "2026-06-04T12:12:00.000Z",
+        metadata: {
+          source: "memory"
+        }
+      }
+    ]);
+    expect(store.snapshotFields()).toEqual([
+      {
+        subjectId: "subject-3",
+        fieldName: "name",
+        value: "Mario Rossi",
+        updatedAt: "2026-06-04T12:12:00.000Z"
+      },
+      {
+        subjectId: "subject-3",
+        fieldName: "problemSummary",
+        value: "Sintesi breve",
+        updatedAt: "2026-06-04T12:13:00.000Z"
+      }
+    ]);
+    expect(store.snapshotEvents()).toEqual([
+      {
+        eventId: "intake-event-memory-1",
+        subjectId: "subject-3",
+        eventType: "intake_complete",
+        state: "intake_complete",
+        occurredAt: "2026-06-04T12:14:00.000Z"
+      }
+    ]);
   });
 
   it("in-memory consent store tracks state and events", async () => {

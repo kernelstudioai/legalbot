@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { runInboundPipeline } from "../../src/app";
-import { InMemoryConsentStore } from "../../src/persistence";
-import { InMemoryClientIntakeStore } from "../../src/runtime/client/intake";
+import { InMemoryConsentStore, InMemoryIntakeStore } from "../../src/persistence";
 import type { OpenWaMessage } from "../../src/transport/openwa/types";
 
 describe("inbound pipeline", () => {
@@ -41,7 +40,7 @@ describe("inbound pipeline", () => {
     };
 
     const consentStore = new InMemoryConsentStore();
-    const intakeStore = new InMemoryClientIntakeStore();
+    const intakeStore = new InMemoryIntakeStore();
     const result = await runInboundPipeline(rawMessage, {
       clientConsentPersistence: consentStore,
       clientIntakePersistence: intakeStore
@@ -50,6 +49,6 @@ describe("inbound pipeline", () => {
     expect(result.runtimeDecision.action).toBe("request_consent");
     expect(result.outputPlan.messages[0]?.body).toContain("Acconsento al trattamento");
     expect(await consentStore.getConsentState("client-456@c.us")).toBe("requested");
-    expect(await intakeStore.getIntakeRecord("client-456@c.us")).toBeNull();
+    expect(await intakeStore.getIntakeSnapshot("client-456@c.us")).toBeNull();
   });
 });

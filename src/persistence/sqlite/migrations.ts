@@ -65,5 +65,43 @@ export const sqliteMigrations: SqliteMigration[] = [
         metadata_json TEXT
       );
     `
+  },
+  {
+    id: "0006_create_intake_states",
+    sql: `
+      CREATE TABLE IF NOT EXISTS intake_states (
+        subject_id TEXT PRIMARY KEY,
+        intake_state TEXT NOT NULL CHECK (intake_state IN ('not_started', 'asking_name', 'asking_problem_summary', 'intake_complete')),
+        updated_at TEXT NOT NULL,
+        metadata_json TEXT
+      );
+    `
+  },
+  {
+    id: "0007_create_intake_fields",
+    sql: `
+      CREATE TABLE IF NOT EXISTS intake_fields (
+        subject_id TEXT NOT NULL,
+        field_name TEXT NOT NULL CHECK (field_name IN ('name', 'problemSummary')),
+        field_value TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        metadata_json TEXT,
+        PRIMARY KEY (subject_id, field_name)
+      );
+    `
+  },
+  {
+    id: "0008_create_intake_events",
+    sql: `
+      CREATE TABLE IF NOT EXISTS intake_events (
+        event_id TEXT PRIMARY KEY,
+        subject_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        intake_state TEXT CHECK (intake_state IN ('not_started', 'asking_name', 'asking_problem_summary', 'intake_complete')),
+        field_name TEXT CHECK (field_name IN ('name', 'problemSummary')),
+        occurred_at TEXT NOT NULL,
+        metadata_json TEXT
+      );
+    `
   }
 ];

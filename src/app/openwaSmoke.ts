@@ -6,7 +6,10 @@ import {
   type PersistenceService,
   type SqlitePersistenceService
 } from "../persistence/index.ts";
-import type { ClientConsentPersistence } from "../runtime/client/clientRuntime.ts";
+import type {
+  ClientConsentPersistence,
+  ClientIntakePersistence
+} from "../runtime/client/clientRuntime.ts";
 import { assertSqliteMigrationsApplied } from "../persistence/sqlite/index.ts";
 import { createOpenWaTechnicalPersistence } from "../runtime/openwa/technicalPersistence.ts";
 import { registerOpenWaListener } from "../transport/openwa/listener.ts";
@@ -46,6 +49,7 @@ export interface StartOpenWaSmokeAppOptions {
   createClient?: (config: OpenWaConfig) => Promise<OpenWaRuntimeClient>;
   persistenceService?: PersistenceService;
   clientConsentPersistence?: ClientConsentPersistence;
+  clientIntakePersistence?: ClientIntakePersistence;
   createSqlitePersistence?: (config: {
     databaseUrl: string;
     cwd?: string;
@@ -79,6 +83,7 @@ export const startOpenWaSmokeApp = async ({
   createClient = createDefaultClient,
   persistenceService,
   clientConsentPersistence,
+  clientIntakePersistence,
   createSqlitePersistence = createSqlitePersistenceService
 }: StartOpenWaSmokeAppOptions = {}): Promise<OpenWaSmokeApp> => {
   const env = loadSmokeRuntimeEnv(envSource);
@@ -156,6 +161,11 @@ export const startOpenWaSmokeApp = async ({
             ...(clientConsentPersistence
               ? {
                   clientConsentPersistence
+                }
+              : {}),
+            ...(clientIntakePersistence
+              ? {
+                  clientIntakePersistence
                 }
               : {})
           })

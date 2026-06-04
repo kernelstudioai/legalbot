@@ -13,7 +13,7 @@ const forbiddenSecretKeys = [
   /browser.*path/i,
   /session.*path/i
 ];
-const phoneKeyPattern = /(?:^|\b)(?:from|to|phone|chatid|chat_id|senderid|sender_id|recipient)(?:\b|$)/i;
+const phoneKeyPattern = /(from|to|phone|chat.?id|sender.?id|recipient)/i;
 const windowsPathPattern = /[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\)*[^\\/:*?"<>|\r\n]*/g;
 const posixPathPattern = /\/(?:Users|home|tmp|var|opt|etc|appdata|openwa-session|sessions)[^\s"]*/gi;
 const e164PhonePattern = /\+\d{8,15}/g;

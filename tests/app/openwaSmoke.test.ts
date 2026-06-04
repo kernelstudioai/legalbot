@@ -51,6 +51,32 @@ const createPersistenceService = (): PersistenceService => ({
     occurredAt: event.occurredAt ?? "2026-06-04T12:00:00.000Z",
     ...(event.metadata ? { metadata: event.metadata } : {})
   })),
+  getIntakeState: vi.fn().mockResolvedValue("not_started"),
+  setIntakeState: vi.fn().mockImplementation(async (subjectId, state, metadata) => ({
+    record: {
+      subjectId,
+      state,
+      updatedAt: metadata?.updatedAt ?? "2026-06-04T12:00:00.000Z"
+    }
+  })),
+  setIntakeField: vi.fn().mockImplementation(async (subjectId, fieldName, value, metadata) => ({
+    record: {
+      subjectId,
+      fieldName,
+      value,
+      updatedAt: metadata?.updatedAt ?? "2026-06-04T12:00:00.000Z"
+    }
+  })),
+  getIntakeSnapshot: vi.fn().mockResolvedValue(null),
+  appendIntakeEvent: vi.fn().mockImplementation(async (event) => ({
+    eventId: event.eventId,
+    subjectId: event.subjectId,
+    eventType: event.eventType,
+    occurredAt: event.occurredAt ?? "2026-06-04T12:00:00.000Z",
+    ...(event.state ? { state: event.state } : {}),
+    ...(event.fieldName ? { fieldName: event.fieldName } : {}),
+    ...(event.metadata ? { metadata: event.metadata } : {})
+  })),
   createCase: vi.fn(),
   getCase: vi.fn(),
   updateCaseStatus: vi.fn()

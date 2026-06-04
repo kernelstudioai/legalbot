@@ -4,7 +4,8 @@ import {
   type ClientConsentPersistence,
   type ClientIntakePersistence
 } from "../../src/runtime/client/clientRuntime";
-import type { ClientIntakeRecord, SetClientIntakeRecordInput } from "../../src/runtime/client/intake";
+import type { ClientIntakeRecord } from "../../src/runtime/client/intake";
+import type { IntakeSnapshot } from "../../src/persistence";
 
 const createEnvelope = (body: string) => ({
   messageId: "wamid.client-1",
@@ -30,14 +31,50 @@ const createConsentPersistence = (
   appendConsentEvent: vi.fn().mockResolvedValue(undefined)
 });
 
+const toSnapshot = (intakeRecord: ClientIntakeRecord | null): IntakeSnapshot | null =>
+  intakeRecord
+    ? {
+        subjectId: intakeRecord.subjectId,
+        state: intakeRecord.state,
+        updatedAt: intakeRecord.updatedAt,
+        fields: {
+          ...(intakeRecord.name ? { name: intakeRecord.name } : {}),
+          ...(intakeRecord.problemSummary
+            ? {
+                problemSummary: intakeRecord.problemSummary
+              }
+            : {})
+        }
+      }
+    : null;
+
 const createIntakePersistence = (
   intakeRecord: ClientIntakeRecord | null = null
 ): ClientIntakePersistence & {
-  getIntakeRecord: ReturnType<typeof vi.fn>;
-  setIntakeRecord: ReturnType<typeof vi.fn>;
+  getIntakeState: ReturnType<typeof vi.fn>;
+  getIntakeSnapshot: ReturnType<typeof vi.fn>;
+  setIntakeState: ReturnType<typeof vi.fn>;
+  setIntakeField: ReturnType<typeof vi.fn>;
+  appendIntakeEvent: ReturnType<typeof vi.fn>;
 } => ({
-  getIntakeRecord: vi.fn().mockResolvedValue(intakeRecord),
-  setIntakeRecord: vi.fn().mockImplementation(async (input: SetClientIntakeRecordInput) => input)
+  getIntakeState: vi.fn().mockResolvedValue(intakeRecord?.state ?? "not_started"),
+  getIntakeSnapshot: vi.fn().mockResolvedValue(toSnapshot(intakeRecord)),
+  setIntakeState: vi.fn().mockImplementation(async (subjectId, state, metadata) => ({
+    record: {
+      subjectId,
+      state,
+      updatedAt: metadata?.updatedAt ?? "2026-06-04T12:00:00.000Z"
+    }
+  })),
+  setIntakeField: vi.fn().mockImplementation(async (subjectId, fieldName, value, metadata) => ({
+    record: {
+      subjectId,
+      fieldName,
+      value,
+      updatedAt: metadata?.updatedAt ?? "2026-06-04T12:00:00.000Z"
+    }
+  })),
+  appendIntakeEvent: vi.fn().mockResolvedValue(undefined)
 });
 
 describe("client runtime wiring", () => {
@@ -101,11 +138,20 @@ describe("client runtime wiring", () => {
         }
       })
     );
-    expect(intakePersistence.setIntakeRecord).toHaveBeenCalledWith({
-      subjectId: "15551234567@c.us",
-      state: "asking_name",
-      updatedAt: expect.any(String)
-    });
+    expect(intakePersistence.setIntakeState).toHaveBeenCalledWith(
+      "15551234567@c.us",
+      "asking_name",
+      expect.objectContaining({
+        updatedAt: expect.any(String),
+        metadata: {
+          channel: "whatsapp",
+          messageId: "wamid.client-1",
+          subjectIdSource: "transport.chatId",
+          runtime: "client"
+        }
+      })
+    );
+    expect(intakePersistence.setIntakeField).not.toHaveBeenCalled();
   });
 
   it("persists denied consent and never starts intake", async () => {
@@ -131,7 +177,8 @@ describe("client runtime wiring", () => {
         eventType: "consent_denied"
       })
     );
-    expect(intakePersistence.setIntakeRecord).not.toHaveBeenCalled();
+    expect(intakePersistence.setIntakeState).not.toHaveBeenCalled();
+    expect(intakePersistence.setIntakeField).not.toHaveBeenCalled();
   });
 
   it("keeps requested consent open on ambiguous replies without granting", async () => {
@@ -147,7 +194,8 @@ describe("client runtime wiring", () => {
     expect(result.runtimeDecision.action).toBe("consent_clarification");
     expect(consentPersistence.setConsentState).not.toHaveBeenCalled();
     expect(consentPersistence.appendConsentEvent).not.toHaveBeenCalled();
-    expect(intakePersistence.setIntakeRecord).not.toHaveBeenCalled();
+    expect(intakePersistence.setIntakeState).not.toHaveBeenCalled();
+    expect(intakePersistence.setIntakeField).not.toHaveBeenCalled();
   });
 
   it("starts intake by asking for the client name when consent is already granted", async () => {
@@ -163,11 +211,14 @@ describe("client runtime wiring", () => {
     expect(result.runtimeDecision.action).toBe("intake_ask_name");
     expect(consentPersistence.setConsentState).not.toHaveBeenCalled();
     expect(consentPersistence.appendConsentEvent).not.toHaveBeenCalled();
-    expect(intakePersistence.setIntakeRecord).toHaveBeenCalledWith({
-      subjectId: "15551234567@c.us",
-      state: "asking_name",
-      updatedAt: expect.any(String)
-    });
+    expect(intakePersistence.setIntakeState).toHaveBeenCalledWith(
+      "15551234567@c.us",
+      "asking_name",
+      expect.objectContaining({
+        updatedAt: expect.any(String)
+      })
+    );
+    expect(intakePersistence.setIntakeField).not.toHaveBeenCalled();
   });
 
   it("returns the safe closed response when consent is already denied", async () => {
@@ -183,7 +234,8 @@ describe("client runtime wiring", () => {
     expect(result.runtimeDecision.action).toBe("consent_denied_close");
     expect(consentPersistence.setConsentState).not.toHaveBeenCalled();
     expect(consentPersistence.appendConsentEvent).not.toHaveBeenCalled();
-    expect(intakePersistence.setIntakeRecord).not.toHaveBeenCalled();
+    expect(intakePersistence.setIntakeState).not.toHaveBeenCalled();
+    expect(intakePersistence.setIntakeField).not.toHaveBeenCalled();
   });
 
   it("accepts a valid name as a structured field and advances to the problem summary", async () => {
@@ -201,12 +253,26 @@ describe("client runtime wiring", () => {
     });
 
     expect(result.runtimeDecision.action).toBe("intake_ask_problem_summary");
-    expect(intakePersistence.setIntakeRecord).toHaveBeenCalledWith({
-      subjectId: "15551234567@c.us",
-      state: "asking_problem_summary",
-      updatedAt: expect.any(String),
-      name: "Mario Rossi"
-    });
+    expect(intakePersistence.setIntakeState).toHaveBeenCalledWith(
+      "15551234567@c.us",
+      "asking_problem_summary",
+      expect.objectContaining({
+        updatedAt: expect.any(String)
+      })
+    );
+    expect(intakePersistence.setIntakeField).toHaveBeenCalledWith(
+      "15551234567@c.us",
+      "name",
+      "Mario Rossi",
+      expect.objectContaining({
+        updatedAt: expect.any(String),
+        metadata: expect.not.objectContaining({
+          body: expect.anything(),
+          text: expect.anything(),
+          content: expect.anything()
+        })
+      })
+    );
   });
 
   it("returns intake_invalid_response for empty or overly long names", async () => {
@@ -230,7 +296,8 @@ describe("client runtime wiring", () => {
 
     expect(emptyResult.runtimeDecision.action).toBe("intake_invalid_response");
     expect(longResult.runtimeDecision.action).toBe("intake_invalid_response");
-    expect(intakePersistence.setIntakeRecord).not.toHaveBeenCalled();
+    expect(intakePersistence.setIntakeState).not.toHaveBeenCalled();
+    expect(intakePersistence.setIntakeField).not.toHaveBeenCalled();
   });
 
   it("accepts a valid problem summary and completes intake without storing the raw inbound body", async () => {
@@ -249,18 +316,25 @@ describe("client runtime wiring", () => {
     });
 
     expect(result.runtimeDecision.action).toBe("intake_complete_ack");
-    expect(intakePersistence.setIntakeRecord).toHaveBeenCalledWith({
-      subjectId: "15551234567@c.us",
-      state: "intake_complete",
-      updatedAt: expect.any(String),
-      name: "Mario Rossi",
-      problemSummary: "Licenziamento improvviso e richiesta di chiarimenti contrattuali"
-    });
-    expect(intakePersistence.setIntakeRecord).not.toHaveBeenCalledWith(
+    expect(intakePersistence.setIntakeState).toHaveBeenCalledWith(
+      "15551234567@c.us",
+      "intake_complete",
       expect.objectContaining({
-        body: expect.anything(),
-        rawBody: expect.anything(),
-        inboundText: expect.anything()
+        updatedAt: expect.any(String)
+      })
+    );
+    expect(intakePersistence.setIntakeField).toHaveBeenCalledWith(
+      "15551234567@c.us",
+      "problemSummary",
+      "Licenziamento improvviso e richiesta di chiarimenti contrattuali",
+      expect.objectContaining({
+        updatedAt: expect.any(String),
+        metadata: expect.not.objectContaining({
+          body: expect.anything(),
+          rawBody: expect.anything(),
+          inboundText: expect.anything(),
+          text: expect.anything()
+        })
       })
     );
   });
@@ -281,6 +355,7 @@ describe("client runtime wiring", () => {
     });
 
     expect(result.runtimeDecision.action).toBe("intake_invalid_response");
-    expect(intakePersistence.setIntakeRecord).not.toHaveBeenCalled();
+    expect(intakePersistence.setIntakeState).not.toHaveBeenCalled();
+    expect(intakePersistence.setIntakeField).not.toHaveBeenCalled();
   });
 });

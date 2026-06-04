@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import type { CanonicalEnvelopeType, RuntimeDecisionType } from "../../contracts/index.ts";
 import type {
   AppendConsentEventInput,
+  AppendIntakeEventInput,
   ConsentState,
+  IntakeFieldName,
+  IntakeSnapshot,
+  IntakeState,
   SetConsentStateMetadata
 } from "../../persistence/index.ts";
 import type { RuntimeContext } from "../shared/runtimeContext.ts";
@@ -25,8 +29,26 @@ export interface ClientConsentPersistence {
 }
 
 export interface ClientIntakePersistence {
-  getIntakeRecord(subjectId: string): Promise<ClientIntakeRecord | null>;
-  setIntakeRecord(input: SetClientIntakeRecordInput): Promise<unknown>;
+  getIntakeState(subjectId: string): Promise<IntakeState>;
+  getIntakeSnapshot(subjectId: string): Promise<IntakeSnapshot | null>;
+  setIntakeState(
+    subjectId: string,
+    state: IntakeState,
+    metadata?: {
+      updatedAt?: string;
+      metadata?: Record<string, unknown>;
+    }
+  ): Promise<unknown>;
+  setIntakeField(
+    subjectId: string,
+    fieldName: IntakeFieldName,
+    value: string,
+    metadata?: {
+      updatedAt?: string;
+      metadata?: Record<string, unknown>;
+    }
+  ): Promise<unknown>;
+  appendIntakeEvent(event: AppendIntakeEventInput): Promise<unknown>;
 }
 
 export interface RunClientRuntimeInput {
@@ -52,6 +74,78 @@ const buildConsentMetadata = (
   subjectIdSource: "transport.chatId",
   runtime: "client"
 });
+
+const buildIntakeMetadata = (
+  envelope: CanonicalEnvelopeType
+): Record<string, unknown> => ({
+  channel: envelope.channel,
+  messageId: envelope.messageId,
+  subjectIdSource: "transport.chatId",
+  runtime: "client"
+});
+
+const toClientIntakeRecord = (snapshot: IntakeSnapshot | null): ClientIntakeRecord | null =>
+  snapshot
+    ? {
+        subjectId: snapshot.subjectId,
+        state: snapshot.state,
+        updatedAt: snapshot.updatedAt,
+        ...(snapshot.fields.name ? { name: snapshot.fields.name } : {}),
+        ...(snapshot.fields.problemSummary
+          ? {
+              problemSummary: snapshot.fields.problemSummary
+            }
+          : {})
+      }
+    : null;
+
+const persistIntakeRecord = async (
+  intakePersistence: ClientIntakePersistence,
+  envelope: CanonicalEnvelopeType,
+  currentRecord: ClientIntakeRecord | null,
+  nextRecord: SetClientIntakeRecordInput
+): Promise<void> => {
+  const metadata = buildIntakeMetadata(envelope);
+  const currentState = currentRecord?.state ?? "not_started";
+
+  if (currentState !== nextRecord.state) {
+    await intakePersistence.setIntakeState(nextRecord.subjectId, nextRecord.state, {
+      ...(nextRecord.updatedAt ? { updatedAt: nextRecord.updatedAt } : {}),
+      metadata
+    });
+    await intakePersistence.appendIntakeEvent({
+      eventId: randomUUID(),
+      subjectId: nextRecord.subjectId,
+      eventType: "intake_state_updated",
+      state: nextRecord.state,
+      ...(nextRecord.updatedAt ? { occurredAt: nextRecord.updatedAt } : {}),
+      metadata
+    });
+  }
+
+  for (const fieldName of ["name", "problemSummary"] as const) {
+    const nextValue = nextRecord[fieldName];
+    const currentValue = currentRecord?.[fieldName];
+
+    if (!nextValue || currentValue === nextValue) {
+      continue;
+    }
+
+    await intakePersistence.setIntakeField(nextRecord.subjectId, fieldName, nextValue, {
+      ...(nextRecord.updatedAt ? { updatedAt: nextRecord.updatedAt } : {}),
+      metadata
+    });
+    await intakePersistence.appendIntakeEvent({
+      eventId: randomUUID(),
+      subjectId: nextRecord.subjectId,
+      eventType: "intake_field_accepted",
+      state: nextRecord.state,
+      fieldName,
+      ...(nextRecord.updatedAt ? { occurredAt: nextRecord.updatedAt } : {}),
+      metadata
+    });
+  }
+};
 
 export const runClientRuntime = async ({
   envelope,
@@ -109,9 +203,10 @@ export const runClientRuntime = async ({
     };
   }
 
-  const intakeRecord = intakePersistence
-    ? await intakePersistence.getIntakeRecord(subjectId)
+  const intakeSnapshot = intakePersistence
+    ? await intakePersistence.getIntakeSnapshot(subjectId)
     : null;
+  const intakeRecord = toClientIntakeRecord(intakeSnapshot);
   const intakeDecision = resolveClientIntakeRuntimeDecision({
     subjectId,
     intakeRecord,
@@ -121,7 +216,7 @@ export const runClientRuntime = async ({
   });
 
   if (intakePersistence && intakeDecision.nextRecord) {
-    await intakePersistence.setIntakeRecord(intakeDecision.nextRecord);
+    await persistIntakeRecord(intakePersistence, envelope, intakeRecord, intakeDecision.nextRecord);
   }
 
   return {

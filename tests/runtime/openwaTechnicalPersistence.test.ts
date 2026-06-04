@@ -69,6 +69,35 @@ describe("openwa technical persistence", () => {
         occurredAt: event.occurredAt ?? "2026-06-04T12:00:00.000Z",
         ...(event.metadata ? { metadata: event.metadata } : {})
       }),
+      getIntakeState: async () => "not_started",
+      setIntakeState: async (subjectId, state, metadata) => ({
+        record: {
+          subjectId,
+          state,
+          updatedAt: metadata?.updatedAt ?? "2026-06-04T12:00:00.000Z"
+        }
+      }),
+      setIntakeField: async (subjectId, fieldName, value, metadata) => ({
+        record: {
+          subjectId,
+          fieldName,
+          value,
+          updatedAt: metadata?.updatedAt ?? "2026-06-04T12:00:00.000Z"
+        }
+      }),
+      getIntakeSnapshot: async () => null,
+      appendIntakeEvent: async (event) => ({
+        event: {
+          eventId: event.eventId,
+          subjectId: event.subjectId,
+          eventType: event.eventType,
+          occurredAt: event.occurredAt ?? "2026-06-04T12:00:00.000Z",
+          ...(event.state ? { state: event.state } : {}),
+          ...(event.fieldName ? { fieldName: event.fieldName } : {}),
+          ...(event.metadata ? { metadata: event.metadata } : {})
+        },
+        ...(event.metadata ? { sanitizedMetadata: event.metadata } : {})
+      }),
       createCase: async () => {
         throw new Error("not used");
       },
@@ -163,7 +192,10 @@ describe("openwa technical persistence", () => {
         "0002_create_processed_messages",
         "0003_create_audit_events",
         "0004_create_consent_states",
-        "0005_create_consent_events"
+        "0005_create_consent_events",
+        "0006_create_intake_states",
+        "0007_create_intake_fields",
+        "0008_create_intake_events"
       ],
       databasePath: path.join(tempDir, "data", "legalbot.sqlite")
     });

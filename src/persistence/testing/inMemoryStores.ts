@@ -8,10 +8,19 @@ import type {
   ConsentStateRecord,
   ConsentStore,
   CreateCaseInput,
+  IntakeEventRecord,
+  IntakeFieldName,
+  IntakeFieldRecord,
+  IntakeSnapshot,
+  IntakeState,
+  IntakeStateRecord,
+  IntakeStore,
   MarkProcessedMessageResult,
   ProcessedMessageRecord,
   ProcessedMessageStore,
   SetConsentStateOptions,
+  SetIntakeFieldOptions,
+  SetIntakeStateOptions,
   UpdateCaseInput
 } from "../index.ts";
 
@@ -120,5 +129,93 @@ export class InMemoryConsentStore implements ConsentStore {
 
   snapshotEvents(): ConsentEventRecord[] {
     return [...this.consentEvents];
+  }
+}
+
+const acceptedIntakeFields = new Set<IntakeFieldName>(["name", "problemSummary"]);
+
+export class InMemoryIntakeStore implements IntakeStore {
+  private readonly intakeStates = new Map<string, IntakeStateRecord>();
+  private readonly intakeFields = new Map<string, Map<IntakeFieldName, IntakeFieldRecord>>();
+  private readonly intakeEvents: IntakeEventRecord[] = [];
+
+  async getIntakeState(subjectId: string): Promise<IntakeState> {
+    return this.intakeStates.get(subjectId)?.state ?? "not_started";
+  }
+
+  async setIntakeState(
+    subjectId: string,
+    state: IntakeState,
+    options: SetIntakeStateOptions = {}
+  ): Promise<IntakeStateRecord> {
+    const record: IntakeStateRecord = {
+      subjectId,
+      state,
+      updatedAt: options.updatedAt ?? new Date().toISOString(),
+      ...(options.metadata ? { metadata: options.metadata } : {})
+    };
+
+    this.intakeStates.set(subjectId, record);
+    return record;
+  }
+
+  async setIntakeField(
+    subjectId: string,
+    fieldName: IntakeFieldName,
+    value: string,
+    options: SetIntakeFieldOptions = {}
+  ): Promise<IntakeFieldRecord> {
+    if (!acceptedIntakeFields.has(fieldName)) {
+      throw new Error(`Unsupported intake field: ${fieldName}`);
+    }
+
+    const record: IntakeFieldRecord = {
+      subjectId,
+      fieldName,
+      value,
+      updatedAt: options.updatedAt ?? new Date().toISOString(),
+      ...(options.metadata ? { metadata: options.metadata } : {})
+    };
+
+    const subjectFields = this.intakeFields.get(subjectId) ?? new Map<IntakeFieldName, IntakeFieldRecord>();
+    subjectFields.set(fieldName, record);
+    this.intakeFields.set(subjectId, subjectFields);
+    return record;
+  }
+
+  async getIntakeSnapshot(subjectId: string): Promise<IntakeSnapshot | null> {
+    const stateRecord = this.intakeStates.get(subjectId);
+    const fieldRecords = this.intakeFields.get(subjectId);
+
+    if (!stateRecord && !fieldRecords) {
+      return null;
+    }
+
+    return {
+      subjectId,
+      state: stateRecord?.state ?? "not_started",
+      updatedAt: stateRecord?.updatedAt ?? new Date().toISOString(),
+      fields: fieldRecords
+        ? Object.fromEntries(
+            [...fieldRecords.entries()].map(([fieldName, record]) => [fieldName, record.value])
+          )
+        : {}
+    };
+  }
+
+  async appendIntakeEvent(event: IntakeEventRecord): Promise<void> {
+    this.intakeEvents.push(event);
+  }
+
+  snapshotStates(): IntakeStateRecord[] {
+    return [...this.intakeStates.values()];
+  }
+
+  snapshotFields(): IntakeFieldRecord[] {
+    return [...this.intakeFields.values()].flatMap((fields) => [...fields.values()]);
+  }
+
+  snapshotEvents(): IntakeEventRecord[] {
+    return [...this.intakeEvents];
   }
 }
