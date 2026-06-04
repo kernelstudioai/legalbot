@@ -17,4 +17,9 @@ export type {
   OpenWaLivenessCheckMeta,
   OpenWaRuntimeClient
 } from "./types.ts";
-export type { OpenWaSupervisor, OpenWaSupervisorHealth, OpenWaSupervisorState } from "./supervisor.ts";
+export type {
+  OpenWaRecoveryMode,
+  OpenWaSupervisor,
+  OpenWaSupervisorHealth,
+  OpenWaSupervisorState
+} from "./supervisor.ts";

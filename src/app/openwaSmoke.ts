@@ -68,6 +68,9 @@ export const startOpenWaSmokeApp = async ({
     session_id: startupMeta.session_id,
     openwa_liveness_interval_seconds: env.OPENWA_LIVENESS_INTERVAL_SECONDS,
     openwa_liveness_failure_threshold: env.OPENWA_LIVENESS_FAILURE_THRESHOLD,
+    openwa_recovery_mode: env.OPENWA_RECOVERY_MODE,
+    openwa_recovery_max_attempts: env.OPENWA_RECOVERY_MAX_ATTEMPTS,
+    openwa_recovery_retry_delay_seconds: env.OPENWA_RECOVERY_RETRY_DELAY_SECONDS,
     openwa_startup_max_attempts: env.OPENWA_STARTUP_MAX_ATTEMPTS,
     openwa_startup_retry_delay_seconds: env.OPENWA_STARTUP_RETRY_DELAY_SECONDS
   });
@@ -77,6 +80,9 @@ export const startOpenWaSmokeApp = async ({
     ...startupMeta,
     openwa_liveness_interval_seconds: env.OPENWA_LIVENESS_INTERVAL_SECONDS,
     openwa_liveness_failure_threshold: env.OPENWA_LIVENESS_FAILURE_THRESHOLD,
+    openwa_recovery_mode: env.OPENWA_RECOVERY_MODE,
+    openwa_recovery_max_attempts: env.OPENWA_RECOVERY_MAX_ATTEMPTS,
+    openwa_recovery_retry_delay_seconds: env.OPENWA_RECOVERY_RETRY_DELAY_SECONDS,
     openwa_startup_max_attempts: env.OPENWA_STARTUP_MAX_ATTEMPTS,
     openwa_startup_retry_delay_seconds: env.OPENWA_STARTUP_RETRY_DELAY_SECONDS
   });
@@ -88,7 +94,10 @@ export const startOpenWaSmokeApp = async ({
     startupMaxAttempts: env.OPENWA_STARTUP_MAX_ATTEMPTS,
     startupRetryDelaySeconds: env.OPENWA_STARTUP_RETRY_DELAY_SECONDS,
     livenessIntervalSeconds: env.OPENWA_LIVENESS_INTERVAL_SECONDS,
-    livenessFailureThreshold: env.OPENWA_LIVENESS_FAILURE_THRESHOLD
+    livenessFailureThreshold: env.OPENWA_LIVENESS_FAILURE_THRESHOLD,
+    recoveryMode: env.OPENWA_RECOVERY_MODE,
+    recoveryMaxAttempts: env.OPENWA_RECOVERY_MAX_ATTEMPTS,
+    recoveryRetryDelaySeconds: env.OPENWA_RECOVERY_RETRY_DELAY_SECONDS
   });
   const client = await supervisor.start();
 

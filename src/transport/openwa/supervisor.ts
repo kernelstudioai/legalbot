@@ -12,6 +12,8 @@ export type OpenWaSupervisorState =
   | "shutting_down"
   | "stopped";
 
+export type OpenWaRecoveryMode = "manual" | "restart_client";
+
 export interface OpenWaSupervisorHealth {
   state: OpenWaSupervisorState;
   ready: boolean;
@@ -27,8 +29,16 @@ export interface OpenWaSupervisorHealth {
   livenessIntervalSeconds: number;
   livenessFailureThreshold: number;
   livenessFailureCount: number;
+  recoveryMode: OpenWaRecoveryMode;
+  recoveryAttempt: number;
+  recoveryMaxAttempts: number;
+  recoveryInProgress: boolean;
+  recoveryRetryDelaySeconds: number;
   lastLivenessOkAt?: string;
   lastLivenessFailureAt?: string;
+  lastRecoveryStartedAt?: string;
+  lastRecoverySucceededAt?: string;
+  lastRecoveryFailedAt?: string;
   lastError?: string;
 }
 
@@ -46,6 +56,9 @@ export interface OpenWaSupervisorDependencies {
   startupRetryDelaySeconds: number;
   livenessIntervalSeconds: number;
   livenessFailureThreshold: number;
+  recoveryMode?: OpenWaRecoveryMode;
+  recoveryMaxAttempts?: number;
+  recoveryRetryDelaySeconds?: number;
   createDispatcher?: (client: Pick<OpenWaRuntimeClient, "sendText">) => OpenWaDispatcher;
   createLivenessCheck?: (client: OpenWaRuntimeClient) => OpenWaLivenessCheck;
   registerListener?: (
@@ -53,11 +66,14 @@ export interface OpenWaSupervisorDependencies {
     dependencies: {
       dispatcher: OpenWaDispatcher;
       logger: Logger;
+      processedMessageIds?: Set<string>;
     }
   ) => Promise<unknown>;
 }
 
 const STOPPED_DURING_STARTUP_ERROR = "openwa_startup_stopped";
+const DEFAULT_RECOVERY_MODE: OpenWaRecoveryMode = "manual";
+const DEFAULT_RECOVERY_RETRY_DELAY_SECONDS = 10;
 
 const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : "unknown_error";
@@ -70,11 +86,15 @@ export const createOpenWaSupervisor = ({
   startupRetryDelaySeconds,
   livenessIntervalSeconds,
   livenessFailureThreshold,
+  recoveryMode = DEFAULT_RECOVERY_MODE,
+  recoveryMaxAttempts = recoveryMode === "restart_client" ? 1 : 0,
+  recoveryRetryDelaySeconds = DEFAULT_RECOVERY_RETRY_DELAY_SECONDS,
   createDispatcher = createOpenWaDispatcher,
   createLivenessCheck = (client) => client.checkLiveness ?? createOpenWaLivenessCheck({}),
   registerListener = registerOpenWaListener
 }: OpenWaSupervisorDependencies): OpenWaSupervisor => {
   const livenessEnabled = livenessIntervalSeconds > 0 && livenessFailureThreshold > 0;
+  const processedMessageIds = new Set<string>();
   let state: OpenWaSupervisorState = "starting";
   let startupAttempts = 0;
   let shutdownRequested = false;
@@ -90,6 +110,15 @@ export const createOpenWaSupervisor = ({
   let livenessFailureCount = 0;
   let lastLivenessOkAt: string | undefined;
   let lastLivenessFailureAt: string | undefined;
+  let recoveryTimer: NodeJS.Timeout | undefined;
+  let resolveRecoveryDelay: (() => void) | undefined;
+  let recoveryAttempt = 0;
+  let recoveryInProgress = false;
+  let recoveryScheduled = false;
+  let recoveryExhausted = false;
+  let lastRecoveryStartedAt: string | undefined;
+  let lastRecoverySucceededAt: string | undefined;
+  let lastRecoveryFailedAt: string | undefined;
 
   const logStateChange = (
     previousState: OpenWaSupervisorState,
@@ -135,6 +164,21 @@ export const createOpenWaSupervisor = ({
     livenessTimer = undefined;
   };
 
+  const clearRecoveryDelay = () => {
+    recoveryScheduled = false;
+
+    if (recoveryTimer) {
+      clearTimeout(recoveryTimer);
+      recoveryTimer = undefined;
+    }
+
+    if (resolveRecoveryDelay) {
+      const resolve = resolveRecoveryDelay;
+      resolveRecoveryDelay = undefined;
+      resolve();
+    }
+  };
+
   const waitForRetryDelay = async (): Promise<void> =>
     new Promise((resolve) => {
       resolveRetryDelay = () => {
@@ -148,6 +192,19 @@ export const createOpenWaSupervisor = ({
       }, startupRetryDelaySeconds * 1000);
     });
 
+  const waitForRecoveryDelay = async (): Promise<void> =>
+    new Promise((resolve) => {
+      resolveRecoveryDelay = () => {
+        resolveRecoveryDelay = undefined;
+        resolve();
+      };
+
+      recoveryTimer = setTimeout(() => {
+        recoveryTimer = undefined;
+        resolveRecoveryDelay?.();
+      }, recoveryRetryDelaySeconds * 1000);
+    });
+
   const disposeClient = async (
     client: OpenWaRuntimeClient | undefined,
     reason: string
@@ -157,6 +214,13 @@ export const createOpenWaSupervisor = ({
     }
 
     await client.kill(reason);
+  };
+
+  const resetRecoveryCycle = () => {
+    clearRecoveryDelay();
+    recoveryAttempt = 0;
+    recoveryInProgress = false;
+    recoveryExhausted = false;
   };
 
   const getHealth = (): OpenWaSupervisorHealth => ({
@@ -174,8 +238,16 @@ export const createOpenWaSupervisor = ({
     livenessIntervalSeconds,
     livenessFailureThreshold,
     livenessFailureCount,
+    recoveryMode,
+    recoveryAttempt,
+    recoveryMaxAttempts,
+    recoveryInProgress,
+    recoveryRetryDelaySeconds,
     ...(lastLivenessOkAt ? { lastLivenessOkAt } : {}),
     ...(lastLivenessFailureAt ? { lastLivenessFailureAt } : {}),
+    ...(lastRecoveryStartedAt ? { lastRecoveryStartedAt } : {}),
+    ...(lastRecoverySucceededAt ? { lastRecoverySucceededAt } : {}),
+    ...(lastRecoveryFailedAt ? { lastRecoveryFailedAt } : {}),
     ...(lastError ? { lastError } : {})
   });
 
@@ -202,6 +274,163 @@ export const createOpenWaSupervisor = ({
     }, livenessIntervalSeconds * 1000);
   };
 
+  const startLivenessMonitoring = (client: OpenWaRuntimeClient): void => {
+    clearLivenessTimer();
+    livenessCheck = createLivenessCheck(client);
+    livenessFailureCount = 0;
+    lastLivenessOkAt = undefined;
+    lastLivenessFailureAt = undefined;
+    scheduleNextLivenessCheck();
+  };
+
+  const activateClient = async (client: OpenWaRuntimeClient): Promise<void> => {
+    const dispatcher = createDispatcher(client);
+    await registerListener(client, {
+      dispatcher,
+      logger,
+      processedMessageIds
+    });
+    await assertNotShuttingDown(client);
+
+    activeClient = client;
+    listenerRegisteredForActiveClient = true;
+    lastError = undefined;
+    startLivenessMonitoring(client);
+  };
+
+  const markRecoveryExhausted = () => {
+    if (recoveryExhausted || recoveryMode !== "restart_client") {
+      return;
+    }
+
+    recoveryExhausted = true;
+    logger.warn("openwa_recovery_exhausted", {
+      recovery_attempt: recoveryAttempt,
+      recovery_max_attempts: recoveryMaxAttempts,
+      recovery_retry_delay_seconds: recoveryRetryDelaySeconds,
+      state
+    });
+  };
+
+  const runRecovery = async (): Promise<void> => {
+    if (
+      shutdownRequested ||
+      recoveryMode !== "restart_client" ||
+      recoveryInProgress ||
+      recoveryAttempt >= recoveryMaxAttempts ||
+      state !== "degraded"
+    ) {
+      if (!shutdownRequested && recoveryMode === "restart_client" && recoveryAttempt >= recoveryMaxAttempts) {
+        markRecoveryExhausted();
+      }
+
+      return;
+    }
+
+    recoveryScheduled = false;
+    recoveryInProgress = true;
+    recoveryAttempt += 1;
+    lastRecoveryStartedAt = new Date().toISOString();
+
+    logger.info("openwa_recovery_starting", {
+      recovery_attempt: recoveryAttempt,
+      recovery_max_attempts: recoveryMaxAttempts,
+      recovery_retry_delay_seconds: recoveryRetryDelaySeconds,
+      last_recovery_started_at: lastRecoveryStartedAt
+    });
+
+    const clientToReplace = activeClient;
+
+    try {
+      clearLivenessTimer();
+      livenessCheck = undefined;
+      await disposeClient(clientToReplace, "openwa_recovery_restart_client");
+      activeClient = undefined;
+      listenerRegisteredForActiveClient = false;
+
+      const nextClient = await createClient(config);
+      await assertNotShuttingDown(nextClient);
+      await activateClient(nextClient);
+
+      setState("ready", {
+        reason: "recovery_succeeded",
+        recovery_attempt: recoveryAttempt,
+        recovery_max_attempts: recoveryMaxAttempts
+      });
+
+      lastRecoverySucceededAt = new Date().toISOString();
+      lastError = undefined;
+      recoveryExhausted = false;
+
+      logger.info("openwa_recovery_succeeded", {
+        recovery_attempt: recoveryAttempt,
+        recovery_max_attempts: recoveryMaxAttempts,
+        last_recovery_started_at: lastRecoveryStartedAt,
+        last_recovery_succeeded_at: lastRecoverySucceededAt
+      });
+    } catch (error) {
+      const errorMessage = toErrorMessage(error);
+      lastError = errorMessage;
+      lastRecoveryFailedAt = new Date().toISOString();
+      activeClient = undefined;
+      listenerRegisteredForActiveClient = false;
+      livenessCheck = undefined;
+
+      logger.warn("openwa_recovery_attempt_failed", {
+        recovery_attempt: recoveryAttempt,
+        recovery_max_attempts: recoveryMaxAttempts,
+        recovery_retry_delay_seconds: recoveryRetryDelaySeconds,
+        last_recovery_started_at: lastRecoveryStartedAt,
+        last_recovery_failed_at: lastRecoveryFailedAt,
+        error: errorMessage
+      });
+
+      if (recoveryAttempt >= recoveryMaxAttempts) {
+        markRecoveryExhausted();
+      } else {
+        void scheduleRecovery();
+      }
+    } finally {
+      recoveryInProgress = false;
+    }
+  };
+
+  const scheduleRecovery = async (): Promise<void> => {
+    if (shutdownRequested || state !== "degraded") {
+      return;
+    }
+
+    if (recoveryMode === "manual") {
+      logger.warn("openwa_recovery_required", {
+        recovery_mode: recoveryMode,
+        recovery_attempt: recoveryAttempt,
+        recovery_max_attempts: recoveryMaxAttempts,
+        recovery_retry_delay_seconds: recoveryRetryDelaySeconds,
+        last_liveness_failure_at: lastLivenessFailureAt,
+        error: lastError
+      });
+      return;
+    }
+
+    if (recoveryInProgress || recoveryScheduled) {
+      return;
+    }
+
+    if (recoveryAttempt >= recoveryMaxAttempts) {
+      markRecoveryExhausted();
+      return;
+    }
+
+    recoveryScheduled = true;
+    await waitForRecoveryDelay();
+
+    if (!recoveryScheduled || shutdownRequested || state !== "degraded") {
+      return;
+    }
+
+    void runRecovery();
+  };
+
   const runLivenessCheck = async (): Promise<void> => {
     if (!livenessEnabled || shutdownRequested || activeClient === undefined || livenessCheck === undefined) {
       return;
@@ -226,6 +455,8 @@ export const createOpenWaSupervisor = ({
       });
 
       if (state === "degraded" && activeClient !== undefined) {
+        clearRecoveryDelay();
+        recoveryInProgress = false;
         setState("ready", {
           reason: "liveness_recovered"
         });
@@ -252,6 +483,7 @@ export const createOpenWaSupervisor = ({
       });
 
       if (livenessFailureCount >= livenessFailureThreshold && state === "ready") {
+        resetRecoveryCycle();
         setState("degraded", {
           reason: "liveness_threshold_reached",
           liveness_failure_count: livenessFailureCount,
@@ -263,19 +495,11 @@ export const createOpenWaSupervisor = ({
           liveness_failure_threshold: livenessFailureThreshold,
           last_liveness_failure_at: lastLivenessFailureAt
         });
+        void scheduleRecovery();
       }
     } finally {
       scheduleNextLivenessCheck();
     }
-  };
-
-  const startLivenessMonitoring = (client: OpenWaRuntimeClient): void => {
-    clearLivenessTimer();
-    livenessCheck = createLivenessCheck(client);
-    livenessFailureCount = 0;
-    lastLivenessOkAt = undefined;
-    lastLivenessFailureAt = undefined;
-    scheduleNextLivenessCheck();
   };
 
   const start = async (): Promise<OpenWaRuntimeClient> => {
@@ -294,17 +518,7 @@ export const createOpenWaSupervisor = ({
         try {
           candidateClient = await createClient(config);
           await assertNotShuttingDown(candidateClient);
-
-          const dispatcher = createDispatcher(candidateClient);
-          await registerListener(candidateClient, {
-            dispatcher,
-            logger
-          });
-          await assertNotShuttingDown(candidateClient);
-
-          activeClient = candidateClient;
-          listenerRegisteredForActiveClient = true;
-          lastError = undefined;
+          await activateClient(candidateClient);
 
           setState("ready", {
             startup_attempt: startupAttempts,
@@ -314,7 +528,6 @@ export const createOpenWaSupervisor = ({
             startup_attempt: startupAttempts,
             startup_max_attempts: startupMaxAttempts
           });
-          startLivenessMonitoring(candidateClient);
 
           return candidateClient;
         } catch (error) {
@@ -372,6 +585,7 @@ export const createOpenWaSupervisor = ({
     shutdownRequested = true;
     clearRetryDelay();
     clearLivenessTimer();
+    clearRecoveryDelay();
     setState("shutting_down", { reason });
 
     stopPromise = (async () => {
@@ -381,6 +595,8 @@ export const createOpenWaSupervisor = ({
         await disposeClient(activeClient, reason);
         activeClient = undefined;
         listenerRegisteredForActiveClient = false;
+        livenessCheck = undefined;
+        recoveryInProgress = false;
         setState("stopped", { reason });
         logger.info("openwa_supervisor_stopped", {
           reason,
@@ -390,6 +606,7 @@ export const createOpenWaSupervisor = ({
       } finally {
         clearRetryDelay();
         clearLivenessTimer();
+        clearRecoveryDelay();
       }
     })();
 

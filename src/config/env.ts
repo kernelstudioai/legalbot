@@ -26,6 +26,11 @@ const RetryDelaySecondsSchema = z.preprocess(
   z.coerce.number().int().min(0)
 );
 
+const RecoveryRetryDelaySecondsSchema = z.preprocess(
+  (value) => (value === undefined ? "10" : value),
+  z.coerce.number().int().min(0)
+);
+
 const StartupMaxAttemptsSchema = z.preprocess(
   (value) => (value === undefined ? "1" : value),
   z.coerce.number().int().min(1)
@@ -39,6 +44,26 @@ const LivenessIntervalSecondsSchema = z.preprocess(
 const LivenessFailureThresholdSchema = z.preprocess(
   (value) => (value === undefined ? "3" : value),
   z.coerce.number().int().min(1)
+);
+
+const RecoveryModeSchema = z.preprocess(
+  (value) => (value === undefined ? "manual" : value),
+  z.enum(["manual", "restart_client"])
+);
+
+const OptionalRecoveryMaxAttemptsSchema = z.preprocess(
+  (value) => {
+    if (value === undefined) {
+      return undefined;
+    }
+
+    if (typeof value === "string" && value.trim() === "") {
+      return undefined;
+    }
+
+    return value;
+  },
+  z.coerce.number().int().min(0).optional()
 );
 
 const EnvSchema = z.object({
@@ -62,8 +87,16 @@ export const SmokeRuntimeEnvSchema = EnvSchema.omit({
   OPENWA_STARTUP_MAX_ATTEMPTS: StartupMaxAttemptsSchema,
   OPENWA_STARTUP_RETRY_DELAY_SECONDS: RetryDelaySecondsSchema,
   OPENWA_LIVENESS_INTERVAL_SECONDS: LivenessIntervalSecondsSchema,
-  OPENWA_LIVENESS_FAILURE_THRESHOLD: LivenessFailureThresholdSchema
-});
+  OPENWA_LIVENESS_FAILURE_THRESHOLD: LivenessFailureThresholdSchema,
+  OPENWA_RECOVERY_MODE: RecoveryModeSchema,
+  OPENWA_RECOVERY_MAX_ATTEMPTS: OptionalRecoveryMaxAttemptsSchema,
+  OPENWA_RECOVERY_RETRY_DELAY_SECONDS: RecoveryRetryDelaySecondsSchema
+}).transform((env) => ({
+  ...env,
+  OPENWA_RECOVERY_MAX_ATTEMPTS:
+    env.OPENWA_RECOVERY_MAX_ATTEMPTS ??
+    (env.OPENWA_RECOVERY_MODE === "restart_client" ? 1 : 0)
+}));
 
 export type SmokeRuntimeEnv = z.infer<typeof SmokeRuntimeEnvSchema>;
 

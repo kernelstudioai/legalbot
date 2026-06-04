@@ -36,6 +36,9 @@ describe("openwa smoke startup", () => {
         OPENWA_STARTUP_RETRY_DELAY_SECONDS: "9",
         OPENWA_LIVENESS_INTERVAL_SECONDS: "45",
         OPENWA_LIVENESS_FAILURE_THRESHOLD: "4",
+        OPENWA_RECOVERY_MODE: "restart_client",
+        OPENWA_RECOVERY_MAX_ATTEMPTS: "2",
+        OPENWA_RECOVERY_RETRY_DELAY_SECONDS: "11",
         LAWYER_PHONE_E164: "+15551234567"
       },
       logger,
@@ -62,6 +65,9 @@ describe("openwa smoke startup", () => {
       session_id: "legalbot-smoke",
       openwa_liveness_interval_seconds: 45,
       openwa_liveness_failure_threshold: 4,
+      openwa_recovery_mode: "restart_client",
+      openwa_recovery_max_attempts: 2,
+      openwa_recovery_retry_delay_seconds: 11,
       openwa_startup_max_attempts: 2,
       openwa_startup_retry_delay_seconds: 9
     });
@@ -78,6 +84,9 @@ describe("openwa smoke startup", () => {
         openwa_auth_timeout_seconds: 180,
         openwa_liveness_interval_seconds: 45,
         openwa_liveness_failure_threshold: 4,
+        openwa_recovery_mode: "restart_client",
+        openwa_recovery_max_attempts: 2,
+        openwa_recovery_retry_delay_seconds: 11,
         openwa_startup_max_attempts: 2,
         openwa_startup_retry_delay_seconds: 9
       })
@@ -111,7 +120,12 @@ describe("openwa smoke startup", () => {
       livenessEnabled: true,
       livenessIntervalSeconds: 45,
       livenessFailureThreshold: 4,
-      livenessFailureCount: 0
+      livenessFailureCount: 0,
+      recoveryMode: "restart_client",
+      recoveryAttempt: 0,
+      recoveryMaxAttempts: 2,
+      recoveryInProgress: false,
+      recoveryRetryDelaySeconds: 11
     });
 
     await app.stop("test_shutdown");
@@ -165,6 +179,7 @@ describe("openwa smoke startup", () => {
         OPENWA_HEADLESS: "false",
         OPENWA_LIVENESS_INTERVAL_SECONDS: "30",
         OPENWA_LIVENESS_FAILURE_THRESHOLD: "3",
+        OPENWA_RECOVERY_MODE: "manual",
         LAWYER_PHONE_E164: "+15551234567"
       },
       logger,
