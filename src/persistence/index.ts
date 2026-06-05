@@ -1,4 +1,7 @@
 export type { AuditEventRecord, AuditLogStore } from "./auditLogStore.ts";
+export {
+  CaseDraftUniquenessError
+} from "./caseStore.ts";
 export type { CaseRecord, CaseStatus, CaseStore, CreateCaseInput, UpdateCaseInput } from "./caseStore.ts";
 export type {
   AppendConsentEventInput,

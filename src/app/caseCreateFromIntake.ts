@@ -9,6 +9,7 @@ import {
 import { loadEnv } from "../config/env.ts";
 import { consoleLogger, type Logger } from "../logging/logger.ts";
 import {
+  CaseDraftUniquenessError,
   createSqlitePersistenceService,
   type SqlitePersistenceService
 } from "../persistence/index.ts";
@@ -212,7 +213,9 @@ export const runCaseCreateFromIntakeCommand = async ({
     };
   } catch (error) {
     logger.error("case_create_from_intake_failed", {
-      ...(error instanceof CaseCreationPreconditionError ? { code: error.code } : {}),
+      ...(error instanceof CaseCreationPreconditionError || error instanceof CaseDraftUniquenessError
+        ? { code: error.code }
+        : {}),
       error: toErrorMessage(error)
     });
 

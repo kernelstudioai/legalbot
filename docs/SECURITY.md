@@ -16,6 +16,7 @@
 - M18 exposes only a manual operator command for that same boundary. It must require an already migrated SQLite database, must emit only sanitized result fields (`caseId`, `status`, `createdAt`), and must not print message bodies, transcripts, secrets, or database dumps.
 - M19 makes repeated manual case-creation attempts idempotent by `subjectId` plus existing `draft` case. An idempotent hit may append only sanitized structured metadata, must not persist raw body or transcript content, and still must not enable any automatic live OpenWA case creation.
 - M20 adds schema-level enforcement for the same manual-only boundary. The SQLite migration may remediate duplicate historical `draft` rows only by changing later duplicates to `duplicate_archived`; it must not dump table contents, persist transcripts, or enable automatic live OpenWA case creation.
+- M21 adds sanitized operator hardening for that same boundary. SQLite duplicate-draft violations must map to a safe application error, and `npm run case:doctor` must report only migration and case-count aggregates plus remediation guidance, never SQL text, database paths, raw rows, message bodies, transcripts, or secrets.
 - Consent persistence uses a generic `subjectId` string and does not require phone-number semantics.
 - Live OpenWA transport stays transport-only even though the application layer can now inject consent and intake persistence into the client runtime.
 
@@ -31,8 +32,10 @@
 - Intake persistence may store only accepted `name` and `problemSummary` values plus sanitized metadata. It must reject unknown field names, strip `messageBody`, `body`, `content`, and `text`, and redact full phone numbers, tokens, and browser/session/QR paths.
 - The case-creation boundary must stay outside `src/transport/openwa`. It must use only accepted structured intake fields, must append sanitized audit metadata, and must not persist raw message bodies, transcripts, rejected values, or full phone-number metadata.
 - The manual case-creation command must stay outside `src/transport/openwa`, must remain idempotent for repeated operator runs on the same subject, and must not be wired into listener callbacks, intake completion, or any automatic OpenWA runtime behavior.
+- The case-doctor command must stay outside `src/transport/openwa`, must require previously applied migrations, and must inspect only aggregate case consistency counts plus index presence.
 - The SQLite cases-table hardening migration may copy forward only minimal case fields and must drop legacy transcript/body columns instead of preserving them under new names.
 - The SQLite draft-case uniqueness migration must keep only the earliest `draft` row per `subjectId`, archive later duplicates without deleting rows, and allow non-`draft` history for the same subject.
+- Raw SQLite uniqueness messages must not leak through the application boundary for duplicate `draft` cases.
 - Live OpenWA listener and client-intake runtime code must not call case creation automatically in M16 or M17.
 - Rejected intake replies and ambiguous consent replies must not be persisted.
 - The `subjectId` for consent state is the canonical sender/chat id. Any stored metadata must avoid restating the full phone number and must remain sanitized through the persistence boundary.
@@ -40,4 +43,4 @@
 ## Current Gaps
 
 - Authentication, encryption at rest, and retention policies are not implemented in this phase.
-- Transcript persistence and legal-advice generation remain out of scope. Case creation now exists only as an explicit tested application boundary plus a manual operator command with transactional persistence support, an idempotency guard, and a SQLite uniqueness constraint, and it is still not wired into the live OpenWA runtime.
+- Transcript persistence and legal-advice generation remain out of scope. Case creation still exists only as an explicit tested application boundary plus operator commands with transactional persistence support, an idempotency guard, a SQLite uniqueness constraint, and a sanitized doctor report, and it is still not wired into the live OpenWA runtime.

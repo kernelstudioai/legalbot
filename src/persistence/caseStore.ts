@@ -1,5 +1,14 @@
 export type CaseStatus = "draft" | "duplicate_archived" | "review_pending" | string;
 
+export class CaseDraftUniquenessError extends Error {
+  readonly code = "draft_case_already_exists";
+
+  constructor(message: string = "A draft case already exists for this subject.") {
+    super(message);
+    this.name = "CaseDraftUniquenessError";
+  }
+}
+
 export interface CaseRecord {
   caseId: string;
   subjectId: string;

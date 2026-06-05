@@ -22,6 +22,8 @@ M19 makes that manual case-creation path idempotent for repeated runs on the sam
 
 M20 hardens SQLite historical databases. Migration `0010_enforce_draft_case_uniqueness` remediates duplicate `draft` rows by `subjectId`, keeps the earliest draft row, marks later duplicates as `duplicate_archived`, and enforces one `draft` case per subject with a partial unique index.
 
+M21 adds safe error mapping for that SQLite uniqueness rule and an operator-only `npm run case:doctor` remediation report. Duplicate draft writes now fail with a sanitized application error instead of a raw SQLite constraint message, and operators can inspect migration readiness plus case consistency counts without dumping database contents.
+
 ## Interfaces
 
 - `CaseStore`: minimal create/get/update support for case records built from accepted structured intake data only.
@@ -59,9 +61,11 @@ M20 hardens SQLite historical databases. Migration `0010_enforce_draft_case_uniq
 - `src/domain/cases/caseCreationService.ts` is the explicit application boundary that reads consent and intake through `PersistenceService`, revalidates accepted fields, creates a `draft` case, and appends a sanitized `case_created_from_intake` audit event.
 - On repeated manual runs for the same subject, that boundary first looks up an existing `draft` case through `findDraftCaseBySubjectId(subjectId)`. If one exists, it returns the existing case and appends only a sanitized `case_create_from_intake_idempotent_hit` audit event.
 - SQLite now enforces the invariant that at most one `draft` case may exist for a given `subjectId`. Historical duplicate drafts are remediated during migration instead of being deleted.
+- When a direct SQLite-backed caller still attempts to create or restore a second `draft` case for the same `subjectId`, the persistence boundary maps the partial-index failure to `CaseDraftUniquenessError` with the safe code `draft_case_already_exists`.
 - `createCaseWithAudit(...)` is transactional for the bundled SQLite and in-memory persistence implementations so a case row and its audit event commit or roll back together.
 - M16 does not wire that service into the live OpenWA listener or intake-completion runtime path yet.
 - `src/app/caseCreateFromIntake.ts` is the operator entrypoint for manual case creation. It loads env through the shared loader, requires an already migrated SQLite database, accepts `--subject <subjectId>`, and prints only `{ caseId, status, createdAt }`. Repeated runs for the same completed-intake subject return the existing draft case instead of creating another one.
+- `src/app/caseDoctor.ts` is the operator entrypoint for persistence consistency checks. It loads env through the shared loader, requires an already migrated SQLite database, checks only migration and case-count aggregates, and never prints raw rows, SQL text, database paths, message bodies, transcripts, secrets, or full phone numbers.
 
 ## SQLite Foundation
 
@@ -71,9 +75,11 @@ M20 hardens SQLite historical databases. Migration `0010_enforce_draft_case_uniq
 - Operators can run `npm run db:migrate` to apply the committed SQLite schema explicitly.
 - Operators can run `npm run db:status` to inspect applied and pending migration ids without dumping table contents.
 - Operators can run `npm run case:create-from-intake -- --subject <subjectId>` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
+- Operators can run `npm run case:doctor` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
 - The SQLite migration runner is explicit and testable through `runSqliteMigrations(...)`, `getSqliteMigrationStatus(...)`, and `SqliteMigrationRunner`.
 - `0009_harden_cases_schema` safely rebuilds legacy `cases` tables when older SQLite files still use `reference`, camelCase columns, or extra transcript/body columns, and it copies forward only the minimal supported case fields.
 - `0010_enforce_draft_case_uniqueness` scans historical `draft` cases by `subjectId`, keeps the earliest `created_at` row as `draft`, marks later duplicates as `duplicate_archived`, and adds the partial unique index `cases_one_draft_per_subject_id` on `cases(subject_id) WHERE status = 'draft'`.
+- `npm run case:doctor` reports only aggregate counts: applied and pending migration counts, current `draft` case count, unique `draft` subject count, `duplicate_archived` count, duplicate-draft anomaly counts, and whether the committed draft-uniqueness index is present.
 - Technical runtime startup never runs migrations. When `TECHNICAL_PERSISTENCE_ENABLED=true`, startup requires `npm run db:migrate` to have been completed already or it fails safely with a clear error.
 - Current tables:
   - `cases`
@@ -118,6 +124,7 @@ M20 hardens SQLite historical databases. Migration `0010_enforce_draft_case_uniq
 - The M18 manual command still stores only the accepted structured `name` and `problemSummary` fields already present in intake persistence. It does not persist raw bodies, transcripts, rejected values, or secret-bearing metadata.
 - M19 keeps manual case creation idempotent by `subjectId` plus existing `draft` case. The idempotent-hit audit event stores only sanitized structured metadata and does not persist transcripts, raw bodies, rejected values, or full phone numbers.
 - M20 remediation never stores transcripts, message bodies, or rejected values. It changes only case status metadata inside the existing `cases` table and preserves duplicate rows as `duplicate_archived` instead of deleting them.
+- M21 uniqueness-error mapping and `case:doctor` output are sanitized by policy. They must not expose SQL statements, database paths, raw rows, message bodies, transcripts, rejected values, or secrets.
 - Live WhatsApp runtime writes never create or update cases automatically.
 - M13 live consent wiring never stores inbound message body text in consent state metadata or consent events.
 - M15 live intake wiring persists only accepted structured `name` and `problemSummary` values plus sanitized metadata after explicit `granted` consent.
@@ -135,7 +142,8 @@ M20 hardens SQLite historical databases. Migration `0010_enforce_draft_case_uniq
 - When `DATABASE_MIGRATIONS_ENABLED=true`, `npm run db:migrate` creates parent directories as needed and applies the committed migration list.
 - When `DATABASE_MIGRATIONS_ENABLED=false`, `npm run db:migrate` reports pending migrations and skips schema changes.
 - `npm run db:status` reports applied and pending migration ids and counts without reading or printing table contents.
-- `npm run db:migrate` and `npm run db:status` remain direct Node 22 `--experimental-strip-types` entrypoints.
+- `npm run case:doctor` fails safely when migrations are missing or incomplete, exits `0` only when the migrated database is healthy, and exits nonzero when migration readiness or draft-case anomalies require operator action.
+- `npm run db:migrate`, `npm run db:status`, and `npm run case:doctor` remain direct Node 22 `--experimental-strip-types` entrypoints.
 - Existing SQLite databases created before M17 can be upgraded in place. The cases-table hardening migration preserves minimal case metadata, normalizes column names to the committed snake_case schema, and drops unsupported legacy columns.
 - Existing SQLite databases created before M20 can be upgraded in place. Duplicate `draft` rows are remediated deterministically by `created_at ASC, case_id ASC`, and future duplicate `draft` inserts for the same `subjectId` fail at the SQLite schema boundary.
 - The migration boundary is intentionally separate from OpenWA startup so transport smoke behavior stays unchanged when technical persistence is disabled.
@@ -187,4 +195,9 @@ M20 hardens SQLite historical databases. Migration `0010_enforce_draft_case_uniq
   - earliest historical draft is preserved during remediation
   - later historical drafts become `duplicate_archived`
   - non-`draft` rows for the same subject remain allowed
+- M21 adds safe operator hardening for the same manual-only boundary:
+  - duplicate draft constraint failures map to `draft_case_already_exists`
+  - `npm run case:doctor` logs `case_doctor_starting`, `case_doctor_checked`, or `case_doctor_failed`
+  - `npm run case:doctor` prints only sanitized aggregate counts plus a remediation summary
+  - the live OpenWA runtime still does not create cases automatically
 - The live OpenWA runtime still does not create cases automatically, store full transcripts, or persist raw message bodies.

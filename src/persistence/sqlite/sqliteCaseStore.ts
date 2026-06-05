@@ -1,5 +1,34 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { CaseRecord, CaseStore, CreateCaseInput, UpdateCaseInput } from "../caseStore.ts";
+import {
+  CaseDraftUniquenessError,
+  type CaseRecord,
+  type CaseStore,
+  type CreateCaseInput,
+  type UpdateCaseInput
+} from "../caseStore.ts";
+
+interface SqliteConstraintError extends Error {
+  code?: string;
+  errcode?: number;
+}
+
+const sqliteConstraintViolationCode = 2067;
+const draftUniquenessConstraintMessage = "UNIQUE constraint failed: cases.subject_id";
+
+const isDraftUniquenessViolation = (error: unknown, status: string): boolean =>
+  status === "draft" &&
+  error instanceof Error &&
+  (error as SqliteConstraintError).code === "ERR_SQLITE_ERROR" &&
+  (error as SqliteConstraintError).errcode === sqliteConstraintViolationCode &&
+  error.message.includes(draftUniquenessConstraintMessage);
+
+const mapSqliteCaseWriteError = (error: unknown, status: string): never => {
+  if (isDraftUniquenessViolation(error, status)) {
+    throw new CaseDraftUniquenessError();
+  }
+
+  throw error;
+};
 
 const mapCaseRow = (row: {
   case_id: string;
@@ -37,30 +66,34 @@ export class SqliteCaseStore implements CaseStore {
       updatedAt: input.updatedAt ?? input.createdAt ?? new Date().toISOString()
     };
 
-    this.database
-      .prepare(
-        `
-          INSERT INTO cases (
-            case_id,
-            subject_id,
-            status,
-            name,
-            problem_summary,
-            created_at,
-            updated_at
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `
-      )
-      .run(
-        record.caseId,
-        record.subjectId,
-        record.status,
-        record.name,
-        record.problemSummary,
-        record.createdAt,
-        record.updatedAt
-      );
+    try {
+      this.database
+        .prepare(
+          `
+            INSERT INTO cases (
+              case_id,
+              subject_id,
+              status,
+              name,
+              problem_summary,
+              created_at,
+              updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `
+        )
+        .run(
+          record.caseId,
+          record.subjectId,
+          record.status,
+          record.name,
+          record.problemSummary,
+          record.createdAt,
+          record.updatedAt
+        );
+    } catch (error) {
+      mapSqliteCaseWriteError(error, record.status);
+    }
 
     return record;
   }
@@ -142,15 +175,19 @@ export class SqliteCaseStore implements CaseStore {
       updatedAt: input.updatedAt
     };
 
-    this.database
-      .prepare(
-        `
-          UPDATE cases
-          SET status = ?, updated_at = ?
-          WHERE case_id = ?
-        `
-      )
-      .run(updated.status, updated.updatedAt, updated.caseId);
+    try {
+      this.database
+        .prepare(
+          `
+            UPDATE cases
+            SET status = ?, updated_at = ?
+            WHERE case_id = ?
+          `
+        )
+        .run(updated.status, updated.updatedAt, updated.caseId);
+    } catch (error) {
+      mapSqliteCaseWriteError(error, updated.status);
+    }
 
     return updated;
   }
