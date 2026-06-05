@@ -20,6 +20,8 @@ M18 adds an explicit operator-only command, `npm run case:create-from-intake -- 
 
 M19 makes that manual case-creation path idempotent for repeated runs on the same `subjectId`. When a `draft` case already exists for the subject, the boundary returns the existing case, appends a sanitized `case_create_from_intake_idempotent_hit` audit event, and does not create a duplicate row.
 
+M20 hardens SQLite historical databases. Migration `0010_enforce_draft_case_uniqueness` remediates duplicate `draft` rows by `subjectId`, keeps the earliest draft row, marks later duplicates as `duplicate_archived`, and enforces one `draft` case per subject with a partial unique index.
+
 ## Interfaces
 
 - `CaseStore`: minimal create/get/update support for case records built from accepted structured intake data only.
@@ -56,6 +58,7 @@ M19 makes that manual case-creation path idempotent for repeated runs on the sam
 - Client runtime wiring uses narrow application-layer adapters so consent-gated intake writes stay separate from M10 technical dedupe and audit wiring.
 - `src/domain/cases/caseCreationService.ts` is the explicit application boundary that reads consent and intake through `PersistenceService`, revalidates accepted fields, creates a `draft` case, and appends a sanitized `case_created_from_intake` audit event.
 - On repeated manual runs for the same subject, that boundary first looks up an existing `draft` case through `findDraftCaseBySubjectId(subjectId)`. If one exists, it returns the existing case and appends only a sanitized `case_create_from_intake_idempotent_hit` audit event.
+- SQLite now enforces the invariant that at most one `draft` case may exist for a given `subjectId`. Historical duplicate drafts are remediated during migration instead of being deleted.
 - `createCaseWithAudit(...)` is transactional for the bundled SQLite and in-memory persistence implementations so a case row and its audit event commit or roll back together.
 - M16 does not wire that service into the live OpenWA listener or intake-completion runtime path yet.
 - `src/app/caseCreateFromIntake.ts` is the operator entrypoint for manual case creation. It loads env through the shared loader, requires an already migrated SQLite database, accepts `--subject <subjectId>`, and prints only `{ caseId, status, createdAt }`. Repeated runs for the same completed-intake subject return the existing draft case instead of creating another one.
@@ -70,6 +73,7 @@ M19 makes that manual case-creation path idempotent for repeated runs on the sam
 - Operators can run `npm run case:create-from-intake -- --subject <subjectId>` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
 - The SQLite migration runner is explicit and testable through `runSqliteMigrations(...)`, `getSqliteMigrationStatus(...)`, and `SqliteMigrationRunner`.
 - `0009_harden_cases_schema` safely rebuilds legacy `cases` tables when older SQLite files still use `reference`, camelCase columns, or extra transcript/body columns, and it copies forward only the minimal supported case fields.
+- `0010_enforce_draft_case_uniqueness` scans historical `draft` cases by `subjectId`, keeps the earliest `created_at` row as `draft`, marks later duplicates as `duplicate_archived`, and adds the partial unique index `cases_one_draft_per_subject_id` on `cases(subject_id) WHERE status = 'draft'`.
 - Technical runtime startup never runs migrations. When `TECHNICAL_PERSISTENCE_ENABLED=true`, startup requires `npm run db:migrate` to have been completed already or it fails safely with a clear error.
 - Current tables:
   - `cases`
@@ -113,6 +117,7 @@ M19 makes that manual case-creation path idempotent for repeated runs on the sam
 - Case creation does not store full phone-number metadata, raw message bodies, transcripts, rejected values, attachments, or legal advice content.
 - The M18 manual command still stores only the accepted structured `name` and `problemSummary` fields already present in intake persistence. It does not persist raw bodies, transcripts, rejected values, or secret-bearing metadata.
 - M19 keeps manual case creation idempotent by `subjectId` plus existing `draft` case. The idempotent-hit audit event stores only sanitized structured metadata and does not persist transcripts, raw bodies, rejected values, or full phone numbers.
+- M20 remediation never stores transcripts, message bodies, or rejected values. It changes only case status metadata inside the existing `cases` table and preserves duplicate rows as `duplicate_archived` instead of deleting them.
 - Live WhatsApp runtime writes never create or update cases automatically.
 - M13 live consent wiring never stores inbound message body text in consent state metadata or consent events.
 - M15 live intake wiring persists only accepted structured `name` and `problemSummary` values plus sanitized metadata after explicit `granted` consent.
@@ -132,6 +137,7 @@ M19 makes that manual case-creation path idempotent for repeated runs on the sam
 - `npm run db:status` reports applied and pending migration ids and counts without reading or printing table contents.
 - `npm run db:migrate` and `npm run db:status` remain direct Node 22 `--experimental-strip-types` entrypoints.
 - Existing SQLite databases created before M17 can be upgraded in place. The cases-table hardening migration preserves minimal case metadata, normalizes column names to the committed snake_case schema, and drops unsupported legacy columns.
+- Existing SQLite databases created before M20 can be upgraded in place. Duplicate `draft` rows are remediated deterministically by `created_at ASC, case_id ASC`, and future duplicate `draft` inserts for the same `subjectId` fail at the SQLite schema boundary.
 - The migration boundary is intentionally separate from OpenWA startup so transport smoke behavior stays unchanged when technical persistence is disabled.
 - `createSqlitePersistenceService(...)` expects a database path that has already been prepared through the explicit migration boundary or an equivalent test setup.
 
@@ -176,4 +182,9 @@ M19 makes that manual case-creation path idempotent for repeated runs on the sam
   - first run creates one `draft` case plus `case_created_from_intake`
   - repeated runs on the same subject return the existing `draft` case
   - repeated runs append only sanitized `case_create_from_intake_idempotent_hit`
+- M20 adds SQLite enforcement for the same invariant:
+  - one `draft` case per `subjectId`
+  - earliest historical draft is preserved during remediation
+  - later historical drafts become `duplicate_archived`
+  - non-`draft` rows for the same subject remain allowed
 - The live OpenWA runtime still does not create cases automatically, store full transcripts, or persist raw message bodies.

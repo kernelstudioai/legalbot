@@ -502,7 +502,11 @@ describe("manual case creation command", () => {
       logger,
       stdout,
       verifyMigrationsApplied: () => ({
-        appliedMigrationIds: ["0001_create_cases", "0009_harden_cases_schema"],
+        appliedMigrationIds: [
+          "0001_create_cases",
+          "0009_harden_cases_schema",
+          "0010_enforce_draft_case_uniqueness"
+        ],
         databasePath: "/tmp/legalbot.sqlite"
       }),
       createSqlitePersistenceServiceFactory: () => persistence,

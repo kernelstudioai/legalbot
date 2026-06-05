@@ -116,6 +116,50 @@ const normalizeCasesTable = (database: DatabaseSync): void => {
   database.exec("ALTER TABLE cases__m17_new RENAME TO cases;");
 };
 
+const remediateDuplicateDraftCases = (database: DatabaseSync): void => {
+  database.exec(`
+    WITH ranked_drafts AS (
+      SELECT
+        case_id,
+        ROW_NUMBER() OVER (
+          PARTITION BY subject_id
+          ORDER BY created_at ASC, case_id ASC
+        ) AS draft_rank
+      FROM cases
+      WHERE status = 'draft'
+    )
+    UPDATE cases
+    SET status = 'duplicate_archived'
+    WHERE status = 'draft'
+      AND case_id IN (
+        SELECT case_id
+        FROM ranked_drafts
+        WHERE draft_rank > 1
+      );
+  `);
+};
+
+const createDraftCaseUniquenessIndex = (database: DatabaseSync): void => {
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS cases_one_draft_per_subject_id
+    ON cases(subject_id)
+    WHERE status = 'draft';
+  `);
+};
+
+const enforceDraftCaseUniqueness = (database: DatabaseSync): void => {
+  database.exec("BEGIN IMMEDIATE;");
+
+  try {
+    remediateDuplicateDraftCases(database);
+    createDraftCaseUniquenessIndex(database);
+    database.exec("COMMIT;");
+  } catch (error) {
+    database.exec("ROLLBACK;");
+    throw error;
+  }
+};
+
 export const sqliteMigrations: SqliteMigration[] = [
   {
     id: "0001_create_cases",
@@ -222,6 +266,12 @@ export const sqliteMigrations: SqliteMigration[] = [
     id: "0009_harden_cases_schema",
     run(database) {
       normalizeCasesTable(database);
+    }
+  },
+  {
+    id: "0010_enforce_draft_case_uniqueness",
+    run(database) {
+      enforceDraftCaseUniqueness(database);
     }
   }
 ];

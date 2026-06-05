@@ -1,7 +1,9 @@
+export type CaseStatus = "draft" | "duplicate_archived" | "review_pending" | string;
+
 export interface CaseRecord {
   caseId: string;
   subjectId: string;
-  status: string;
+  status: CaseStatus;
   name: string;
   problemSummary: string;
   createdAt: string;
@@ -11,7 +13,7 @@ export interface CaseRecord {
 export interface CreateCaseInput {
   caseId: string;
   subjectId: string;
-  status?: string;
+  status?: CaseStatus;
   name: string;
   problemSummary: string;
   createdAt?: string;
@@ -20,7 +22,7 @@ export interface CreateCaseInput {
 
 export interface UpdateCaseInput {
   caseId: string;
-  status?: string;
+  status?: CaseStatus;
   updatedAt: string;
 }
 

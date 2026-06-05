@@ -13,6 +13,20 @@ import {
 } from "../../src/persistence/sqlite/index.ts";
 
 const tempDirectories: string[] = [];
+const allMigrationIds = [
+  "0001_create_cases",
+  "0002_create_processed_messages",
+  "0003_create_audit_events",
+  "0004_create_consent_states",
+  "0005_create_consent_events",
+  "0006_create_intake_states",
+  "0007_create_intake_fields",
+  "0008_create_intake_events",
+  "0009_harden_cases_schema",
+  "0010_enforce_draft_case_uniqueness"
+] as const;
+const migrationIdsThrough0008 = allMigrationIds.slice(0, 8);
+const migrationIdsThrough0009 = allMigrationIds.slice(0, 9);
 
 const createTempDatabaseConfig = () => {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), "legalbot-persistence-"));
@@ -45,17 +59,7 @@ describe("sqlite persistence foundation", () => {
     });
 
     expect(migrationResult.skipped).toBe(false);
-    expect(migrationResult.appliedMigrationIds).toEqual([
-      "0001_create_cases",
-      "0002_create_processed_messages",
-      "0003_create_audit_events",
-      "0004_create_consent_states",
-      "0005_create_consent_events",
-      "0006_create_intake_states",
-      "0007_create_intake_fields",
-      "0008_create_intake_events",
-      "0009_harden_cases_schema"
-    ]);
+    expect(migrationResult.appliedMigrationIds).toEqual(allMigrationIds);
     expect(migrationResult.pendingMigrationIds).toEqual([]);
     expect(migrationResult.databasePath.startsWith(tempDir)).toBe(true);
     expect(existsSync(migrationResult.databasePath)).toBe(true);
@@ -109,17 +113,6 @@ describe("sqlite persistence foundation", () => {
           applied_at TEXT NOT NULL
         );
 
-        INSERT INTO schema_migrations (migration_id, applied_at)
-        VALUES
-          ('0001_create_cases', '2026-06-04T09:00:00.000Z'),
-          ('0002_create_processed_messages', '2026-06-04T09:00:00.000Z'),
-          ('0003_create_audit_events', '2026-06-04T09:00:00.000Z'),
-          ('0004_create_consent_states', '2026-06-04T09:00:00.000Z'),
-          ('0005_create_consent_events', '2026-06-04T09:00:00.000Z'),
-          ('0006_create_intake_states', '2026-06-04T09:00:00.000Z'),
-          ('0007_create_intake_fields', '2026-06-04T09:00:00.000Z'),
-          ('0008_create_intake_events', '2026-06-04T09:00:00.000Z');
-
         CREATE TABLE cases (
           reference TEXT PRIMARY KEY,
           subjectId TEXT NOT NULL,
@@ -155,6 +148,15 @@ describe("sqlite persistence foundation", () => {
           'raw body'
         );
       `);
+
+      const insertMigration = database.prepare(`
+        INSERT INTO schema_migrations (migration_id, applied_at)
+        VALUES (?, ?)
+      `);
+
+      for (const migrationId of migrationIdsThrough0008) {
+        insertMigration.run(migrationId, "2026-06-04T09:00:00.000Z");
+      }
     } finally {
       database.close();
     }
@@ -165,7 +167,10 @@ describe("sqlite persistence foundation", () => {
       enabled: true
     });
 
-    expect(migrationResult.appliedMigrationIds).toEqual(["0009_harden_cases_schema"]);
+    expect(migrationResult.appliedMigrationIds).toEqual([
+      "0009_harden_cases_schema",
+      "0010_enforce_draft_case_uniqueness"
+    ]);
     expect(migrationResult.pendingMigrationIds).toEqual([]);
 
     const { database: migratedDatabase } = openSqliteDatabase({
@@ -224,8 +229,220 @@ describe("sqlite persistence foundation", () => {
         created_at: "2026-06-04T09:30:00.000Z",
         updated_at: "2026-06-04T09:30:00.000Z"
       });
+
+      const draftUniquenessIndex = migratedDatabase
+        .prepare(
+          `
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'index' AND name = 'cases_one_draft_per_subject_id'
+          `
+        )
+        .get() as { sql: string } | undefined;
+
+      expect(draftUniquenessIndex?.sql).toContain("WHERE status = 'draft'");
     } finally {
       migratedDatabase.close();
+    }
+  });
+
+  it("remediates duplicate draft rows and preserves the earliest draft per subject", () => {
+    const { tempDir, databaseUrl } = createTempDatabaseConfig();
+    const { database } = openSqliteDatabase({
+      databaseUrl,
+      cwd: tempDir
+    });
+
+    try {
+      database.exec(`
+        CREATE TABLE schema_migrations (
+          migration_id TEXT PRIMARY KEY,
+          applied_at TEXT NOT NULL
+        );
+
+        CREATE TABLE cases (
+          case_id TEXT PRIMARY KEY,
+          subject_id TEXT NOT NULL,
+          status TEXT NOT NULL,
+          name TEXT NOT NULL,
+          problem_summary TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        INSERT INTO cases (
+          case_id,
+          subject_id,
+          status,
+          name,
+          problem_summary,
+          created_at,
+          updated_at
+        )
+        VALUES
+          ('CASE-DRAFT-1', 'subject-dup', 'draft', 'Mario Rossi', 'Prima bozza', '2026-06-05T08:00:00.000Z', '2026-06-05T08:00:00.000Z'),
+          ('CASE-DRAFT-2', 'subject-dup', 'draft', 'Mario Rossi', 'Seconda bozza', '2026-06-05T08:05:00.000Z', '2026-06-05T08:05:00.000Z'),
+          ('CASE-DRAFT-3', 'subject-dup', 'draft', 'Mario Rossi', 'Terza bozza', '2026-06-05T08:10:00.000Z', '2026-06-05T08:10:00.000Z'),
+          ('CASE-REVIEW-1', 'subject-dup', 'review_pending', 'Mario Rossi', 'Storico non draft', '2026-06-05T08:15:00.000Z', '2026-06-05T08:15:00.000Z'),
+          ('CASE-DRAFT-OTHER', 'subject-other', 'draft', 'Giulia Bianchi', 'Bozza separata', '2026-06-05T08:20:00.000Z', '2026-06-05T08:20:00.000Z');
+      `);
+
+      const insertMigration = database.prepare(`
+        INSERT INTO schema_migrations (migration_id, applied_at)
+        VALUES (?, ?)
+      `);
+
+      for (const migrationId of migrationIdsThrough0009) {
+        insertMigration.run(migrationId, "2026-06-05T07:55:00.000Z");
+      }
+    } finally {
+      database.close();
+    }
+
+    const migrationResult = runSqliteMigrations({
+      databaseUrl,
+      cwd: tempDir,
+      enabled: true
+    });
+
+    expect(migrationResult.appliedMigrationIds).toEqual([
+      "0010_enforce_draft_case_uniqueness"
+    ]);
+    expect(migrationResult.pendingMigrationIds).toEqual([]);
+
+    const { database: migratedDatabase } = openSqliteDatabase({
+      databaseUrl,
+      cwd: tempDir
+    });
+
+    try {
+      const duplicateSubjectRows = migratedDatabase
+        .prepare(
+          `
+            SELECT case_id, status, created_at
+            FROM cases
+            WHERE subject_id = ?
+            ORDER BY created_at ASC, case_id ASC
+          `
+        )
+        .all("subject-dup") as Array<{
+        case_id: string;
+        status: string;
+        created_at: string;
+      }>;
+
+      const draftCounts = migratedDatabase
+        .prepare(
+          `
+            SELECT
+              subject_id,
+              COUNT(*) AS draft_count
+            FROM cases
+            WHERE status = 'draft'
+            GROUP BY subject_id
+            ORDER BY subject_id ASC
+          `
+        )
+        .all() as Array<{
+        subject_id: string;
+        draft_count: number;
+      }>;
+
+      expect(duplicateSubjectRows).toEqual([
+        {
+          case_id: "CASE-DRAFT-1",
+          status: "draft",
+          created_at: "2026-06-05T08:00:00.000Z"
+        },
+        {
+          case_id: "CASE-DRAFT-2",
+          status: "duplicate_archived",
+          created_at: "2026-06-05T08:05:00.000Z"
+        },
+        {
+          case_id: "CASE-DRAFT-3",
+          status: "duplicate_archived",
+          created_at: "2026-06-05T08:10:00.000Z"
+        },
+        {
+          case_id: "CASE-REVIEW-1",
+          status: "review_pending",
+          created_at: "2026-06-05T08:15:00.000Z"
+        }
+      ]);
+      expect(draftCounts).toEqual([
+        {
+          subject_id: "subject-dup",
+          draft_count: 1
+        },
+        {
+          subject_id: "subject-other",
+          draft_count: 1
+        }
+      ]);
+    } finally {
+      migratedDatabase.close();
+    }
+  });
+
+  it("prevents future duplicate drafts while allowing non-draft rows for the same subject", () => {
+    const { tempDir, databaseUrl } = createTempDatabaseConfig();
+    runSqliteMigrations({ databaseUrl, cwd: tempDir, enabled: true });
+
+    const { database } = openSqliteDatabase({
+      databaseUrl,
+      cwd: tempDir
+    });
+
+    try {
+      const insertCase = database.prepare(`
+        INSERT INTO cases (
+          case_id,
+          subject_id,
+          status,
+          name,
+          problem_summary,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      insertCase.run(
+        "CASE-DRAFT-PRIMARY",
+        "subject-constraint",
+        "draft",
+        "Mario Rossi",
+        "Bozza primaria",
+        "2026-06-05T09:00:00.000Z",
+        "2026-06-05T09:00:00.000Z"
+      );
+
+      expect(() =>
+        insertCase.run(
+          "CASE-DRAFT-DUPLICATE",
+          "subject-constraint",
+          "draft",
+          "Mario Rossi",
+          "Bozza duplicata",
+          "2026-06-05T09:05:00.000Z",
+          "2026-06-05T09:05:00.000Z"
+        )
+      ).toThrow(/UNIQUE constraint failed: cases\.subject_id/);
+
+      expect(() =>
+        insertCase.run(
+          "CASE-DUPLICATE-ARCHIVED",
+          "subject-constraint",
+          "duplicate_archived",
+          "Mario Rossi",
+          "Storico archiviato",
+          "2026-06-05T09:10:00.000Z",
+          "2026-06-05T09:10:00.000Z"
+        )
+      ).not.toThrow();
+    } finally {
+      database.close();
     }
   });
 

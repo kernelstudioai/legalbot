@@ -1,5 +1,5 @@
 import type { AuditEventRecord, AuditLogStore } from "./auditLogStore.ts";
-import type { CaseRecord, CaseStore, CreateCaseInput } from "./caseStore.ts";
+import type { CaseRecord, CaseStatus, CaseStore, CreateCaseInput } from "./caseStore.ts";
 import type {
   AppendConsentEventInput,
   ConsentEventRecord,
@@ -154,7 +154,7 @@ export interface PersistenceService {
   ): Promise<PersistenceCreateCaseWithAuditResult>;
   findDraftCaseBySubjectId(subjectId: string): Promise<CaseRecord | null>;
   getCase(caseId: string): Promise<CaseRecord | null>;
-  updateCaseStatus(caseId: string, status: string): Promise<CaseRecord | null>;
+  updateCaseStatus(caseId: string, status: CaseStatus): Promise<CaseRecord | null>;
 }
 
 export interface CreatePersistenceServiceOptions {
