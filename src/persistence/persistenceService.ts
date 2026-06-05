@@ -120,6 +120,7 @@ export interface PersistenceTransactionRunner {
 }
 
 export interface PersistenceService {
+  runInTransaction<T>(operation: () => Promise<T>): Promise<T>;
   isMessageProcessed(messageId: string): Promise<boolean>;
   markMessageProcessed(
     messageId: string,
@@ -151,6 +152,7 @@ export interface PersistenceService {
   createCaseWithAudit(
     input: PersistenceCreateCaseWithAuditInput
   ): Promise<PersistenceCreateCaseWithAuditResult>;
+  findDraftCaseBySubjectId(subjectId: string): Promise<CaseRecord | null>;
   getCase(caseId: string): Promise<CaseRecord | null>;
   updateCaseStatus(caseId: string, status: string): Promise<CaseRecord | null>;
 }
@@ -211,6 +213,14 @@ export const createPersistenceService = ({
   };
 
   return {
+    async runInTransaction(operation) {
+      if (transactionRunner) {
+        return transactionRunner.runInTransaction(operation);
+      }
+
+      return operation();
+    },
+
     async isMessageProcessed(messageId) {
       return processedMessageStore.has(messageId);
     },
@@ -316,11 +326,11 @@ export const createPersistenceService = ({
     },
 
     async createCaseWithAudit(input) {
-      if (transactionRunner) {
-        return transactionRunner.runInTransaction(() => createCaseWithAudit(input));
-      }
+      return this.runInTransaction(() => createCaseWithAudit(input));
+    },
 
-      return createCaseWithAudit(input);
+    async findDraftCaseBySubjectId(subjectId) {
+      return caseStore.findDraftBySubjectId(subjectId);
     },
 
     async getCase(caseId) {

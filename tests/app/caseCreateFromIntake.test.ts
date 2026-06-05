@@ -333,6 +333,128 @@ describe("manual case creation command", () => {
     }
   });
 
+  it("returns the existing draft case on repeated command runs without creating duplicates", async () => {
+    const tempDir = createTempDir();
+    const logger = createLogger();
+    const stdout = createStdout();
+    const databaseUrl = "file:./data/legalbot.sqlite";
+    const subjectId = "subject-123";
+
+    runSqliteMigrations({
+      databaseUrl,
+      cwd: tempDir,
+      enabled: true
+    });
+
+    const persistence = createSqlitePersistenceService({
+      databaseUrl,
+      cwd: tempDir
+    });
+
+    try {
+      await seedCompletedIntake(persistence, subjectId, {
+        name: "Mario Rossi",
+        problemSummary: "Sintesi breve del problema"
+      });
+    } finally {
+      persistence.close();
+    }
+
+    const firstSummary = await runCaseCreateFromIntakeCommand({
+      argv: ["node", "src/app/caseCreateFromIntake.ts", "--subject", subjectId],
+      cwd: tempDir,
+      envSource: {
+        DATABASE_URL: databaseUrl
+      },
+      logger,
+      stdout
+    });
+    const firstOutput = stdout.output;
+
+    const secondSummary = await runCaseCreateFromIntakeCommand({
+      argv: ["node", "src/app/caseCreateFromIntake.ts", "--subject", subjectId],
+      cwd: tempDir,
+      envSource: {
+        DATABASE_URL: databaseUrl
+      },
+      logger,
+      stdout
+    });
+
+    expect(firstSummary.exitCode).toBe(0);
+    expect(secondSummary.exitCode).toBe(0);
+    expect(secondSummary.result).toEqual(firstSummary.result);
+    expect(stdout.output).toBe(`${firstOutput}${JSON.stringify(secondSummary.result)}\n`);
+    expect(firstSummary.result).toBeDefined();
+
+    const { database } = openSqliteDatabase({
+      databaseUrl,
+      cwd: tempDir
+    });
+
+    try {
+      const caseRows = database
+        .prepare(
+          `
+            SELECT case_id, subject_id, status
+            FROM cases
+            WHERE subject_id = ?
+            ORDER BY created_at ASC
+          `
+        )
+        .all(subjectId) as Array<{
+        case_id: string;
+        subject_id: string;
+        status: string;
+      }>;
+      const auditRows = database
+        .prepare(
+          `
+            SELECT event_type, entity_id, metadata_json
+            FROM audit_events
+            WHERE entity_id = ?
+          `
+        )
+        .all(firstSummary.result!.caseId) as Array<{
+        event_type: string;
+        entity_id: string;
+        metadata_json: string | null;
+      }>;
+
+      expect(caseRows).toEqual([
+        {
+          case_id: firstSummary.result!.caseId,
+          subject_id: subjectId,
+          status: "draft"
+        }
+      ]);
+      expect(auditRows).toHaveLength(2);
+      expect(auditRows.some((row) => row.event_type === "case_created_from_intake")).toBe(true);
+      expect(auditRows.some((row) => row.event_type === "case_create_from_intake_idempotent_hit")).toBe(true);
+      const idempotentHitRow = auditRows.find(
+        (row) => row.event_type === "case_create_from_intake_idempotent_hit"
+      );
+
+      expect(auditRows.find((row) => row.event_type === "case_created_from_intake")).toMatchObject({
+        event_type: "case_created_from_intake",
+        entity_id: firstSummary.result!.caseId
+      });
+      expect(idempotentHitRow).toMatchObject({
+        event_type: "case_create_from_intake_idempotent_hit",
+        entity_id: firstSummary.result!.caseId
+      });
+      expect(JSON.parse(idempotentHitRow?.metadata_json ?? "{}")).toEqual({
+        source: "completed_intake",
+        existingStatus: "draft",
+        acceptedFieldNames: ["name", "problemSummary"]
+      });
+      expect(idempotentHitRow?.metadata_json ?? "").not.toContain("body");
+      expect(idempotentHitRow?.metadata_json ?? "").not.toContain("transcript");
+    } finally {
+      database.close();
+    }
+  });
+
   it("uses the transactional create-case boundary", async () => {
     const logger = createLogger();
     const stdout = createStdout();
@@ -356,6 +478,9 @@ describe("manual case creation command", () => {
     const persistence = {
       databasePath: "/tmp/legalbot.sqlite",
       close: vi.fn(),
+      runInTransaction: async (operation: () => Promise<unknown>) => operation(),
+      appendAuditEvent: vi.fn(),
+      findDraftCaseBySubjectId: async () => null,
       getConsentState: async () => "granted",
       getIntakeSnapshot: async () => ({
         subjectId: "subject-123",

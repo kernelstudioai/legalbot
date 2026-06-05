@@ -39,6 +39,14 @@ class CapturingCaseStore implements CaseStore {
     return record;
   }
 
+  async findDraftBySubjectId(subjectId: string): Promise<CaseRecord | null> {
+    return (
+      [...this.records.values()].find(
+        (record) => record.subjectId === subjectId && record.status === "draft"
+      ) ?? null
+    );
+  }
+
   async getById(caseId: string): Promise<CaseRecord | null> {
     return this.records.get(caseId) ?? null;
   }
@@ -256,6 +264,31 @@ describe("case creation service boundary", () => {
       name: "Mario Rossi",
       problemSummary: "Sintesi breve del problema"
     });
+  });
+
+  it("returns the existing draft case on repeated calls and appends an idempotent audit event", async () => {
+    const { auditLogStore, caseStore, generateReference, service, subjectId } = await buildHarness();
+
+    const firstResult = await service.createCaseFromCompletedIntake(subjectId);
+    const secondResult = await service.createCaseFromCompletedIntake(subjectId);
+
+    expect(secondResult.caseRecord).toEqual(firstResult.caseRecord);
+    expect(caseStore.createdInputs).toHaveLength(1);
+    expect(generateReference).toHaveBeenCalledTimes(1);
+    expect(auditLogStore.events).toHaveLength(2);
+    expect(auditLogStore.events[1]).toMatchObject({
+      eventType: "case_create_from_intake_idempotent_hit",
+      entityType: "case",
+      entityId: "CASE-20260605-TEST0001",
+      occurredAt: "2026-06-05T08:00:00.000Z",
+      metadata: {
+        source: "completed_intake",
+        existingStatus: "draft",
+        acceptedFieldNames: ["name", "problemSummary"]
+      }
+    });
+    expect(auditLogStore.events[1]?.metadata).not.toHaveProperty("body");
+    expect(auditLogStore.events[1]?.metadata).not.toHaveProperty("transcript");
   });
 
   it("does not persist raw body or transcript fields", async () => {

@@ -17,6 +17,7 @@ const createLogger = (): Logger => ({
 });
 
 const createPersistenceService = (): PersistenceService => ({
+  runInTransaction: async (operation) => operation(),
   isMessageProcessed: vi.fn().mockResolvedValue(false),
   markMessageProcessed: vi.fn().mockResolvedValue({
     inserted: true,
@@ -80,6 +81,7 @@ const createPersistenceService = (): PersistenceService => ({
   })),
   createCase: vi.fn(),
   createCaseWithAudit: vi.fn(),
+  findDraftCaseBySubjectId: vi.fn().mockResolvedValue(null),
   getCase: vi.fn(),
   updateCaseStatus: vi.fn()
 });

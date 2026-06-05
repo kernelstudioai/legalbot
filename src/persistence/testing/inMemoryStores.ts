@@ -47,6 +47,18 @@ export class InMemoryCaseStore implements CaseStore {
     return record;
   }
 
+  async findDraftBySubjectId(subjectId: string): Promise<CaseRecord | null> {
+    const matchingCases = [...this.cases.values()]
+      .filter((record) => record.subjectId === subjectId && record.status === "draft")
+      .sort((left, right) =>
+        left.createdAt === right.createdAt
+          ? left.caseId.localeCompare(right.caseId)
+          : left.createdAt.localeCompare(right.createdAt)
+      );
+
+    return matchingCases[0] ?? null;
+  }
+
   async getById(caseId: string): Promise<CaseRecord | null> {
     return this.cases.get(caseId) ?? null;
   }

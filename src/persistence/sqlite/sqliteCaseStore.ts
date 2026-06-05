@@ -65,6 +65,39 @@ export class SqliteCaseStore implements CaseStore {
     return record;
   }
 
+  async findDraftBySubjectId(subjectId: string): Promise<CaseRecord | null> {
+    const row = this.database
+      .prepare(
+        `
+          SELECT
+            case_id,
+            subject_id,
+            status,
+            name,
+            problem_summary,
+            created_at,
+            updated_at
+          FROM cases
+          WHERE subject_id = ? AND status = 'draft'
+          ORDER BY created_at ASC, case_id ASC
+          LIMIT 1
+        `
+      )
+      .get(subjectId) as
+      | {
+          case_id: string;
+          subject_id: string;
+          status: string;
+          name: string;
+          problem_summary: string;
+          created_at: string;
+          updated_at: string;
+        }
+      | undefined;
+
+    return row ? mapCaseRow(row) : null;
+  }
+
   async getById(caseId: string): Promise<CaseRecord | null> {
     const row = this.database
       .prepare(

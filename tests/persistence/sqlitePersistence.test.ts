@@ -653,7 +653,7 @@ describe("sqlite persistence foundation", () => {
     }
   });
 
-  it("supports case create/get/update skeleton methods", async () => {
+  it("supports case create/find/get/update skeleton methods", async () => {
     const { tempDir, databaseUrl } = createTempDatabaseConfig();
     runSqliteMigrations({ databaseUrl, cwd: tempDir, enabled: true });
 
@@ -684,6 +684,7 @@ describe("sqlite persistence foundation", () => {
         createdAt: "2026-06-04T10:10:00.000Z",
         updatedAt: "2026-06-04T10:10:00.000Z"
       });
+      expect(await store.findDraftBySubjectId("subject-1")).toEqual(created);
       expect(await store.getById("case-1")).toEqual(created);
 
       const updated = await store.update({
@@ -701,6 +702,7 @@ describe("sqlite persistence foundation", () => {
         createdAt: "2026-06-04T10:10:00.000Z",
         updatedAt: "2026-06-04T10:15:00.000Z"
       });
+      expect(await store.findDraftBySubjectId("subject-1")).toBeNull();
       expect(await store.getById("case-1")).toEqual(updated);
       expect(await store.update({
         caseId: "missing-case",

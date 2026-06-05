@@ -26,6 +26,7 @@ export interface UpdateCaseInput {
 
 export interface CaseStore {
   create(input: CreateCaseInput): Promise<CaseRecord>;
+  findDraftBySubjectId(subjectId: string): Promise<CaseRecord | null>;
   getById(caseId: string): Promise<CaseRecord | null>;
   update(input: UpdateCaseInput): Promise<CaseRecord | null>;
 }

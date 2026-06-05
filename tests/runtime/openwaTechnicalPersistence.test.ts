@@ -31,6 +31,7 @@ describe("openwa technical persistence", () => {
   it("sanitizes audit payloads before they reach persistence", async () => {
     const capturedEvents: Array<Record<string, unknown>> = [];
     const persistenceService: PersistenceService = {
+      runInTransaction: async (operation) => operation(),
       isMessageProcessed: async () => false,
       markMessageProcessed: async () => ({
         inserted: true,
@@ -104,6 +105,7 @@ describe("openwa technical persistence", () => {
       createCaseWithAudit: async () => {
         throw new Error("not used");
       },
+      findDraftCaseBySubjectId: async () => null,
       getCase: async () => null,
       updateCaseStatus: async () => null
     };

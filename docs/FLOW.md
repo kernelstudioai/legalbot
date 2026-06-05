@@ -42,10 +42,11 @@
 - Case creation is not part of the live OpenWA runtime path yet. M16 requires an explicit application call to `createCaseFromCompletedIntake(subjectId)` after consent is `granted` and intake state is `intake_complete`.
 - M18 keeps that boundary manual and operator-only through `npm run case:create-from-intake -- --subject <subjectId>`. It is not triggered by intake completion, OpenWA listeners, or any live runtime path.
 - The case-creation boundary revalidates accepted structured `name` and `problemSummary` fields, creates a minimal `draft` case record, and appends a sanitized `case_created_from_intake` audit event.
+- M19 makes repeated manual runs idempotent by subject. If a `draft` case already exists for the same `subjectId`, the boundary returns that existing case, appends `case_create_from_intake_idempotent_hit`, and does not create a duplicate draft.
 - The case-creation boundary uses only accepted structured intake fields. It does not persist transcripts, raw message bodies, rejected values, attachments, or legal advice.
 - Dispatcher is a thin transport boundary around `client.sendText`.
 - OpenWA startup emits `openwa_client_starting`, drives the supervisor through `starting -> ready|degraded`, and exposes readiness through `getHealth()`.
 - Bounded startup retry is controlled by `OPENWA_STARTUP_MAX_ATTEMPTS` and `OPENWA_STARTUP_RETRY_DELAY_SECONDS`.
 - After readiness, transport liveness uses a read-only heartbeat loop controlled by `OPENWA_LIVENESS_INTERVAL_SECONDS` and `OPENWA_LIVENESS_FAILURE_THRESHOLD`.
 - Shutdown emits `openwa_shutdown_starting`, `openwa_shutdown_complete`, and `openwa_shutdown_failed`.
-- No live OpenWA flow path creates a legal case automatically in this milestone. Case creation exists only as an explicit operator command and application boundary, and it is not triggered from listener or intake-completion runtime code.
+- No live OpenWA flow path creates a legal case automatically in this milestone. Case creation exists only as an explicit operator command and application boundary, remains idempotent for repeated manual runs, and is not triggered from listener or intake-completion runtime code.

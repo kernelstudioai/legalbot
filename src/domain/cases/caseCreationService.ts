@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { AuditEventRecord, CaseRecord, CreateCaseInput, PersistenceService } from "../../persistence/index.ts";
 import {
   validateAcceptedClientName,
@@ -7,7 +7,12 @@ import {
 
 export type CaseCreationPersistence = Pick<
   PersistenceService,
-  "createCaseWithAudit" | "getConsentState" | "getIntakeSnapshot"
+  "appendAuditEvent"
+    | "createCaseWithAudit"
+    | "findDraftCaseBySubjectId"
+    | "getConsentState"
+    | "getIntakeSnapshot"
+    | "runInTransaction"
 >;
 
 export interface CaseReferenceGeneratorInput {
@@ -104,6 +109,8 @@ const requireValidatedProblemSummary = (value: string | undefined): string => {
   return parsed.value;
 };
 
+const acceptedFieldNames = ["name", "problemSummary"] as const;
+
 export interface CaseCreationService {
   createCaseFromCompletedIntake(subjectId: string): Promise<CreateCaseFromCompletedIntakeResult>;
 }
@@ -114,56 +121,81 @@ export const createCaseCreationService = ({
   now = () => new Date().toISOString()
 }: CreateCaseCreationServiceOptions): CaseCreationService => ({
   async createCaseFromCompletedIntake(subjectId) {
-    const consentState = await persistence.getConsentState(subjectId);
+    return persistence.runInTransaction(async () => {
+      const existingDraftCase = await persistence.findDraftCaseBySubjectId(subjectId);
 
-    if (consentState !== "granted") {
-      throw new CaseCreationPreconditionError(
-        "consent_not_granted",
-        `Consent must be granted before creating a case. Received: ${consentState}`
-      );
-    }
+      if (existingDraftCase) {
+        const auditEvent = await persistence.appendAuditEvent({
+          eventId: `audit-case-create-from-intake-idempotent-hit-${randomUUID()}`,
+          eventType: "case_create_from_intake_idempotent_hit",
+          entityType: "case",
+          entityId: existingDraftCase.caseId,
+          occurredAt: now(),
+          metadata: {
+            source: "completed_intake",
+            existingStatus: "draft",
+            acceptedFieldNames
+          }
+        });
 
-    const intakeSnapshot = await persistence.getIntakeSnapshot(subjectId);
-
-    if (intakeSnapshot?.state !== "intake_complete") {
-      throw new CaseCreationPreconditionError(
-        "intake_not_complete",
-        "Intake must be complete before creating a case"
-      );
-    }
-
-    const name = requireValidatedName(intakeSnapshot.fields.name);
-    const problemSummary = requireValidatedProblemSummary(intakeSnapshot.fields.problemSummary);
-    const createdAt = now();
-    const caseInput: CreateCaseInput = {
-      caseId: caseReferenceGenerator.generate({
-        subjectId,
-        createdAt,
-        name,
-        problemSummary
-      }),
-      subjectId,
-      status: "draft",
-      name,
-      problemSummary,
-      createdAt,
-      updatedAt: createdAt
-    };
-    return persistence.createCaseWithAudit({
-      case: caseInput,
-      auditEvent: {
-        eventId: `audit-case-created-from-intake-${caseInput.caseId}`,
-        eventType: "case_created_from_intake",
-        entityType: "case",
-        entityId: caseInput.caseId,
-        occurredAt: createdAt,
-        metadata: {
-          source: "completed_intake",
-          consentState: "granted",
-          intakeState: "intake_complete",
-          acceptedFieldNames: ["name", "problemSummary"]
-        }
+        return {
+          caseRecord: existingDraftCase,
+          auditEvent
+        };
       }
+
+      const consentState = await persistence.getConsentState(subjectId);
+
+      if (consentState !== "granted") {
+        throw new CaseCreationPreconditionError(
+          "consent_not_granted",
+          `Consent must be granted before creating a case. Received: ${consentState}`
+        );
+      }
+
+      const intakeSnapshot = await persistence.getIntakeSnapshot(subjectId);
+
+      if (intakeSnapshot?.state !== "intake_complete") {
+        throw new CaseCreationPreconditionError(
+          "intake_not_complete",
+          "Intake must be complete before creating a case"
+        );
+      }
+
+      const name = requireValidatedName(intakeSnapshot.fields.name);
+      const problemSummary = requireValidatedProblemSummary(intakeSnapshot.fields.problemSummary);
+      const createdAt = now();
+      const caseInput: CreateCaseInput = {
+        caseId: caseReferenceGenerator.generate({
+          subjectId,
+          createdAt,
+          name,
+          problemSummary
+        }),
+        subjectId,
+        status: "draft",
+        name,
+        problemSummary,
+        createdAt,
+        updatedAt: createdAt
+      };
+
+      return persistence.createCaseWithAudit({
+        case: caseInput,
+        auditEvent: {
+          eventId: `audit-case-created-from-intake-${caseInput.caseId}`,
+          eventType: "case_created_from_intake",
+          entityType: "case",
+          entityId: caseInput.caseId,
+          occurredAt: createdAt,
+          metadata: {
+            source: "completed_intake",
+            consentState: "granted",
+            intakeState: "intake_complete",
+            acceptedFieldNames
+          }
+        }
+      });
     });
   }
 });

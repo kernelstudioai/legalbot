@@ -281,6 +281,7 @@ describe("persistence service boundary", () => {
         create: async () => {
           throw new Error("not used");
         },
+        findDraftBySubjectId: async () => null,
         getById: async () => null,
         update: async () => null
       } satisfies CaseStore,
@@ -342,12 +343,14 @@ describe("persistence service boundary", () => {
     });
 
     expect(created.status).toBe("draft");
+    await expect(service.findDraftCaseBySubjectId("subject-1")).resolves.toEqual(created);
     await expect(service.getCase("case-1")).resolves.toEqual(created);
     await expect(service.updateCaseStatus("case-1", "review_pending")).resolves.toEqual({
       ...created,
       status: "review_pending",
       updatedAt: "2026-06-04T12:05:00.000Z"
     });
+    await expect(service.findDraftCaseBySubjectId("subject-1")).resolves.toBeNull();
     await expect(service.getCase("missing-case")).resolves.toBeNull();
   });
 
@@ -887,6 +890,7 @@ describe("persistence service boundary", () => {
         create: async () => {
           throw new Error("not used");
         },
+        findDraftBySubjectId: async () => null,
         getById: async () => null,
         update: async () => null
       } satisfies CaseStore,
@@ -956,6 +960,7 @@ describe("persistence service boundary", () => {
         create: async () => {
           throw new Error("not used");
         },
+        findDraftBySubjectId: async () => null,
         getById: async () => null,
         update: async () => null
       } satisfies CaseStore,
@@ -1058,6 +1063,7 @@ describe("persistence service boundary", () => {
         create: async () => {
           throw new Error("not used");
         },
+        findDraftBySubjectId: async () => null,
         getById: async () => null,
         update: async () => null
       } satisfies CaseStore,

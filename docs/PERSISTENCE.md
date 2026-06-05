@@ -18,6 +18,8 @@ M17 hardens the SQLite `cases` schema for legacy databases and adds a transactio
 
 M18 adds an explicit operator-only command, `npm run case:create-from-intake -- --subject <subjectId>`, that invokes the existing case-creation boundary manually after migrations are already applied.
 
+M19 makes that manual case-creation path idempotent for repeated runs on the same `subjectId`. When a `draft` case already exists for the subject, the boundary returns the existing case, appends a sanitized `case_create_from_intake_idempotent_hit` audit event, and does not create a duplicate row.
+
 ## Interfaces
 
 - `CaseStore`: minimal create/get/update support for case records built from accepted structured intake data only.
@@ -44,6 +46,7 @@ M18 adds an explicit operator-only command, `npm run case:create-from-intake -- 
   - `appendIntakeEvent(event)`
   - `createCase(input)`
   - `createCaseWithAudit({ case, auditEvent })`
+  - `findDraftCaseBySubjectId(subjectId)`
   - `getCase(caseId)`
   - `updateCaseStatus(caseId, status)`
 - `createSqlitePersistenceService(config)` opens a SQLite-backed service against an explicit `file:` database path.
@@ -52,9 +55,10 @@ M18 adds an explicit operator-only command, `npm run case:create-from-intake -- 
 - The OpenWA smoke runtime can inject an existing `PersistenceService` or create a SQLite-backed one only when `TECHNICAL_PERSISTENCE_ENABLED=true`.
 - Client runtime wiring uses narrow application-layer adapters so consent-gated intake writes stay separate from M10 technical dedupe and audit wiring.
 - `src/domain/cases/caseCreationService.ts` is the explicit application boundary that reads consent and intake through `PersistenceService`, revalidates accepted fields, creates a `draft` case, and appends a sanitized `case_created_from_intake` audit event.
+- On repeated manual runs for the same subject, that boundary first looks up an existing `draft` case through `findDraftCaseBySubjectId(subjectId)`. If one exists, it returns the existing case and appends only a sanitized `case_create_from_intake_idempotent_hit` audit event.
 - `createCaseWithAudit(...)` is transactional for the bundled SQLite and in-memory persistence implementations so a case row and its audit event commit or roll back together.
 - M16 does not wire that service into the live OpenWA listener or intake-completion runtime path yet.
-- `src/app/caseCreateFromIntake.ts` is the operator entrypoint for manual case creation. It loads env through the shared loader, requires an already migrated SQLite database, accepts `--subject <subjectId>`, and prints only `{ caseId, status, createdAt }`.
+- `src/app/caseCreateFromIntake.ts` is the operator entrypoint for manual case creation. It loads env through the shared loader, requires an already migrated SQLite database, accepts `--subject <subjectId>`, and prints only `{ caseId, status, createdAt }`. Repeated runs for the same completed-intake subject return the existing draft case instead of creating another one.
 
 ## SQLite Foundation
 
@@ -108,6 +112,7 @@ M18 adds an explicit operator-only command, `npm run case:create-from-intake -- 
 - The M17 schema-hardening migration copies forward only those case fields and removes legacy `rawBody`, `body`, `transcript`, or other extra columns from the SQLite `cases` table.
 - Case creation does not store full phone-number metadata, raw message bodies, transcripts, rejected values, attachments, or legal advice content.
 - The M18 manual command still stores only the accepted structured `name` and `problemSummary` fields already present in intake persistence. It does not persist raw bodies, transcripts, rejected values, or secret-bearing metadata.
+- M19 keeps manual case creation idempotent by `subjectId` plus existing `draft` case. The idempotent-hit audit event stores only sanitized structured metadata and does not persist transcripts, raw bodies, rejected values, or full phone numbers.
 - Live WhatsApp runtime writes never create or update cases automatically.
 - M13 live consent wiring never stores inbound message body text in consent state metadata or consent events.
 - M15 live intake wiring persists only accepted structured `name` and `problemSummary` values plus sanitized metadata after explicit `granted` consent.
@@ -167,4 +172,8 @@ M18 adds an explicit operator-only command, `npm run case:create-from-intake -- 
   - `npm run case:create-from-intake -- --subject <subjectId>`
   - fail safely when migrations are missing or incomplete
   - print and log only sanitized case creation output (`caseId`, `status`, `createdAt`)
+- M19 adds an idempotency guard to that manual-only path:
+  - first run creates one `draft` case plus `case_created_from_intake`
+  - repeated runs on the same subject return the existing `draft` case
+  - repeated runs append only sanitized `case_create_from_intake_idempotent_hit`
 - The live OpenWA runtime still does not create cases automatically, store full transcripts, or persist raw message bodies.

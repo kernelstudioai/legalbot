@@ -3,6 +3,7 @@ import type { PersistenceTransactionRunner } from "../persistenceService.ts";
 
 class SqliteTransactionRunner implements PersistenceTransactionRunner {
   private savepointCounter = 0;
+  private transactionDepth = 0;
   private readonly database: DatabaseSync;
 
   constructor(database: DatabaseSync) {
@@ -10,18 +11,40 @@ class SqliteTransactionRunner implements PersistenceTransactionRunner {
   }
 
   async runInTransaction<T>(operation: () => Promise<T>): Promise<T> {
-    const savepointName = `legalbot_tx_${this.savepointCounter++}`;
+    const isOuterTransaction = this.transactionDepth === 0;
+    const savepointName = isOuterTransaction
+      ? null
+      : `legalbot_tx_${this.savepointCounter++}`;
 
-    this.database.exec(`SAVEPOINT ${savepointName}`);
+    this.transactionDepth += 1;
+
+    if (isOuterTransaction) {
+      this.database.exec("BEGIN IMMEDIATE");
+    } else {
+      this.database.exec(`SAVEPOINT ${savepointName}`);
+    }
 
     try {
       const result = await operation();
-      this.database.exec(`RELEASE SAVEPOINT ${savepointName}`);
+
+      if (isOuterTransaction) {
+        this.database.exec("COMMIT");
+      } else {
+        this.database.exec(`RELEASE SAVEPOINT ${savepointName}`);
+      }
+
       return result;
     } catch (error) {
-      this.database.exec(`ROLLBACK TO SAVEPOINT ${savepointName}`);
-      this.database.exec(`RELEASE SAVEPOINT ${savepointName}`);
+      if (isOuterTransaction) {
+        this.database.exec("ROLLBACK");
+      } else {
+        this.database.exec(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+        this.database.exec(`RELEASE SAVEPOINT ${savepointName}`);
+      }
+
       throw error;
+    } finally {
+      this.transactionDepth -= 1;
     }
   }
 }
