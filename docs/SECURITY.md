@@ -12,6 +12,7 @@
 - Keep M10 technical dedupe markers and sanitized audit events separate from any future consent-gated client content persistence.
 - M13 runtime consent wiring still stores only consent state plus sanitized metadata; it must strip `messageBody`, `body`, `content`, and `text`, and must not retain full phone numbers, tokens, or browser/session/QR paths.
 - M15 intake persistence remains consent-gated. It must not persist raw message bodies or full transcripts, and it may retain only explicitly accepted structured intake fields after `granted` consent.
+- M16 case creation is an explicit application boundary only. It may create a `draft` case only from `granted` consent, an `intake_complete` snapshot, and revalidated accepted `name` plus `problemSummary` fields.
 - Consent persistence uses a generic `subjectId` string and does not require phone-number semantics.
 - Live OpenWA transport stays transport-only even though the application layer can now inject consent and intake persistence into the client runtime.
 
@@ -25,10 +26,12 @@
 - The client runtime may persist only consent state transitions and append-only consent events. It must not persist inbound message bodies, legal facts, or create case records.
 - The intake runtime must stay under `src/runtime/client` and remain transport-agnostic. It may collect only validated structured fields, must reject empty or overly long values, and must not create live cases or provide legal advice.
 - Intake persistence may store only accepted `name` and `problemSummary` values plus sanitized metadata. It must reject unknown field names, strip `messageBody`, `body`, `content`, and `text`, and redact full phone numbers, tokens, and browser/session/QR paths.
+- The case-creation boundary must stay outside `src/transport/openwa`. It must use only accepted structured intake fields, must append sanitized audit metadata, and must not persist raw message bodies, transcripts, rejected values, or full phone-number metadata.
+- Live OpenWA listener and client-intake runtime code must not call case creation automatically in M16.
 - Rejected intake replies and ambiguous consent replies must not be persisted.
 - The `subjectId` for consent state is the canonical sender/chat id. Any stored metadata must avoid restating the full phone number and must remain sanitized through the persistence boundary.
 
 ## Current Gaps
 
 - Authentication, encryption at rest, and retention policies are not implemented in this phase.
-- Transcript persistence, case creation, and legal-advice generation remain out of scope until future dedicated milestones.
+- Transcript persistence and legal-advice generation remain out of scope. Case creation now exists only as an explicit tested application boundary and is still not wired into the live OpenWA runtime.

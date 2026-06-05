@@ -324,12 +324,14 @@ describe("persistence service boundary", () => {
 
     const created = await service.createCase({
       caseId: "case-1",
-      clientPhoneE164: "+15551234567",
+      subjectId: "subject-1",
+      name: "Mario Rossi",
+      problemSummary: "Sintesi breve del problema",
       createdAt: "2026-06-04T12:04:00.000Z",
       updatedAt: "2026-06-04T12:04:00.000Z"
     });
 
-    expect(created.status).toBe("pending");
+    expect(created.status).toBe("draft");
     await expect(service.getCase("case-1")).resolves.toEqual(created);
     await expect(service.updateCaseStatus("case-1", "review_pending")).resolves.toEqual({
       ...created,
@@ -723,11 +725,15 @@ describe("persistence service boundary", () => {
     await expect(
       service.createCase({
         caseId: "case-memory-1",
-        clientPhoneE164: "+15557654321"
+        subjectId: "memory-subject-1",
+        name: "Giulia Verdi",
+        problemSummary: "Richiesta iniziale sintetica"
       })
     ).resolves.toMatchObject({
       caseId: "case-memory-1",
-      clientPhoneE164: "+15557654321"
+      subjectId: "memory-subject-1",
+      name: "Giulia Verdi",
+      problemSummary: "Richiesta iniziale sintetica"
     });
     await expect(service.getConsentState("memory-subject")).resolves.toBe("unknown");
     await expect(service.getIntakeState("memory-subject")).resolves.toBe("not_started");

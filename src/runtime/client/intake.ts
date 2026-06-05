@@ -1,7 +1,15 @@
 import { z } from "zod";
 import { RuntimeDecision } from "../../contracts/index.ts";
 import type { RuntimeDecisionType } from "../../contracts/index.ts";
+import {
+  CLIENT_NAME_MAX_LENGTH,
+  CLIENT_PROBLEM_SUMMARY_MAX_LENGTH,
+  validateAcceptedClientName,
+  validateAcceptedProblemSummary
+} from "../../domain/intake/acceptedFields.ts";
 import { InMemoryIntakeStore, type IntakeFieldName } from "../../persistence/index.ts";
+
+export { CLIENT_NAME_MAX_LENGTH, CLIENT_PROBLEM_SUMMARY_MAX_LENGTH };
 
 export const intakeStates = [
   "not_started",
@@ -11,9 +19,6 @@ export const intakeStates = [
 ] as const;
 
 export type IntakeState = (typeof intakeStates)[number];
-
-export const CLIENT_NAME_MAX_LENGTH = 80;
-export const CLIENT_PROBLEM_SUMMARY_MAX_LENGTH = 500;
 
 export interface ClientIntakeRecord {
   subjectId: string;
@@ -150,24 +155,6 @@ export const isIntakeRuntimeAction = (
   action: RuntimeDecisionType["action"]
 ): action is IntakeRuntimeAction => action in intakeMessageTemplates;
 
-const normalizeStructuredValue = (value: string): string => value.trim().replace(/\s+/g, " ");
-
-const validateStructuredField = (
-  value: string | undefined,
-  maxLength: number
-): { valid: true; value: string } | { valid: false } => {
-  const normalizedValue = normalizeStructuredValue(value ?? "");
-
-  if (normalizedValue.length === 0 || normalizedValue.length > maxLength) {
-    return { valid: false };
-  }
-
-  return {
-    valid: true,
-    value: normalizedValue
-  };
-};
-
 const buildNextRecord = (
   subjectId: string,
   state: IntakeState,
@@ -231,7 +218,7 @@ export const resolveClientIntakeRuntimeDecision = ({
   }
 
   if (currentState === "asking_name") {
-    const parsedName = validateStructuredField(inboundText, CLIENT_NAME_MAX_LENGTH);
+    const parsedName = validateAcceptedClientName(inboundText);
 
     if (!parsedName.valid) {
       return {
@@ -257,7 +244,7 @@ export const resolveClientIntakeRuntimeDecision = ({
     };
   }
 
-  const parsedSummary = validateStructuredField(inboundText, CLIENT_PROBLEM_SUMMARY_MAX_LENGTH);
+  const parsedSummary = validateAcceptedProblemSummary(inboundText);
 
   if (!parsedSummary.valid) {
     return {

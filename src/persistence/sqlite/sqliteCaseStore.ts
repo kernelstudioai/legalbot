@@ -3,16 +3,18 @@ import type { CaseRecord, CaseStore, CreateCaseInput, UpdateCaseInput } from "..
 
 const mapCaseRow = (row: {
   case_id: string;
-  channel: "whatsapp";
-  client_phone_e164: string;
+  subject_id: string;
   status: string;
+  name: string;
+  problem_summary: string;
   created_at: string;
   updated_at: string;
 }): CaseRecord => ({
   caseId: row.case_id,
-  channel: row.channel,
-  clientPhoneE164: row.client_phone_e164,
+  subjectId: row.subject_id,
   status: row.status,
+  name: row.name,
+  problemSummary: row.problem_summary,
   createdAt: row.created_at,
   updatedAt: row.updated_at
 });
@@ -23,9 +25,10 @@ export class SqliteCaseStore implements CaseStore {
   async create(input: CreateCaseInput): Promise<CaseRecord> {
     const record: CaseRecord = {
       caseId: input.caseId,
-      channel: input.channel ?? "whatsapp",
-      clientPhoneE164: input.clientPhoneE164,
-      status: input.status ?? "pending",
+      subjectId: input.subjectId,
+      status: input.status ?? "draft",
+      name: input.name,
+      problemSummary: input.problemSummary,
       createdAt: input.createdAt ?? new Date().toISOString(),
       updatedAt: input.updatedAt ?? input.createdAt ?? new Date().toISOString()
     };
@@ -35,20 +38,22 @@ export class SqliteCaseStore implements CaseStore {
         `
           INSERT INTO cases (
             case_id,
-            channel,
-            client_phone_e164,
+            subject_id,
             status,
+            name,
+            problem_summary,
             created_at,
             updated_at
           )
-          VALUES (?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
         `
       )
       .run(
         record.caseId,
-        record.channel,
-        record.clientPhoneE164,
+        record.subjectId,
         record.status,
+        record.name,
+        record.problemSummary,
         record.createdAt,
         record.updatedAt
       );
@@ -62,9 +67,10 @@ export class SqliteCaseStore implements CaseStore {
         `
           SELECT
             case_id,
-            channel,
-            client_phone_e164,
+            subject_id,
             status,
+            name,
+            problem_summary,
             created_at,
             updated_at
           FROM cases
@@ -74,9 +80,10 @@ export class SqliteCaseStore implements CaseStore {
       .get(caseId) as
       | {
           case_id: string;
-          channel: "whatsapp";
-          client_phone_e164: string;
+          subject_id: string;
           status: string;
+          name: string;
+          problem_summary: string;
           created_at: string;
           updated_at: string;
         }

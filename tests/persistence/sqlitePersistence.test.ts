@@ -532,17 +532,20 @@ describe("sqlite persistence foundation", () => {
 
       const created = await store.create({
         caseId: "case-1",
-        clientPhoneE164: "+15551234567",
-        status: "pending",
+        subjectId: "subject-1",
+        status: "draft",
+        name: "Mario Rossi",
+        problemSummary: "Sintesi breve del problema",
         createdAt: "2026-06-04T10:10:00.000Z",
         updatedAt: "2026-06-04T10:10:00.000Z"
       });
 
       expect(created).toEqual({
         caseId: "case-1",
-        channel: "whatsapp",
-        clientPhoneE164: "+15551234567",
-        status: "pending",
+        subjectId: "subject-1",
+        status: "draft",
+        name: "Mario Rossi",
+        problemSummary: "Sintesi breve del problema",
         createdAt: "2026-06-04T10:10:00.000Z",
         updatedAt: "2026-06-04T10:10:00.000Z"
       });
@@ -556,9 +559,10 @@ describe("sqlite persistence foundation", () => {
 
       expect(updated).toEqual({
         caseId: "case-1",
-        channel: "whatsapp",
-        clientPhoneE164: "+15551234567",
+        subjectId: "subject-1",
         status: "review_pending",
+        name: "Mario Rossi",
+        problemSummary: "Sintesi breve del problema",
         createdAt: "2026-06-04T10:10:00.000Z",
         updatedAt: "2026-06-04T10:15:00.000Z"
       });

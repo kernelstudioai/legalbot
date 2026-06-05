@@ -18,6 +18,7 @@
 - M13 wires that consent state into the live client runtime path only.
 - M14 adds the intake state machine under `src/runtime/client/intake.ts`.
 - M15 adds consent-gated intake persistence under `src/persistence/*` and keeps SQLite wiring behind `PersistenceService`.
+- M16 adds an explicit application-only case-creation boundary under `src/domain/cases/caseCreationService.ts`.
 - When consent is `unknown`, the client runtime returns `request_consent` and upgrades stored consent to `requested` when a consent persistence adapter is available.
 - When consent is `requested`, only strict explicit grant or denial phrases change state. Grant persists `granted`, appends a consent event, and immediately starts intake with `intake_ask_name`. Denial persists `denied`, appends a consent event, and returns `consent_denied_close`. Ambiguous replies return `consent_clarification` and do not grant consent.
 - When consent is already `granted`, the runtime enters the intake state machine:
@@ -38,9 +39,12 @@
 - Consent persistence remains separate from M10 technical dedupe and technical audit writes.
 - Intake state remains separate from both consent-state persistence and technical persistence, and OpenWA listener files stay transport-only.
 - Consent subject identity is derived narrowly from the canonical sender/chat id and used only as `subjectId`. Consent metadata stores durable routing facts such as `messageId`, channel, runtime, and source markers, not full phone numbers.
+- Case creation is not part of the live OpenWA runtime path yet. M16 requires an explicit application call to `createCaseFromCompletedIntake(subjectId)` after consent is `granted` and intake state is `intake_complete`.
+- The case-creation boundary revalidates accepted structured `name` and `problemSummary` fields, creates a minimal `draft` case record, and appends a sanitized `case_created_from_intake` audit event.
+- The case-creation boundary uses only accepted structured intake fields. It does not persist transcripts, raw message bodies, rejected values, attachments, or legal advice.
 - Dispatcher is a thin transport boundary around `client.sendText`.
 - OpenWA startup emits `openwa_client_starting`, drives the supervisor through `starting -> ready|degraded`, and exposes readiness through `getHealth()`.
 - Bounded startup retry is controlled by `OPENWA_STARTUP_MAX_ATTEMPTS` and `OPENWA_STARTUP_RETRY_DELAY_SECONDS`.
 - After readiness, transport liveness uses a read-only heartbeat loop controlled by `OPENWA_LIVENESS_INTERVAL_SECONDS` and `OPENWA_LIVENESS_FAILURE_THRESHOLD`.
 - Shutdown emits `openwa_shutdown_starting`, `openwa_shutdown_complete`, and `openwa_shutdown_failed`.
-- No flow path in this milestone creates a legal case. Future case creation must remain a separate milestone.
+- No live OpenWA flow path creates a legal case automatically in this milestone. Case creation exists only as an explicit application boundary and is not triggered from listener or intake-completion runtime code.

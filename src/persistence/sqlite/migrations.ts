@@ -9,9 +9,10 @@ export const sqliteMigrations: SqliteMigration[] = [
     sql: `
       CREATE TABLE IF NOT EXISTS cases (
         case_id TEXT PRIMARY KEY,
-        channel TEXT NOT NULL,
-        client_phone_e164 TEXT NOT NULL,
+        subject_id TEXT NOT NULL,
         status TEXT NOT NULL,
+        name TEXT NOT NULL,
+        problem_summary TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );

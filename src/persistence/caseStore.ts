@@ -1,17 +1,19 @@
 export interface CaseRecord {
   caseId: string;
-  channel: "whatsapp";
-  clientPhoneE164: string;
+  subjectId: string;
   status: string;
+  name: string;
+  problemSummary: string;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface CreateCaseInput {
   caseId: string;
-  channel?: "whatsapp";
-  clientPhoneE164: string;
+  subjectId: string;
   status?: string;
+  name: string;
+  problemSummary: string;
   createdAt?: string;
   updatedAt?: string;
 }

@@ -24,8 +24,7 @@ import type {
   UpdateCaseInput
 } from "../index.ts";
 
-const defaultCaseChannel = "whatsapp" as const;
-const defaultCaseStatus = "pending";
+const defaultCaseStatus = "draft";
 
 export class InMemoryCaseStore implements CaseStore {
   private readonly cases = new Map<string, CaseRecord>();
@@ -33,9 +32,10 @@ export class InMemoryCaseStore implements CaseStore {
   async create(input: CreateCaseInput): Promise<CaseRecord> {
     const record: CaseRecord = {
       caseId: input.caseId,
-      channel: input.channel ?? defaultCaseChannel,
-      clientPhoneE164: input.clientPhoneE164,
+      subjectId: input.subjectId,
       status: input.status ?? defaultCaseStatus,
+      name: input.name,
+      problemSummary: input.problemSummary,
       createdAt: input.createdAt ?? new Date().toISOString(),
       updatedAt: input.updatedAt ?? input.createdAt ?? new Date().toISOString()
     };
