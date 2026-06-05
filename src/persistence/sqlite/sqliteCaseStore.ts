@@ -20,7 +20,11 @@ const mapCaseRow = (row: {
 });
 
 export class SqliteCaseStore implements CaseStore {
-  constructor(private readonly database: DatabaseSync) {}
+  private readonly database: DatabaseSync;
+
+  constructor(database: DatabaseSync) {
+    this.database = database;
+  }
 
   async create(input: CreateCaseInput): Promise<CaseRecord> {
     const record: CaseRecord = {

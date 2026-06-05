@@ -26,7 +26,11 @@ const mapStateRow = (row: {
 });
 
 export class SqliteIntakeStore implements IntakeStore {
-  constructor(private readonly database: DatabaseSync) {}
+  private readonly database: DatabaseSync;
+
+  constructor(database: DatabaseSync) {
+    this.database = database;
+  }
 
   async getIntakeState(subjectId: string): Promise<IntakeState> {
     const row = this.database

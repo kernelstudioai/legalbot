@@ -2,7 +2,11 @@ import type { DatabaseSync } from "node:sqlite";
 import type { AuditEventRecord, AuditLogStore } from "../auditLogStore.ts";
 
 export class SqliteAuditLogStore implements AuditLogStore {
-  constructor(private readonly database: DatabaseSync) {}
+  private readonly database: DatabaseSync;
+
+  constructor(database: DatabaseSync) {
+    this.database = database;
+  }
 
   async append(event: AuditEventRecord): Promise<void> {
     this.database

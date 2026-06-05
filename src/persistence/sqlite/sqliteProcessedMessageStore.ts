@@ -6,7 +6,11 @@ import type {
 } from "../processedMessageStore.ts";
 
 export class SqliteProcessedMessageStore implements ProcessedMessageStore {
-  constructor(private readonly database: DatabaseSync) {}
+  private readonly database: DatabaseSync;
+
+  constructor(database: DatabaseSync) {
+    this.database = database;
+  }
 
   async has(messageId: string): Promise<boolean> {
     const row = this.database

@@ -20,7 +20,11 @@ const mapConsentStateRow = (row: {
 });
 
 export class SqliteConsentStore implements ConsentStore {
-  constructor(private readonly database: DatabaseSync) {}
+  private readonly database: DatabaseSync;
+
+  constructor(database: DatabaseSync) {
+    this.database = database;
+  }
 
   async getConsentState(subjectId: string): Promise<ConsentState> {
     const row = this.database

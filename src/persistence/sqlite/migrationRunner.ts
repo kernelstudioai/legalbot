@@ -21,11 +21,19 @@ export interface SqliteMigrationStatusResult {
 }
 
 export class SqliteMigrationRunner {
+  private readonly database: DatabaseSync;
+  private readonly migrations: SqliteMigration[];
+  private readonly now: () => string;
+
   constructor(
-    private readonly database: DatabaseSync,
-    private readonly migrations: SqliteMigration[] = sqliteMigrations,
-    private readonly now: () => string = () => new Date().toISOString()
-  ) {}
+    database: DatabaseSync,
+    migrations: SqliteMigration[] = sqliteMigrations,
+    now: () => string = () => new Date().toISOString()
+  ) {
+    this.database = database;
+    this.migrations = migrations;
+    this.now = now;
+  }
 
   run(options: SqliteMigrationRunnerOptions = {}): SqliteMigrationRunResult {
     const enabled = options.enabled ?? true;
