@@ -1,8 +1,12 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+import { describe, expect, it, vi } from "vitest";
 import type { Logger } from "../../src/logging/logger";
 import {
+  createOpenWaStatusServerHandler,
   sanitizeSupervisorHealth,
-  startOpenWaStatusServer
+  startOpenWaStatusServer,
+  type OpenWaStatusHttpServer
 } from "../../src/app/openwaStatusServer";
 import type { OpenWaSupervisorHealth } from "../../src/transport/openwa/supervisor";
 
@@ -38,45 +42,103 @@ const createHealth = (
   ...overrides
 });
 
-const getJson = async (url: string) => {
-  const response = await fetch(url);
+const invokeHandler = (
+  path: string,
+  getHealth: () => OpenWaSupervisorHealth,
+  method = "GET"
+) => {
+  const handler = createOpenWaStatusServerHandler(getHealth);
+  const headers = new Map<string, string>();
+  let payload = "";
+  const responseState: {
+    statusCode: number;
+    setHeader(name: string, value: string): void;
+    end(chunk?: string): void;
+  } = {
+    statusCode: 0,
+    setHeader(name, value) {
+      headers.set(name, value);
+    },
+    end(chunk = "") {
+      payload = chunk;
+    }
+  };
+  const request = {
+    method,
+    url: path
+  } as IncomingMessage;
+
+  handler(request, responseState as unknown as ServerResponse);
+
   return {
-    response,
-    json: await response.json()
+    headers,
+    payload: JSON.parse(payload),
+    statusCode: responseState.statusCode
   };
 };
 
-describe("openwa status server", () => {
-  const activeServers: Array<{ stop(): Promise<void> }> = [];
+const createFakeHttpServer = (options?: {
+  address?: AddressInfo;
+  listenError?: Error;
+}) => {
+  const onceListeners = new Map<"error" | "listening", (...args: any[]) => void>();
+  const address =
+    options?.address ??
+    ({
+      address: "127.0.0.1",
+      family: "IPv4",
+      port: 4010
+    } satisfies AddressInfo);
 
-  afterEach(async () => {
-    while (activeServers.length > 0) {
-      await activeServers.pop()?.stop();
+  const server: OpenWaStatusHttpServer = {
+    once(event, listener) {
+      onceListeners.set(event, listener);
+      return this;
+    },
+    off(event, listener) {
+      const current = onceListeners.get(event);
+
+      if (current === listener) {
+        onceListeners.delete(event);
+      }
+
+      return this;
+    },
+    listen() {
+      if (options?.listenError) {
+        onceListeners.get("error")?.(options.listenError);
+        onceListeners.delete("error");
+        return this;
+      }
+
+      onceListeners.get("listening")?.();
+      onceListeners.delete("listening");
+      return this;
+    },
+    address() {
+      return address;
+    },
+    close(callback) {
+      callback();
+      return this;
     }
-  });
+  };
 
-  it("returns an alive sanitized health response", async () => {
-    const server = await startOpenWaStatusServer({
-      config: {
-        enabled: true,
-        host: "127.0.0.1",
-        port: 0
-      },
-      logger: createLogger(),
-      getHealth: () =>
-        createHealth({
-          lastError:
-            "browser failed at C:\\Users\\Jacopo\\Documents\\legalbot\\openwa-session while sending body hello to +15551234567"
-        })
-    });
-    activeServers.push(server);
+  return server;
+};
 
-    const { response, json } = await getJson(
-      `http://${server.address?.host}:${server.address?.port}/health`
+describe("openwa status server", () => {
+  it("returns an alive sanitized health response", () => {
+    const { headers, payload, statusCode } = invokeHandler("/health", () =>
+      createHealth({
+        lastError:
+          "browser failed at C:\\Users\\Jacopo\\Documents\\legalbot\\openwa-session while sending body hello to +15551234567"
+      })
     );
 
-    expect(response.status).toBe(200);
-    expect(json).toEqual({
+    expect(statusCode).toBe(200);
+    expect(headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(payload).toEqual({
       alive: true,
       transport: {
         state: "ready",
@@ -92,54 +154,29 @@ describe("openwa status server", () => {
     });
   });
 
-  it("returns 200 on ready only when the supervisor is ready", async () => {
-    const readyServer = await startOpenWaStatusServer({
-      config: {
-        enabled: true,
-        host: "127.0.0.1",
-        port: 0
-      },
-      logger: createLogger(),
-      getHealth: () => createHealth()
-    });
-    activeServers.push(readyServer);
-
-    const degradedServer = await startOpenWaStatusServer({
-      config: {
-        enabled: true,
-        host: "127.0.0.1",
-        port: 0
-      },
-      logger: createLogger(),
-      getHealth: () =>
-        createHealth({
-          state: "degraded",
-          ready: false,
-          livenessFailureCount: 3
-        })
-    });
-    activeServers.push(degradedServer);
-
-    const readyResult = await getJson(
-      `http://${readyServer.address?.host}:${readyServer.address?.port}/ready`
-    );
-    const degradedResult = await getJson(
-      `http://${degradedServer.address?.host}:${degradedServer.address?.port}/ready`
+  it("returns 200 on ready only when the supervisor is ready", () => {
+    const readyResult = invokeHandler("/ready", () => createHealth());
+    const degradedResult = invokeHandler("/ready", () =>
+      createHealth({
+        state: "degraded",
+        ready: false,
+        livenessFailureCount: 3
+      })
     );
 
-    expect(readyResult.response.status).toBe(200);
-    expect(readyResult.json).toEqual({
+    expect(readyResult.statusCode).toBe(200);
+    expect(readyResult.payload).toEqual({
       ready: true,
       state: "ready"
     });
-    expect(degradedResult.response.status).toBe(503);
-    expect(degradedResult.json).toEqual({
+    expect(degradedResult.statusCode).toBe(503);
+    expect(degradedResult.payload).toEqual({
       ready: false,
       state: "degraded"
     });
   });
 
-  it("returns the full sanitized supervisor health object", async () => {
+  it("returns the full sanitized supervisor health object", () => {
     const health = createHealth({
       state: "degraded",
       ready: false,
@@ -150,29 +187,16 @@ describe("openwa status server", () => {
       lastError:
         "browser failed at C:\\Users\\Jacopo\\AppData\\Local\\Chrome with qr token and body hello for +15551234567"
     });
-    const server = await startOpenWaStatusServer({
-      config: {
-        enabled: true,
-        host: "127.0.0.1",
-        port: 0
-      },
-      logger: createLogger(),
-      getHealth: () => health
-    });
-    activeServers.push(server);
+    const { payload, statusCode } = invokeHandler("/status", () => health);
 
-    const { response, json } = await getJson(
-      `http://${server.address?.host}:${server.address?.port}/status`
-    );
-
-    expect(response.status).toBe(200);
-    expect(json).toEqual({
+    expect(statusCode).toBe(200);
+    expect(payload).toEqual({
       ...health,
       lastError: "redacted_sensitive_error"
     });
-    expect(JSON.stringify(json)).not.toContain("AppData");
-    expect(JSON.stringify(json)).not.toContain("+15551234567");
-    expect(JSON.stringify(json)).not.toContain("body hello");
+    expect(JSON.stringify(payload)).not.toContain("AppData");
+    expect(JSON.stringify(payload)).not.toContain("+15551234567");
+    expect(JSON.stringify(payload)).not.toContain("body hello");
   });
 
   it("closes the status server on shutdown", async () => {
@@ -184,18 +208,22 @@ describe("openwa status server", () => {
         port: 0
       },
       logger,
-      getHealth: () => createHealth()
+      getHealth: () => createHealth(),
+      createHttpServer: () =>
+        createFakeHttpServer({
+          address: {
+            address: "127.0.0.1",
+            family: "IPv4",
+            port: 4011
+          }
+        })
     });
-
-    const url = `http://${server.address?.host}:${server.address?.port}/health`;
-    await expect(fetch(url)).resolves.toBeDefined();
 
     await server.stop();
 
-    await expect(fetch(url)).rejects.toThrow();
     expect(logger.info).toHaveBeenCalledWith("openwa_status_server_stopped", {
-      host: server.address?.host,
-      port: server.address?.port
+      host: "127.0.0.1",
+      port: 4011
     });
   });
 

@@ -20,10 +20,21 @@ export interface OpenWaStatusServer {
   stop(): Promise<void>;
 }
 
-interface StartOpenWaStatusServerOptions {
+export interface OpenWaStatusHttpServer {
+  once(event: "error" | "listening", listener: (...args: any[]) => void): this;
+  off(event: "error" | "listening", listener: (...args: any[]) => void): this;
+  listen(port: number, host: string): this;
+  address(): ReturnType<Server["address"]>;
+  close(callback: (error?: Error | undefined) => void): this;
+}
+
+export interface StartOpenWaStatusServerOptions {
   config: OpenWaStatusServerConfig;
   logger: Logger;
   getHealth: () => OpenWaSupervisorHealth;
+  createHttpServer?: (
+    handler: (request: IncomingMessage, response: ServerResponse) => void
+  ) => OpenWaStatusHttpServer;
 }
 
 type HealthStatusResponse = {
@@ -134,7 +145,18 @@ const handleRequest = (
   }
 };
 
-const getServerAddress = (server: Server, configuredHost: string): OpenWaStatusServerAddress => {
+export const createOpenWaStatusServerHandler = (
+  getHealth: () => OpenWaSupervisorHealth
+): ((request: IncomingMessage, response: ServerResponse) => void) => {
+  return (request, response) => {
+    handleRequest(request, response, getHealth);
+  };
+};
+
+const getServerAddress = (
+  server: OpenWaStatusHttpServer,
+  configuredHost: string
+): OpenWaStatusServerAddress => {
   const address = server.address();
 
   if (!address || typeof address === "string") {
@@ -162,7 +184,8 @@ const createDisabledStatusServer = (): OpenWaStatusServer => ({
 export const startOpenWaStatusServer = async ({
   config,
   logger,
-  getHealth
+  getHealth,
+  createHttpServer = createServer
 }: StartOpenWaStatusServerOptions): Promise<OpenWaStatusServer> => {
   if (!config.enabled) {
     return createDisabledStatusServer();
@@ -173,9 +196,7 @@ export const startOpenWaStatusServer = async ({
     port: config.port
   });
 
-  const server = createServer((request, response) => {
-    handleRequest(request, response, getHealth);
-  });
+  const server = createHttpServer(createOpenWaStatusServerHandler(getHealth));
 
   const address = await new Promise<OpenWaStatusServerAddress>((resolve, reject) => {
     const onError = (error: Error) => {

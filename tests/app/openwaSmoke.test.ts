@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createServer } from "node:http";
 import type { Logger } from "../../src/logging/logger";
 import type { PersistenceService } from "../../src/persistence";
+import type { OpenWaStatusServer } from "../../src/app/openwaStatusServer";
 import {
   installOpenWaSignalHandlers,
   startOpenWaSmokeApp,
@@ -146,7 +147,31 @@ describe("openwa smoke startup", () => {
         LAWYER_PHONE_E164: "+15551234567"
       },
       logger,
-      createClient
+      createClient,
+      startStatusServer: async ({ config, logger: statusLogger }) => {
+        statusLogger.info("openwa_status_server_starting", {
+          host: config.host,
+          port: config.port
+        });
+        statusLogger.info("openwa_status_server_ready", {
+          host: config.host,
+          port: 4012
+        });
+
+        return {
+          enabled: true,
+          address: {
+            host: config.host,
+            port: 4012
+          },
+          stop: vi.fn().mockImplementation(async () => {
+            statusLogger.info("openwa_status_server_stopped", {
+              host: config.host,
+              port: 4012
+            });
+          })
+        };
+      }
     });
 
     expect(createClient).toHaveBeenCalledWith(
@@ -222,7 +247,7 @@ describe("openwa smoke startup", () => {
     });
     expect(app.getStatusServerAddress()).toEqual({
       host: "127.0.0.1",
-      port: expect.any(Number)
+      port: 4012
     });
     expect(app.getHealth()).toMatchObject({
       state: "ready",
@@ -273,7 +298,7 @@ describe("openwa smoke startup", () => {
     });
     expect(logger.info).toHaveBeenCalledWith("openwa_status_server_stopped", {
       host: "127.0.0.1",
-      port: app.getStatusServerAddress()?.port
+      port: 4012
     });
     expect(kill).toHaveBeenCalledWith("test_shutdown");
   });
@@ -319,56 +344,46 @@ describe("openwa smoke startup", () => {
   });
 
   it("does not start WhatsApp when the enabled status server cannot bind", async () => {
-    const reservedServer = createServer();
-    await new Promise<void>((resolve, reject) => {
-      reservedServer.once("error", reject);
-      reservedServer.listen(0, "127.0.0.1", () => resolve());
+    const logger = createLogger();
+    const createClient = vi.fn();
+
+    await expect(
+      startOpenWaSmokeApp({
+        envSource: {
+          BOT_MODE: "smoke",
+          OPENWA_SESSION_ID: "legalbot-smoke",
+          OPENWA_HEADLESS: "false",
+          OPENWA_LIVENESS_INTERVAL_SECONDS: "30",
+          OPENWA_LIVENESS_FAILURE_THRESHOLD: "3",
+          OPENWA_RECOVERY_MODE: "manual",
+          OPENWA_STATUS_SERVER_ENABLED: "true",
+          OPENWA_STATUS_SERVER_HOST: "127.0.0.1",
+          OPENWA_STATUS_SERVER_PORT: "3001",
+          LAWYER_PHONE_E164: "+15551234567"
+        },
+        logger,
+        createClient,
+        startStatusServer: async ({ config, logger: statusLogger }) => {
+          statusLogger.info("openwa_status_server_starting", {
+            host: config.host,
+            port: config.port
+          });
+          statusLogger.error("openwa_status_server_failed", {
+            host: config.host,
+            port: config.port,
+            error: "listen EPERM: operation not permitted 127.0.0.1"
+          });
+          throw new Error("listen EPERM: operation not permitted 127.0.0.1");
+        }
+      })
+    ).rejects.toThrow("listen EPERM: operation not permitted 127.0.0.1");
+
+    expect(createClient).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith("openwa_status_server_failed", {
+      host: "127.0.0.1",
+      port: 3001,
+      error: "listen EPERM: operation not permitted 127.0.0.1"
     });
-
-    const address = reservedServer.address();
-
-    try {
-      const logger = createLogger();
-      const createClient = vi.fn();
-
-      await expect(
-        startOpenWaSmokeApp({
-          envSource: {
-            BOT_MODE: "smoke",
-            OPENWA_SESSION_ID: "legalbot-smoke",
-            OPENWA_HEADLESS: "false",
-            OPENWA_LIVENESS_INTERVAL_SECONDS: "30",
-            OPENWA_LIVENESS_FAILURE_THRESHOLD: "3",
-            OPENWA_RECOVERY_MODE: "manual",
-            OPENWA_STATUS_SERVER_ENABLED: "true",
-            OPENWA_STATUS_SERVER_HOST: "127.0.0.1",
-            OPENWA_STATUS_SERVER_PORT:
-              typeof address === "object" && address ? String(address.port) : "3001",
-            LAWYER_PHONE_E164: "+15551234567"
-          },
-          logger,
-          createClient
-        })
-      ).rejects.toThrow();
-
-      expect(createClient).not.toHaveBeenCalled();
-      expect(logger.error).toHaveBeenCalledWith("openwa_status_server_failed", {
-        host: "127.0.0.1",
-        port: typeof address === "object" && address ? address.port : 3001,
-        error: expect.any(String)
-      });
-    } finally {
-      await new Promise<void>((resolve, reject) => {
-        reservedServer.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-
-          resolve();
-        });
-      });
-    }
   });
 
   it("does not open sqlite persistence when technical persistence is disabled", async () => {

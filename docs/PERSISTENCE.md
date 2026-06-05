@@ -16,6 +16,8 @@ M16 adds a separate application case-creation boundary. It can create a minimal 
 
 M17 hardens the SQLite `cases` schema for legacy databases and adds a transactional `createCaseWithAudit(...)` persistence boundary for case creation plus audit append.
 
+M18 adds an explicit operator-only command, `npm run case:create-from-intake -- --subject <subjectId>`, that invokes the existing case-creation boundary manually after migrations are already applied.
+
 ## Interfaces
 
 - `CaseStore`: minimal create/get/update support for case records built from accepted structured intake data only.
@@ -52,6 +54,7 @@ M17 hardens the SQLite `cases` schema for legacy databases and adds a transactio
 - `src/domain/cases/caseCreationService.ts` is the explicit application boundary that reads consent and intake through `PersistenceService`, revalidates accepted fields, creates a `draft` case, and appends a sanitized `case_created_from_intake` audit event.
 - `createCaseWithAudit(...)` is transactional for the bundled SQLite and in-memory persistence implementations so a case row and its audit event commit or roll back together.
 - M16 does not wire that service into the live OpenWA listener or intake-completion runtime path yet.
+- `src/app/caseCreateFromIntake.ts` is the operator entrypoint for manual case creation. It loads env through the shared loader, requires an already migrated SQLite database, accepts `--subject <subjectId>`, and prints only `{ caseId, status, createdAt }`.
 
 ## SQLite Foundation
 
@@ -60,6 +63,7 @@ M17 hardens the SQLite `cases` schema for legacy databases and adds a transactio
 - `TECHNICAL_PERSISTENCE_ENABLED` defaults to `false`.
 - Operators can run `npm run db:migrate` to apply the committed SQLite schema explicitly.
 - Operators can run `npm run db:status` to inspect applied and pending migration ids without dumping table contents.
+- Operators can run `npm run case:create-from-intake -- --subject <subjectId>` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
 - The SQLite migration runner is explicit and testable through `runSqliteMigrations(...)`, `getSqliteMigrationStatus(...)`, and `SqliteMigrationRunner`.
 - `0009_harden_cases_schema` safely rebuilds legacy `cases` tables when older SQLite files still use `reference`, camelCase columns, or extra transcript/body columns, and it copies forward only the minimal supported case fields.
 - Technical runtime startup never runs migrations. When `TECHNICAL_PERSISTENCE_ENABLED=true`, startup requires `npm run db:migrate` to have been completed already or it fails safely with a clear error.
@@ -103,6 +107,7 @@ M17 hardens the SQLite `cases` schema for legacy databases and adds a transactio
   - `updatedAt`
 - The M17 schema-hardening migration copies forward only those case fields and removes legacy `rawBody`, `body`, `transcript`, or other extra columns from the SQLite `cases` table.
 - Case creation does not store full phone-number metadata, raw message bodies, transcripts, rejected values, attachments, or legal advice content.
+- The M18 manual command still stores only the accepted structured `name` and `problemSummary` fields already present in intake persistence. It does not persist raw bodies, transcripts, rejected values, or secret-bearing metadata.
 - Live WhatsApp runtime writes never create or update cases automatically.
 - M13 live consent wiring never stores inbound message body text in consent state metadata or consent events.
 - M15 live intake wiring persists only accepted structured `name` and `problemSummary` values plus sanitized metadata after explicit `granted` consent.
@@ -158,4 +163,8 @@ M17 hardens the SQLite `cases` schema for legacy databases and adds a transactio
   - create a minimal `draft` case
   - append sanitized `case_created_from_intake`
   - commit both writes inside one persistence transaction when the bundled SQLite or in-memory persistence implementation is used
+- M18 exposes that same boundary through an operator-only command:
+  - `npm run case:create-from-intake -- --subject <subjectId>`
+  - fail safely when migrations are missing or incomplete
+  - print and log only sanitized case creation output (`caseId`, `status`, `createdAt`)
 - The live OpenWA runtime still does not create cases automatically, store full transcripts, or persist raw message bodies.

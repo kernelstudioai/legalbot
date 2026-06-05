@@ -33,8 +33,16 @@ export interface CreateCaseFromCompletedIntakeResult {
 }
 
 export class CaseCreationPreconditionError extends Error {
+  readonly code:
+    | "consent_not_granted"
+    | "intake_not_complete"
+    | "missing_name"
+    | "missing_problem_summary"
+    | "invalid_name"
+    | "invalid_problem_summary";
+
   constructor(
-    readonly code:
+    code:
       | "consent_not_granted"
       | "intake_not_complete"
       | "missing_name"
@@ -45,6 +53,7 @@ export class CaseCreationPreconditionError extends Error {
   ) {
     super(message);
     this.name = "CaseCreationPreconditionError";
+    this.code = code;
   }
 }
 

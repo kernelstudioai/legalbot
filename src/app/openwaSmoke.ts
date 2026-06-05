@@ -15,6 +15,7 @@ import { createOpenWaTechnicalPersistence } from "../runtime/openwa/technicalPer
 import { registerOpenWaListener } from "../transport/openwa/listener.ts";
 import {
   startOpenWaStatusServer,
+  type OpenWaStatusServer,
   type OpenWaStatusServerAddress
 } from "./openwaStatusServer.ts";
 import {
@@ -54,6 +55,15 @@ export interface StartOpenWaSmokeAppOptions {
     databaseUrl: string;
     cwd?: string;
   }) => SqlitePersistenceService;
+  startStatusServer?: (options: {
+    config: {
+      enabled: boolean;
+      host: string;
+      port: number;
+    };
+    logger: Logger;
+    getHealth: () => OpenWaSupervisorHealth;
+  }) => Promise<OpenWaStatusServer>;
 }
 
 const createDefaultClient = async (
@@ -84,7 +94,8 @@ export const startOpenWaSmokeApp = async ({
   persistenceService,
   clientConsentPersistence,
   clientIntakePersistence,
-  createSqlitePersistence = createSqlitePersistenceService
+  createSqlitePersistence = createSqlitePersistenceService,
+  startStatusServer = startOpenWaStatusServer
 }: StartOpenWaSmokeAppOptions = {}): Promise<OpenWaSmokeApp> => {
   const env = loadSmokeRuntimeEnv(envSource);
   const config = createSmokeOpenWaConfig(env);
@@ -172,7 +183,7 @@ export const startOpenWaSmokeApp = async ({
       }),
     ...(technicalPersistence ? { technicalPersistence } : {})
   });
-  const statusServer = await startOpenWaStatusServer({
+  const statusServer = await startStatusServer({
     config: {
       enabled: env.OPENWA_STATUS_SERVER_ENABLED,
       host: env.OPENWA_STATUS_SERVER_HOST,
