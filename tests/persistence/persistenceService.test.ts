@@ -18,9 +18,12 @@ import type {
   SetIntakeStateOptions
 } from "../../src/persistence/index.ts";
 import {
+  InMemoryAuditLogStore,
   InMemoryCaseStore,
   InMemoryConsentStore,
   InMemoryIntakeStore,
+  InMemoryProcessedMessageStore,
+  createInMemoryPersistenceTransactionRunner,
   createInMemoryPersistenceService,
   createPersistenceService,
   createSqlitePersistenceService
@@ -34,6 +37,13 @@ class CapturingAuditLogStore implements AuditLogStore {
 
   async append(event: AuditEventRecord): Promise<void> {
     this.events.push(event);
+  }
+}
+
+class FailingInMemoryAuditLogStore extends InMemoryAuditLogStore {
+  async append(event: AuditEventRecord): Promise<void> {
+    await super.append(event);
+    throw new Error("audit_append_failed");
   }
 }
 
@@ -339,6 +349,136 @@ describe("persistence service boundary", () => {
       updatedAt: "2026-06-04T12:05:00.000Z"
     });
     await expect(service.getCase("missing-case")).resolves.toBeNull();
+  });
+
+  it("creates a case and audit event atomically with the in-memory transaction runner", async () => {
+    const caseStore = new InMemoryCaseStore();
+    const processedMessageStore = new InMemoryProcessedMessageStore();
+    const auditLogStore = new InMemoryAuditLogStore();
+    const consentStore = new InMemoryConsentStore();
+    const intakeStore = new InMemoryIntakeStore();
+    const service = createPersistenceService({
+      caseStore,
+      processedMessageStore,
+      auditLogStore,
+      consentStore,
+      intakeStore,
+      transactionRunner: createInMemoryPersistenceTransactionRunner({
+        caseStore,
+        processedMessageStore,
+        auditLogStore,
+        consentStore,
+        intakeStore
+      }),
+      now: () => "2026-06-04T12:06:00.000Z"
+    });
+
+    await expect(
+      service.createCaseWithAudit({
+        case: {
+          caseId: "case-atomic-1",
+          subjectId: "subject-atomic-1",
+          name: "Mario Rossi",
+          problemSummary: "Sintesi breve del problema",
+          createdAt: "2026-06-04T12:06:00.000Z",
+          updatedAt: "2026-06-04T12:06:00.000Z"
+        },
+        auditEvent: {
+          eventId: "audit-case-atomic-1",
+          eventType: "case_created_from_intake",
+          entityType: "case",
+          entityId: "case-atomic-1",
+          metadata: {
+            source: "test"
+          }
+        }
+      })
+    ).resolves.toEqual({
+      caseRecord: {
+        caseId: "case-atomic-1",
+        subjectId: "subject-atomic-1",
+        status: "draft",
+        name: "Mario Rossi",
+        problemSummary: "Sintesi breve del problema",
+        createdAt: "2026-06-04T12:06:00.000Z",
+        updatedAt: "2026-06-04T12:06:00.000Z"
+      },
+      auditEvent: {
+        eventId: "audit-case-atomic-1",
+        eventType: "case_created_from_intake",
+        entityType: "case",
+        entityId: "case-atomic-1",
+        occurredAt: "2026-06-04T12:06:00.000Z",
+        metadata: {
+          source: "test"
+        }
+      }
+    });
+    await expect(service.getCase("case-atomic-1")).resolves.toEqual({
+      caseId: "case-atomic-1",
+      subjectId: "subject-atomic-1",
+      status: "draft",
+      name: "Mario Rossi",
+      problemSummary: "Sintesi breve del problema",
+      createdAt: "2026-06-04T12:06:00.000Z",
+      updatedAt: "2026-06-04T12:06:00.000Z"
+    });
+    expect(auditLogStore.snapshot()).toEqual([
+      {
+        eventId: "audit-case-atomic-1",
+        eventType: "case_created_from_intake",
+        entityType: "case",
+        entityId: "case-atomic-1",
+        occurredAt: "2026-06-04T12:06:00.000Z",
+        metadata: {
+          source: "test"
+        }
+      }
+    ]);
+  });
+
+  it("rolls back case creation when audit append fails inside the transaction boundary", async () => {
+    const caseStore = new InMemoryCaseStore();
+    const processedMessageStore = new InMemoryProcessedMessageStore();
+    const auditLogStore = new FailingInMemoryAuditLogStore();
+    const consentStore = new InMemoryConsentStore();
+    const intakeStore = new InMemoryIntakeStore();
+    const service = createPersistenceService({
+      caseStore,
+      processedMessageStore,
+      auditLogStore,
+      consentStore,
+      intakeStore,
+      transactionRunner: createInMemoryPersistenceTransactionRunner({
+        caseStore,
+        processedMessageStore,
+        auditLogStore,
+        consentStore,
+        intakeStore
+      }),
+      now: () => "2026-06-04T12:07:00.000Z"
+    });
+
+    await expect(
+      service.createCaseWithAudit({
+        case: {
+          caseId: "case-rolled-back-1",
+          subjectId: "subject-atomic-2",
+          name: "Mario Rossi",
+          problemSummary: "Sintesi breve del problema",
+          createdAt: "2026-06-04T12:07:00.000Z",
+          updatedAt: "2026-06-04T12:07:00.000Z"
+        },
+        auditEvent: {
+          eventId: "audit-case-rolled-back-1",
+          eventType: "case_created_from_intake",
+          entityType: "case",
+          entityId: "case-rolled-back-1"
+        }
+      })
+    ).rejects.toThrow("audit_append_failed");
+    await expect(service.getCase("case-rolled-back-1")).resolves.toBeNull();
+    expect(auditLogStore.snapshot()).toEqual([]);
   });
 
   it("runs the sqlite factory against a temp database only", async () => {

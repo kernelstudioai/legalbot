@@ -23,8 +23,12 @@ import type {
   SetIntakeStateOptions,
   UpdateCaseInput
 } from "../index.ts";
+import type { PersistenceTransactionRunner } from "../persistenceService.ts";
 
 const defaultCaseStatus = "draft";
+const cloneValue = <T>(value: T): T => structuredClone(value);
+const cloneMap = <K, V>(input: Map<K, V>): Map<K, V> =>
+  new Map([...input.entries()].map(([key, value]) => [key, cloneValue(value)] as const));
 
 export class InMemoryCaseStore implements CaseStore {
   private readonly cases = new Map<string, CaseRecord>();
@@ -62,6 +66,18 @@ export class InMemoryCaseStore implements CaseStore {
     this.cases.set(updated.caseId, updated);
     return updated;
   }
+
+  createSnapshot(): Map<string, CaseRecord> {
+    return cloneMap(this.cases);
+  }
+
+  restoreSnapshot(snapshot: Map<string, CaseRecord>): void {
+    this.cases.clear();
+
+    for (const [caseId, record] of snapshot.entries()) {
+      this.cases.set(caseId, cloneValue(record));
+    }
+  }
 }
 
 export class InMemoryProcessedMessageStore implements ProcessedMessageStore {
@@ -81,6 +97,18 @@ export class InMemoryProcessedMessageStore implements ProcessedMessageStore {
     this.processedMessages.set(record.messageId, record);
     return { inserted: true };
   }
+
+  createSnapshot(): Map<string, ProcessedMessageRecord> {
+    return cloneMap(this.processedMessages);
+  }
+
+  restoreSnapshot(snapshot: Map<string, ProcessedMessageRecord>): void {
+    this.processedMessages.clear();
+
+    for (const [messageId, record] of snapshot.entries()) {
+      this.processedMessages.set(messageId, cloneValue(record));
+    }
+  }
 }
 
 export class InMemoryAuditLogStore implements AuditLogStore {
@@ -92,6 +120,14 @@ export class InMemoryAuditLogStore implements AuditLogStore {
 
   snapshot(): AuditEventRecord[] {
     return [...this.events];
+  }
+
+  createSnapshot(): AuditEventRecord[] {
+    return cloneValue(this.events);
+  }
+
+  restoreSnapshot(snapshot: AuditEventRecord[]): void {
+    this.events.splice(0, this.events.length, ...cloneValue(snapshot));
   }
 }
 
@@ -129,6 +165,29 @@ export class InMemoryConsentStore implements ConsentStore {
 
   snapshotEvents(): ConsentEventRecord[] {
     return [...this.consentEvents];
+  }
+
+  createSnapshot(): {
+    consentStates: Map<string, ConsentStateRecord>;
+    consentEvents: ConsentEventRecord[];
+  } {
+    return {
+      consentStates: cloneMap(this.consentStates),
+      consentEvents: cloneValue(this.consentEvents)
+    };
+  }
+
+  restoreSnapshot(snapshot: {
+    consentStates: Map<string, ConsentStateRecord>;
+    consentEvents: ConsentEventRecord[];
+  }): void {
+    this.consentStates.clear();
+
+    for (const [subjectId, record] of snapshot.consentStates.entries()) {
+      this.consentStates.set(subjectId, cloneValue(record));
+    }
+
+    this.consentEvents.splice(0, this.consentEvents.length, ...cloneValue(snapshot.consentEvents));
   }
 }
 
@@ -218,4 +277,75 @@ export class InMemoryIntakeStore implements IntakeStore {
   snapshotEvents(): IntakeEventRecord[] {
     return [...this.intakeEvents];
   }
+
+  createSnapshot(): {
+    intakeStates: Map<string, IntakeStateRecord>;
+    intakeFields: Map<string, Map<IntakeFieldName, IntakeFieldRecord>>;
+    intakeEvents: IntakeEventRecord[];
+  } {
+    return {
+      intakeStates: cloneMap(this.intakeStates),
+      intakeFields: new Map(
+        [...this.intakeFields.entries()].map(([subjectId, fields]) => [subjectId, cloneMap(fields)] as const)
+      ),
+      intakeEvents: cloneValue(this.intakeEvents)
+    };
+  }
+
+  restoreSnapshot(snapshot: {
+    intakeStates: Map<string, IntakeStateRecord>;
+    intakeFields: Map<string, Map<IntakeFieldName, IntakeFieldRecord>>;
+    intakeEvents: IntakeEventRecord[];
+  }): void {
+    this.intakeStates.clear();
+
+    for (const [subjectId, record] of snapshot.intakeStates.entries()) {
+      this.intakeStates.set(subjectId, cloneValue(record));
+    }
+
+    this.intakeFields.clear();
+
+    for (const [subjectId, fields] of snapshot.intakeFields.entries()) {
+      this.intakeFields.set(subjectId, cloneMap(fields));
+    }
+
+    this.intakeEvents.splice(0, this.intakeEvents.length, ...cloneValue(snapshot.intakeEvents));
+  }
 }
+
+export interface InMemoryPersistenceStoreBundle {
+  caseStore: InMemoryCaseStore;
+  processedMessageStore: InMemoryProcessedMessageStore;
+  auditLogStore: InMemoryAuditLogStore;
+  consentStore: InMemoryConsentStore;
+  intakeStore: InMemoryIntakeStore;
+}
+
+export const createInMemoryPersistenceTransactionRunner = ({
+  caseStore,
+  processedMessageStore,
+  auditLogStore,
+  consentStore,
+  intakeStore
+}: InMemoryPersistenceStoreBundle): PersistenceTransactionRunner => ({
+  async runInTransaction(operation) {
+    const snapshot = {
+      caseStore: caseStore.createSnapshot(),
+      processedMessageStore: processedMessageStore.createSnapshot(),
+      auditLogStore: auditLogStore.createSnapshot(),
+      consentStore: consentStore.createSnapshot(),
+      intakeStore: intakeStore.createSnapshot()
+    };
+
+    try {
+      return await operation();
+    } catch (error) {
+      caseStore.restoreSnapshot(snapshot.caseStore);
+      processedMessageStore.restoreSnapshot(snapshot.processedMessageStore);
+      auditLogStore.restoreSnapshot(snapshot.auditLogStore);
+      consentStore.restoreSnapshot(snapshot.consentStore);
+      intakeStore.restoreSnapshot(snapshot.intakeStore);
+      throw error;
+    }
+  }
+});

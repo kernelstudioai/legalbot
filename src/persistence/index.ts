@@ -30,6 +30,8 @@ export {
   type CreatePersistenceServiceOptions,
   type MarkMessageProcessedMetadata,
   type PersistenceAuditEventInput,
+  type PersistenceCreateCaseWithAuditInput,
+  type PersistenceCreateCaseWithAuditResult,
   type PersistenceConsentStateResult,
   type PersistenceIntakeEventResult,
   type PersistenceIntakeFieldResult,
@@ -37,6 +39,7 @@ export {
   type PersistenceIntakeStateResult,
   type PersistenceProcessedMessageResult,
   type PersistenceService,
+  type PersistenceTransactionRunner,
   type SetIntakeFieldMetadata,
   type SetIntakeStateMetadata,
   type SetConsentStateMetadata,
@@ -52,5 +55,7 @@ export {
   InMemoryCaseStore,
   InMemoryConsentStore,
   InMemoryIntakeStore,
-  InMemoryProcessedMessageStore
+  InMemoryProcessedMessageStore,
+  createInMemoryPersistenceTransactionRunner,
+  type InMemoryPersistenceStoreBundle
 } from "./testing/inMemoryStores.ts";

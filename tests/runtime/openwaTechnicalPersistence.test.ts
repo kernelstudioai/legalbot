@@ -101,6 +101,9 @@ describe("openwa technical persistence", () => {
       createCase: async () => {
         throw new Error("not used");
       },
+      createCaseWithAudit: async () => {
+        throw new Error("not used");
+      },
       getCase: async () => null,
       updateCaseStatus: async () => null
     };
@@ -195,7 +198,8 @@ describe("openwa technical persistence", () => {
         "0005_create_consent_events",
         "0006_create_intake_states",
         "0007_create_intake_fields",
-        "0008_create_intake_events"
+        "0008_create_intake_events",
+        "0009_harden_cases_schema"
       ],
       databasePath: path.join(tempDir, "data", "legalbot.sqlite")
     });

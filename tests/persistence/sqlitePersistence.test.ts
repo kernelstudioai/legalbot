@@ -53,7 +53,8 @@ describe("sqlite persistence foundation", () => {
       "0005_create_consent_events",
       "0006_create_intake_states",
       "0007_create_intake_fields",
-      "0008_create_intake_events"
+      "0008_create_intake_events",
+      "0009_harden_cases_schema"
     ]);
     expect(migrationResult.pendingMigrationIds).toEqual([]);
     expect(migrationResult.databasePath.startsWith(tempDir)).toBe(true);
@@ -91,6 +92,140 @@ describe("sqlite persistence foundation", () => {
       ]);
     } finally {
       database.close();
+    }
+  });
+
+  it("upgrades a legacy cases schema and drops transcript-style columns", () => {
+    const { tempDir, databaseUrl } = createTempDatabaseConfig();
+    const { database } = openSqliteDatabase({
+      databaseUrl,
+      cwd: tempDir
+    });
+
+    try {
+      database.exec(`
+        CREATE TABLE schema_migrations (
+          migration_id TEXT PRIMARY KEY,
+          applied_at TEXT NOT NULL
+        );
+
+        INSERT INTO schema_migrations (migration_id, applied_at)
+        VALUES
+          ('0001_create_cases', '2026-06-04T09:00:00.000Z'),
+          ('0002_create_processed_messages', '2026-06-04T09:00:00.000Z'),
+          ('0003_create_audit_events', '2026-06-04T09:00:00.000Z'),
+          ('0004_create_consent_states', '2026-06-04T09:00:00.000Z'),
+          ('0005_create_consent_events', '2026-06-04T09:00:00.000Z'),
+          ('0006_create_intake_states', '2026-06-04T09:00:00.000Z'),
+          ('0007_create_intake_fields', '2026-06-04T09:00:00.000Z'),
+          ('0008_create_intake_events', '2026-06-04T09:00:00.000Z');
+
+        CREATE TABLE cases (
+          reference TEXT PRIMARY KEY,
+          subjectId TEXT NOT NULL,
+          status TEXT NOT NULL,
+          name TEXT NOT NULL,
+          problemSummary TEXT NOT NULL,
+          createdAt TEXT NOT NULL,
+          updatedAt TEXT NOT NULL,
+          transcript TEXT,
+          rawBody TEXT
+        );
+
+        INSERT INTO cases (
+          reference,
+          subjectId,
+          status,
+          name,
+          problemSummary,
+          createdAt,
+          updatedAt,
+          transcript,
+          rawBody
+        )
+        VALUES (
+          'CASE-LEGACY-1',
+          'subject-legacy-1',
+          'draft',
+          'Mario Rossi',
+          'Sintesi legacy del problema',
+          '2026-06-04T09:30:00.000Z',
+          '2026-06-04T09:30:00.000Z',
+          'raw transcript',
+          'raw body'
+        );
+      `);
+    } finally {
+      database.close();
+    }
+
+    const migrationResult = runSqliteMigrations({
+      databaseUrl,
+      cwd: tempDir,
+      enabled: true
+    });
+
+    expect(migrationResult.appliedMigrationIds).toEqual(["0009_harden_cases_schema"]);
+    expect(migrationResult.pendingMigrationIds).toEqual([]);
+
+    const { database: migratedDatabase } = openSqliteDatabase({
+      databaseUrl,
+      cwd: tempDir
+    });
+
+    try {
+      const caseColumns = (
+        migratedDatabase
+          .prepare("PRAGMA table_info(cases)")
+          .all() as Array<{ name: string }>
+      ).map((row) => row.name);
+      const migratedRow = migratedDatabase
+        .prepare(
+          `
+            SELECT
+              case_id,
+              subject_id,
+              status,
+              name,
+              problem_summary,
+              created_at,
+              updated_at
+            FROM cases
+            WHERE case_id = ?
+          `
+        )
+        .get("CASE-LEGACY-1") as
+        | {
+            case_id: string;
+            subject_id: string;
+            status: string;
+            name: string;
+            problem_summary: string;
+            created_at: string;
+            updated_at: string;
+          }
+        | undefined;
+
+      expect(caseColumns).toEqual([
+        "case_id",
+        "subject_id",
+        "status",
+        "name",
+        "problem_summary",
+        "created_at",
+        "updated_at"
+      ]);
+      expect(migratedRow).toEqual({
+        case_id: "CASE-LEGACY-1",
+        subject_id: "subject-legacy-1",
+        status: "draft",
+        name: "Mario Rossi",
+        problem_summary: "Sintesi legacy del problema",
+        created_at: "2026-06-04T09:30:00.000Z",
+        updated_at: "2026-06-04T09:30:00.000Z"
+      });
+    } finally {
+      migratedDatabase.close();
     }
   });
 

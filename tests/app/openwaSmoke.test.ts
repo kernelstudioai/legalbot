@@ -78,6 +78,7 @@ const createPersistenceService = (): PersistenceService => ({
     ...(event.metadata ? { metadata: event.metadata } : {})
   })),
   createCase: vi.fn(),
+  createCaseWithAudit: vi.fn(),
   getCase: vi.fn(),
   updateCaseStatus: vi.fn()
 });

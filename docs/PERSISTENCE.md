@@ -14,6 +14,8 @@ M15 adds consent-gated intake persistence for state plus accepted structured fie
 
 M16 adds a separate application case-creation boundary. It can create a minimal case record only from `granted` consent plus an `intake_complete` snapshot with valid accepted structured fields.
 
+M17 hardens the SQLite `cases` schema for legacy databases and adds a transactional `createCaseWithAudit(...)` persistence boundary for case creation plus audit append.
+
 ## Interfaces
 
 - `CaseStore`: minimal create/get/update support for case records built from accepted structured intake data only.
@@ -39,6 +41,7 @@ M16 adds a separate application case-creation boundary. It can create a minimal 
   - `getIntakeSnapshot(subjectId)`
   - `appendIntakeEvent(event)`
   - `createCase(input)`
+  - `createCaseWithAudit({ case, auditEvent })`
   - `getCase(caseId)`
   - `updateCaseStatus(caseId, status)`
 - `createSqlitePersistenceService(config)` opens a SQLite-backed service against an explicit `file:` database path.
@@ -47,6 +50,7 @@ M16 adds a separate application case-creation boundary. It can create a minimal 
 - The OpenWA smoke runtime can inject an existing `PersistenceService` or create a SQLite-backed one only when `TECHNICAL_PERSISTENCE_ENABLED=true`.
 - Client runtime wiring uses narrow application-layer adapters so consent-gated intake writes stay separate from M10 technical dedupe and audit wiring.
 - `src/domain/cases/caseCreationService.ts` is the explicit application boundary that reads consent and intake through `PersistenceService`, revalidates accepted fields, creates a `draft` case, and appends a sanitized `case_created_from_intake` audit event.
+- `createCaseWithAudit(...)` is transactional for the bundled SQLite and in-memory persistence implementations so a case row and its audit event commit or roll back together.
 - M16 does not wire that service into the live OpenWA listener or intake-completion runtime path yet.
 
 ## SQLite Foundation
@@ -57,6 +61,7 @@ M16 adds a separate application case-creation boundary. It can create a minimal 
 - Operators can run `npm run db:migrate` to apply the committed SQLite schema explicitly.
 - Operators can run `npm run db:status` to inspect applied and pending migration ids without dumping table contents.
 - The SQLite migration runner is explicit and testable through `runSqliteMigrations(...)`, `getSqliteMigrationStatus(...)`, and `SqliteMigrationRunner`.
+- `0009_harden_cases_schema` safely rebuilds legacy `cases` tables when older SQLite files still use `reference`, camelCase columns, or extra transcript/body columns, and it copies forward only the minimal supported case fields.
 - Technical runtime startup never runs migrations. When `TECHNICAL_PERSISTENCE_ENABLED=true`, startup requires `npm run db:migrate` to have been completed already or it fails safely with a clear error.
 - Current tables:
   - `cases`
@@ -88,7 +93,7 @@ M16 adds a separate application case-creation boundary. It can create a minimal 
   - `problemSummary`
 - Intake persistence stores state transitions separately from accepted structured fields and may append intake events without duplicating raw message content.
 - Intake persistence must not store raw inbound bodies, invalid replies, rejected values, full transcripts, attachments, or live case records.
-- Case records created through M16 store only:
+- Case records created through M16 and M17 store only:
   - `caseId`
   - `subjectId`
   - `status`
@@ -96,6 +101,7 @@ M16 adds a separate application case-creation boundary. It can create a minimal 
   - `problemSummary`
   - `createdAt`
   - `updatedAt`
+- The M17 schema-hardening migration copies forward only those case fields and removes legacy `rawBody`, `body`, `transcript`, or other extra columns from the SQLite `cases` table.
 - Case creation does not store full phone-number metadata, raw message bodies, transcripts, rejected values, attachments, or legal advice content.
 - Live WhatsApp runtime writes never create or update cases automatically.
 - M13 live consent wiring never stores inbound message body text in consent state metadata or consent events.
@@ -114,6 +120,8 @@ M16 adds a separate application case-creation boundary. It can create a minimal 
 - When `DATABASE_MIGRATIONS_ENABLED=true`, `npm run db:migrate` creates parent directories as needed and applies the committed migration list.
 - When `DATABASE_MIGRATIONS_ENABLED=false`, `npm run db:migrate` reports pending migrations and skips schema changes.
 - `npm run db:status` reports applied and pending migration ids and counts without reading or printing table contents.
+- `npm run db:migrate` and `npm run db:status` remain direct Node 22 `--experimental-strip-types` entrypoints.
+- Existing SQLite databases created before M17 can be upgraded in place. The cases-table hardening migration preserves minimal case metadata, normalizes column names to the committed snake_case schema, and drops unsupported legacy columns.
 - The migration boundary is intentionally separate from OpenWA startup so transport smoke behavior stays unchanged when technical persistence is disabled.
 - `createSqlitePersistenceService(...)` expects a database path that has already been prepared through the explicit migration boundary or an equivalent test setup.
 
@@ -149,4 +157,5 @@ M16 adds a separate application case-creation boundary. It can create a minimal 
   - revalidate accepted `name` and `problemSummary`
   - create a minimal `draft` case
   - append sanitized `case_created_from_intake`
+  - commit both writes inside one persistence transaction when the bundled SQLite or in-memory persistence implementation is used
 - The live OpenWA runtime still does not create cases automatically, store full transcripts, or persist raw message bodies.

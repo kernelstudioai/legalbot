@@ -25,6 +25,7 @@ import type {
 } from "./processedMessageStore.ts";
 import {
   openSqliteDatabase,
+  createSqliteTransactionRunner,
   type OpenSqliteDatabaseOptions,
   SqliteAuditLogStore,
   SqliteCaseStore,
@@ -37,7 +38,8 @@ import {
   InMemoryCaseStore,
   InMemoryConsentStore,
   InMemoryIntakeStore,
-  InMemoryProcessedMessageStore
+  InMemoryProcessedMessageStore,
+  createInMemoryPersistenceTransactionRunner
 } from "./testing/inMemoryStores.ts";
 
 const defaultChannel = "whatsapp" as const;
@@ -103,6 +105,20 @@ export interface PersistenceIntakeEventResult {
   sanitizedMetadata?: Record<string, unknown>;
 }
 
+export interface PersistenceCreateCaseWithAuditInput {
+  case: CreateCaseInput;
+  auditEvent: PersistenceAuditEventInput;
+}
+
+export interface PersistenceCreateCaseWithAuditResult {
+  caseRecord: CaseRecord;
+  auditEvent: AuditEventRecord;
+}
+
+export interface PersistenceTransactionRunner {
+  runInTransaction<T>(operation: () => Promise<T>): Promise<T>;
+}
+
 export interface PersistenceService {
   isMessageProcessed(messageId: string): Promise<boolean>;
   markMessageProcessed(
@@ -132,6 +148,9 @@ export interface PersistenceService {
   getIntakeSnapshot(subjectId: string): Promise<IntakeSnapshot | null>;
   appendIntakeEvent(event: AppendIntakeEventInput): Promise<PersistenceIntakeEventResult>;
   createCase(input: CreateCaseInput): Promise<CaseRecord>;
+  createCaseWithAudit(
+    input: PersistenceCreateCaseWithAuditInput
+  ): Promise<PersistenceCreateCaseWithAuditResult>;
   getCase(caseId: string): Promise<CaseRecord | null>;
   updateCaseStatus(caseId: string, status: string): Promise<CaseRecord | null>;
 }
@@ -142,6 +161,7 @@ export interface CreatePersistenceServiceOptions {
   auditLogStore: AuditLogStore;
   consentStore: ConsentStore;
   intakeStore: IntakeStore;
+  transactionRunner?: PersistenceTransactionRunner;
   now?: () => string;
 }
 
@@ -156,31 +176,13 @@ export const createPersistenceService = ({
   auditLogStore,
   consentStore,
   intakeStore,
+  transactionRunner,
   now = () => new Date().toISOString()
-}: CreatePersistenceServiceOptions): PersistenceService => ({
-  async isMessageProcessed(messageId) {
-    return processedMessageStore.has(messageId);
-  },
-
-  async markMessageProcessed(messageId, metadata) {
-    const record: ProcessedMessageRecord = {
-      messageId,
-      channel: metadata.channel ?? defaultChannel,
-      senderId: metadata.senderId,
-      transportChatId: metadata.transportChatId,
-      processedAt: metadata.processedAt ?? now()
-    };
-    const sanitizedMetadata = sanitizePersistenceMetadata(metadata.metadata);
-    const result = await processedMessageStore.markProcessed(record);
-
-    return sanitizedMetadata
-      ? { ...result, record, sanitizedMetadata }
-      : { ...result, record };
-  },
-
-  async appendAuditEvent(event) {
+}: CreatePersistenceServiceOptions): PersistenceService => {
+  const toStoredAuditEvent = (event: PersistenceAuditEventInput): AuditEventRecord => {
     const sanitizedMetadata = sanitizePersistenceMetadata(event.metadata);
-    const storedEvent: AuditEventRecord = {
+
+    return {
       eventId: event.eventId,
       eventType: event.eventType,
       entityType: event.entityType,
@@ -192,100 +194,148 @@ export const createPersistenceService = ({
           }
         : {})
     };
+  };
 
-    await auditLogStore.append(storedEvent);
-    return storedEvent;
-  },
+  const createCaseWithAudit = async (
+    input: PersistenceCreateCaseWithAuditInput
+  ): Promise<PersistenceCreateCaseWithAuditResult> => {
+    const caseRecord = await caseStore.create(input.case);
+    const auditEvent = toStoredAuditEvent(input.auditEvent);
 
-  async getConsentState(subjectId) {
-    return consentStore.getConsentState(subjectId);
-  },
+    await auditLogStore.append(auditEvent);
 
-  async setConsentState(subjectId, state, metadata) {
-    const sanitizedMetadata = sanitizePersistenceMetadata(metadata?.metadata);
-    const record = await consentStore.setConsentState(subjectId, state, {
-      updatedAt: metadata?.updatedAt ?? now(),
-      ...(sanitizedMetadata ? { metadata: sanitizedMetadata } : {})
-    });
-
-    return sanitizedMetadata ? { record, sanitizedMetadata } : { record };
-  },
-
-  async appendConsentEvent(event) {
-    const sanitizedMetadata = sanitizePersistenceMetadata(event.metadata);
-    const storedEvent: ConsentEventRecord = {
-      eventId: event.eventId,
-      subjectId: event.subjectId,
-      state: event.state,
-      eventType: event.eventType,
-      occurredAt: event.occurredAt ?? now(),
-      ...(sanitizedMetadata ? { metadata: sanitizedMetadata } : {})
+    return {
+      caseRecord,
+      auditEvent
     };
+  };
 
-    await consentStore.appendConsentEvent(storedEvent);
-    return storedEvent;
-  },
+  return {
+    async isMessageProcessed(messageId) {
+      return processedMessageStore.has(messageId);
+    },
 
-  async getIntakeState(subjectId) {
-    return intakeStore.getIntakeState(subjectId);
-  },
+    async markMessageProcessed(messageId, metadata) {
+      const record: ProcessedMessageRecord = {
+        messageId,
+        channel: metadata.channel ?? defaultChannel,
+        senderId: metadata.senderId,
+        transportChatId: metadata.transportChatId,
+        processedAt: metadata.processedAt ?? now()
+      };
+      const sanitizedMetadata = sanitizePersistenceMetadata(metadata.metadata);
+      const result = await processedMessageStore.markProcessed(record);
 
-  async setIntakeState(subjectId, state, metadata) {
-    const sanitizedMetadata = sanitizePersistenceMetadata(metadata?.metadata);
-    const record = await intakeStore.setIntakeState(subjectId, state, {
-      updatedAt: metadata?.updatedAt ?? now(),
-      ...(sanitizedMetadata ? { metadata: sanitizedMetadata } : {})
-    });
+      return sanitizedMetadata
+        ? { ...result, record, sanitizedMetadata }
+        : { ...result, record };
+    },
 
-    return sanitizedMetadata ? { record, sanitizedMetadata } : { record };
-  },
+    async appendAuditEvent(event) {
+      const storedEvent = toStoredAuditEvent(event);
 
-  async setIntakeField(subjectId, fieldName, value, metadata) {
-    const sanitizedMetadata = sanitizePersistenceMetadata(metadata?.metadata);
-    const record = await intakeStore.setIntakeField(subjectId, fieldName, value, {
-      updatedAt: metadata?.updatedAt ?? now(),
-      ...(sanitizedMetadata ? { metadata: sanitizedMetadata } : {})
-    });
+      await auditLogStore.append(storedEvent);
+      return storedEvent;
+    },
 
-    return sanitizedMetadata ? { record, sanitizedMetadata } : { record };
-  },
+    async getConsentState(subjectId) {
+      return consentStore.getConsentState(subjectId);
+    },
 
-  async getIntakeSnapshot(subjectId) {
-    return intakeStore.getIntakeSnapshot(subjectId);
-  },
+    async setConsentState(subjectId, state, metadata) {
+      const sanitizedMetadata = sanitizePersistenceMetadata(metadata?.metadata);
+      const record = await consentStore.setConsentState(subjectId, state, {
+        updatedAt: metadata?.updatedAt ?? now(),
+        ...(sanitizedMetadata ? { metadata: sanitizedMetadata } : {})
+      });
 
-  async appendIntakeEvent(event) {
-    const sanitizedMetadata = sanitizePersistenceMetadata(event.metadata);
-    const storedEvent: IntakeEventRecord = {
-      eventId: event.eventId,
-      subjectId: event.subjectId,
-      eventType: event.eventType,
-      occurredAt: event.occurredAt ?? now(),
-      ...(event.state ? { state: event.state } : {}),
-      ...(event.fieldName ? { fieldName: event.fieldName } : {}),
-      ...(sanitizedMetadata ? { metadata: sanitizedMetadata } : {})
-    };
+      return sanitizedMetadata ? { record, sanitizedMetadata } : { record };
+    },
 
-    await intakeStore.appendIntakeEvent(storedEvent);
-    return sanitizedMetadata ? { event: storedEvent, sanitizedMetadata } : { event: storedEvent };
-  },
+    async appendConsentEvent(event) {
+      const sanitizedMetadata = sanitizePersistenceMetadata(event.metadata);
+      const storedEvent: ConsentEventRecord = {
+        eventId: event.eventId,
+        subjectId: event.subjectId,
+        state: event.state,
+        eventType: event.eventType,
+        occurredAt: event.occurredAt ?? now(),
+        ...(sanitizedMetadata ? { metadata: sanitizedMetadata } : {})
+      };
 
-  async createCase(input) {
-    return caseStore.create(input);
-  },
+      await consentStore.appendConsentEvent(storedEvent);
+      return storedEvent;
+    },
 
-  async getCase(caseId) {
-    return caseStore.getById(caseId);
-  },
+    async getIntakeState(subjectId) {
+      return intakeStore.getIntakeState(subjectId);
+    },
 
-  async updateCaseStatus(caseId, status) {
-    return caseStore.update({
-      caseId,
-      status,
-      updatedAt: now()
-    });
-  }
-});
+    async setIntakeState(subjectId, state, metadata) {
+      const sanitizedMetadata = sanitizePersistenceMetadata(metadata?.metadata);
+      const record = await intakeStore.setIntakeState(subjectId, state, {
+        updatedAt: metadata?.updatedAt ?? now(),
+        ...(sanitizedMetadata ? { metadata: sanitizedMetadata } : {})
+      });
+
+      return sanitizedMetadata ? { record, sanitizedMetadata } : { record };
+    },
+
+    async setIntakeField(subjectId, fieldName, value, metadata) {
+      const sanitizedMetadata = sanitizePersistenceMetadata(metadata?.metadata);
+      const record = await intakeStore.setIntakeField(subjectId, fieldName, value, {
+        updatedAt: metadata?.updatedAt ?? now(),
+        ...(sanitizedMetadata ? { metadata: sanitizedMetadata } : {})
+      });
+
+      return sanitizedMetadata ? { record, sanitizedMetadata } : { record };
+    },
+
+    async getIntakeSnapshot(subjectId) {
+      return intakeStore.getIntakeSnapshot(subjectId);
+    },
+
+    async appendIntakeEvent(event) {
+      const sanitizedMetadata = sanitizePersistenceMetadata(event.metadata);
+      const storedEvent: IntakeEventRecord = {
+        eventId: event.eventId,
+        subjectId: event.subjectId,
+        eventType: event.eventType,
+        occurredAt: event.occurredAt ?? now(),
+        ...(event.state ? { state: event.state } : {}),
+        ...(event.fieldName ? { fieldName: event.fieldName } : {}),
+        ...(sanitizedMetadata ? { metadata: sanitizedMetadata } : {})
+      };
+
+      await intakeStore.appendIntakeEvent(storedEvent);
+      return sanitizedMetadata ? { event: storedEvent, sanitizedMetadata } : { event: storedEvent };
+    },
+
+    async createCase(input) {
+      return caseStore.create(input);
+    },
+
+    async createCaseWithAudit(input) {
+      if (transactionRunner) {
+        return transactionRunner.runInTransaction(() => createCaseWithAudit(input));
+      }
+
+      return createCaseWithAudit(input);
+    },
+
+    async getCase(caseId) {
+      return caseStore.getById(caseId);
+    },
+
+    async updateCaseStatus(caseId, status) {
+      return caseStore.update({
+        caseId,
+        status,
+        updatedAt: now()
+      });
+    }
+  };
+};
 
 export const createSqlitePersistenceService = (
   config: OpenSqliteDatabaseOptions
@@ -296,7 +346,8 @@ export const createSqlitePersistenceService = (
     processedMessageStore: new SqliteProcessedMessageStore(database),
     auditLogStore: new SqliteAuditLogStore(database),
     consentStore: new SqliteConsentStore(database),
-    intakeStore: new SqliteIntakeStore(database)
+    intakeStore: new SqliteIntakeStore(database),
+    transactionRunner: createSqliteTransactionRunner(database)
   });
 
   return {
@@ -308,11 +359,25 @@ export const createSqlitePersistenceService = (
   };
 };
 
-export const createInMemoryPersistenceService = (): PersistenceService =>
-  createPersistenceService({
-    caseStore: new InMemoryCaseStore(),
-    processedMessageStore: new InMemoryProcessedMessageStore(),
-    auditLogStore: new InMemoryAuditLogStore(),
-    consentStore: new InMemoryConsentStore(),
-    intakeStore: new InMemoryIntakeStore()
+export const createInMemoryPersistenceService = (): PersistenceService => {
+  const caseStore = new InMemoryCaseStore();
+  const processedMessageStore = new InMemoryProcessedMessageStore();
+  const auditLogStore = new InMemoryAuditLogStore();
+  const consentStore = new InMemoryConsentStore();
+  const intakeStore = new InMemoryIntakeStore();
+
+  return createPersistenceService({
+    caseStore,
+    processedMessageStore,
+    auditLogStore,
+    consentStore,
+    intakeStore,
+    transactionRunner: createInMemoryPersistenceTransactionRunner({
+      caseStore,
+      processedMessageStore,
+      auditLogStore,
+      consentStore,
+      intakeStore
+    })
   });
+};

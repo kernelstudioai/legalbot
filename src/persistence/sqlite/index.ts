@@ -25,3 +25,4 @@ export { SqliteCaseStore } from "./sqliteCaseStore.ts";
 export { SqliteConsentStore } from "./sqliteConsentStore.ts";
 export { SqliteIntakeStore } from "./sqliteIntakeStore.ts";
 export { SqliteProcessedMessageStore } from "./sqliteProcessedMessageStore.ts";
+export { createSqliteTransactionRunner } from "./transactionRunner.ts";

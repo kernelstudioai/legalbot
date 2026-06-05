@@ -1,7 +1,120 @@
+import type { DatabaseSync } from "node:sqlite";
+
 export interface SqliteMigration {
   id: string;
-  sql: string;
+  sql?: string;
+  run?: (database: DatabaseSync) => void;
 }
+
+const requiredCaseColumns = [
+  "case_id",
+  "subject_id",
+  "status",
+  "name",
+  "problem_summary",
+  "created_at",
+  "updated_at"
+] as const;
+
+const quoteIdentifier = (value: string): string => `"${value.replaceAll('"', '""')}"`;
+
+const createCasesTableSql = (tableName: string): string => `
+  CREATE TABLE ${quoteIdentifier(tableName)} (
+    case_id TEXT PRIMARY KEY,
+    subject_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    name TEXT NOT NULL,
+    problem_summary TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+`;
+
+const tableExists = (database: DatabaseSync, tableName: string): boolean => {
+  const row = database
+    .prepare(
+      `
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table' AND name = ?
+      `
+    )
+    .get(tableName) as { name: string } | undefined;
+
+  return row?.name === tableName;
+};
+
+const getTableColumns = (database: DatabaseSync, tableName: string): string[] => {
+  const rows = database
+    .prepare(`PRAGMA table_info(${quoteIdentifier(tableName)})`)
+    .all() as Array<{ name: string }>;
+
+  return rows.map((row) => row.name);
+};
+
+const selectTextExpression = (
+  availableColumns: string[],
+  candidates: string[],
+  fallbackSql: string
+): string => {
+  const matchedColumn = candidates.find((candidate) => availableColumns.includes(candidate));
+
+  if (!matchedColumn) {
+    return fallbackSql;
+  }
+
+  return `COALESCE(CAST(${quoteIdentifier(matchedColumn)} AS TEXT), ${fallbackSql})`;
+};
+
+const normalizeCasesTable = (database: DatabaseSync): void => {
+  if (!tableExists(database, "cases")) {
+    database.exec(createCasesTableSql("cases"));
+    return;
+  }
+
+  const existingColumns = getTableColumns(database, "cases");
+  const alreadyNormalized =
+    existingColumns.length === requiredCaseColumns.length &&
+    requiredCaseColumns.every((columnName) => existingColumns.includes(columnName));
+
+  if (alreadyNormalized) {
+    return;
+  }
+
+  database.exec("ALTER TABLE cases RENAME TO cases__m17_legacy;");
+  database.exec(createCasesTableSql("cases__m17_new"));
+
+  const legacyColumns = getTableColumns(database, "cases__m17_legacy");
+  const createdAtExpression = selectTextExpression(
+    legacyColumns,
+    ["created_at", "createdAt"],
+    "CURRENT_TIMESTAMP"
+  );
+
+  database.exec(`
+    INSERT INTO cases__m17_new (
+      case_id,
+      subject_id,
+      status,
+      name,
+      problem_summary,
+      created_at,
+      updated_at
+    )
+    SELECT
+      ${selectTextExpression(legacyColumns, ["case_id", "caseId", "reference"], "printf('LEGACY-CASE-%d', rowid)")},
+      ${selectTextExpression(legacyColumns, ["subject_id", "subjectId"], "'legacy-subject'")},
+      ${selectTextExpression(legacyColumns, ["status"], "'draft'")},
+      ${selectTextExpression(legacyColumns, ["name", "client_name", "clientName"], "''")},
+      ${selectTextExpression(legacyColumns, ["problem_summary", "problemSummary", "summary"], "''")},
+      ${createdAtExpression},
+      ${selectTextExpression(legacyColumns, ["updated_at", "updatedAt"], createdAtExpression)}
+    FROM cases__m17_legacy;
+  `);
+
+  database.exec("DROP TABLE cases__m17_legacy;");
+  database.exec("ALTER TABLE cases__m17_new RENAME TO cases;");
+};
 
 export const sqliteMigrations: SqliteMigration[] = [
   {
@@ -104,5 +217,11 @@ export const sqliteMigrations: SqliteMigration[] = [
         metadata_json TEXT
       );
     `
+  },
+  {
+    id: "0009_harden_cases_schema",
+    run(database) {
+      normalizeCasesTable(database);
+    }
   }
 ];

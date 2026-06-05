@@ -7,7 +7,7 @@ import {
 
 export type CaseCreationPersistence = Pick<
   PersistenceService,
-  "appendAuditEvent" | "createCase" | "getConsentState" | "getIntakeSnapshot"
+  "createCaseWithAudit" | "getConsentState" | "getIntakeSnapshot"
 >;
 
 export interface CaseReferenceGeneratorInput {
@@ -140,25 +140,22 @@ export const createCaseCreationService = ({
       createdAt,
       updatedAt: createdAt
     };
-    const caseRecord = await persistence.createCase(caseInput);
-    const auditEvent = await persistence.appendAuditEvent({
-      eventId: `audit-case-created-from-intake-${caseRecord.caseId}`,
-      eventType: "case_created_from_intake",
-      entityType: "case",
-      entityId: caseRecord.caseId,
-      occurredAt: createdAt,
-      metadata: {
-        source: "completed_intake",
-        consentState: "granted",
-        intakeState: "intake_complete",
-        acceptedFieldNames: ["name", "problemSummary"]
+    return persistence.createCaseWithAudit({
+      case: caseInput,
+      auditEvent: {
+        eventId: `audit-case-created-from-intake-${caseInput.caseId}`,
+        eventType: "case_created_from_intake",
+        entityType: "case",
+        entityId: caseInput.caseId,
+        occurredAt: createdAt,
+        metadata: {
+          source: "completed_intake",
+          consentState: "granted",
+          intakeState: "intake_complete",
+          acceptedFieldNames: ["name", "problemSummary"]
+        }
       }
     });
-
-    return {
-      caseRecord,
-      auditEvent
-    };
   }
 });
 

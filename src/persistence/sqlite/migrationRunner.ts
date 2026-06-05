@@ -61,7 +61,14 @@ export class SqliteMigrationRunner {
         continue;
       }
 
-      this.database.exec(migration.sql);
+      if (migration.run) {
+        migration.run(this.database);
+      } else if (migration.sql) {
+        this.database.exec(migration.sql);
+      } else {
+        throw new Error(`SQLite migration ${migration.id} is missing an execution body`);
+      }
+
       insertMigration.run(migration.id, this.now());
       appliedMigrationIds.push(migration.id);
     }
