@@ -14,6 +14,7 @@ import {
   runSqliteMigrations
 } from "../../src/persistence/sqlite/index.ts";
 import { runCaseCreateFromIntakeCommand } from "../../src/app/caseCreateFromIntake.ts";
+import { toOperatorSubjectId } from "../../src/app/operatorSubjectId.ts";
 
 const tempDirectories: string[] = [];
 
@@ -331,6 +332,59 @@ describe("manual case creation command", () => {
     } finally {
       database.close();
     }
+  });
+
+  it("accepts an operator-safe subjectId from intake:list-ready", async () => {
+    const tempDir = createTempDir();
+    const logger = createLogger();
+    const stdout = createStdout();
+    const databaseUrl = "file:./data/legalbot.sqlite";
+    const rawSubjectId = "15551234567@c.us";
+
+    runSqliteMigrations({
+      databaseUrl,
+      cwd: tempDir,
+      enabled: true
+    });
+
+    const persistence = createSqlitePersistenceService({
+      databaseUrl,
+      cwd: tempDir
+    });
+
+    try {
+      await seedCompletedIntake(persistence, rawSubjectId, {
+        name: "Mario Rossi",
+        problemSummary: "Completed intake stays sanitized"
+      });
+    } finally {
+      persistence.close();
+    }
+
+    const summary = await runCaseCreateFromIntakeCommand({
+      argv: [
+        "node",
+        "src/app/caseCreateFromIntake.ts",
+        "--subject",
+        toOperatorSubjectId(rawSubjectId)
+      ],
+      cwd: tempDir,
+      envSource: {
+        DATABASE_URL: databaseUrl
+      },
+      logger,
+      stdout
+    });
+
+    expect(summary.exitCode).toBe(0);
+    expect(summary.result).toMatchObject({
+      caseId: expect.stringMatching(/^CASE-\d{8}-[A-F0-9]{10}$/),
+      status: "draft",
+      createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/)
+    });
+    expect(stdout.output).toBe(`${JSON.stringify(summary.result)}\n`);
+    expect(stdout.output).not.toContain(rawSubjectId);
+    expect(logger.error).not.toHaveBeenCalled();
   });
 
   it("returns the existing draft case on repeated command runs without creating duplicates", async () => {

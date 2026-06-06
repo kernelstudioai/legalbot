@@ -24,6 +24,8 @@ M20 hardens SQLite historical databases. Migration `0010_enforce_draft_case_uniq
 
 M21 adds safe error mapping for that SQLite uniqueness rule and an operator-only `npm run case:doctor` remediation report. Duplicate draft writes now fail with a sanitized application error instead of a raw SQLite constraint message, and operators can inspect migration readiness plus case consistency counts without dumping database contents.
 
+M22 adds an operator-only `npm run intake:list-ready` helper plus a durable live E2E runbook. The helper lists only consent-granted completed intakes that already contain both accepted fields, prints only sanitized operator-safe `subjectId` tokens plus state metadata, and still does not create cases automatically.
+
 ## Interfaces
 
 - `CaseStore`: minimal create/get/update support for case records built from accepted structured intake data only.
@@ -66,6 +68,8 @@ M21 adds safe error mapping for that SQLite uniqueness rule and an operator-only
 - M16 does not wire that service into the live OpenWA listener or intake-completion runtime path yet.
 - `src/app/caseCreateFromIntake.ts` is the operator entrypoint for manual case creation. It loads env through the shared loader, requires an already migrated SQLite database, accepts `--subject <subjectId>`, and prints only `{ caseId, status, createdAt }`. Repeated runs for the same completed-intake subject return the existing draft case instead of creating another one.
 - `src/app/caseDoctor.ts` is the operator entrypoint for persistence consistency checks. It loads env through the shared loader, requires an already migrated SQLite database, checks only migration and case-count aggregates, and never prints raw rows, SQL text, database paths, message bodies, transcripts, secrets, or full phone numbers.
+- `src/app/intakeListReady.ts` is the operator entrypoint for completed-intake discovery. It loads env through the shared loader, requires an already migrated SQLite database, lists only consent-granted `intake_complete` subjects that already have both accepted intake fields, and prints only `{ subjectId, intakeState, updatedAt, fieldNamesPresent }`.
+- The `subjectId` printed by `npm run intake:list-ready` is an operator-safe token accepted by `npm run case:create-from-intake -- --subject <subjectId>`. It does not print the raw phone-derived subject identifier.
 
 ## SQLite Foundation
 
@@ -74,6 +78,7 @@ M21 adds safe error mapping for that SQLite uniqueness rule and an operator-only
 - `TECHNICAL_PERSISTENCE_ENABLED` defaults to `false`.
 - Operators can run `npm run db:migrate` to apply the committed SQLite schema explicitly.
 - Operators can run `npm run db:status` to inspect applied and pending migration ids without dumping table contents.
+- Operators can run `npm run intake:list-ready` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
 - Operators can run `npm run case:create-from-intake -- --subject <subjectId>` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
 - Operators can run `npm run case:doctor` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
 - The SQLite migration runner is explicit and testable through `runSqliteMigrations(...)`, `getSqliteMigrationStatus(...)`, and `SqliteMigrationRunner`.
@@ -125,6 +130,7 @@ M21 adds safe error mapping for that SQLite uniqueness rule and an operator-only
 - M19 keeps manual case creation idempotent by `subjectId` plus existing `draft` case. The idempotent-hit audit event stores only sanitized structured metadata and does not persist transcripts, raw bodies, rejected values, or full phone numbers.
 - M20 remediation never stores transcripts, message bodies, or rejected values. It changes only case status metadata inside the existing `cases` table and preserves duplicate rows as `duplicate_archived` instead of deleting them.
 - M21 uniqueness-error mapping and `case:doctor` output are sanitized by policy. They must not expose SQL statements, database paths, raw rows, message bodies, transcripts, rejected values, or secrets.
+- M22 `intake:list-ready` output is sanitized by policy. It must not expose raw subject ids, full phone numbers, SQL text, database paths, raw rows, message bodies, transcripts, rejected values, or secrets.
 - Live WhatsApp runtime writes never create or update cases automatically.
 - M13 live consent wiring never stores inbound message body text in consent state metadata or consent events.
 - M15 live intake wiring persists only accepted structured `name` and `problemSummary` values plus sanitized metadata after explicit `granted` consent.
@@ -142,8 +148,9 @@ M21 adds safe error mapping for that SQLite uniqueness rule and an operator-only
 - When `DATABASE_MIGRATIONS_ENABLED=true`, `npm run db:migrate` creates parent directories as needed and applies the committed migration list.
 - When `DATABASE_MIGRATIONS_ENABLED=false`, `npm run db:migrate` reports pending migrations and skips schema changes.
 - `npm run db:status` reports applied and pending migration ids and counts without reading or printing table contents.
+- `npm run intake:list-ready` fails safely when migrations are missing or incomplete, exits `0` on success, exits nonzero on failure, and prints only operator-safe completed-intake metadata.
 - `npm run case:doctor` fails safely when migrations are missing or incomplete, exits `0` only when the migrated database is healthy, and exits nonzero when migration readiness or draft-case anomalies require operator action.
-- `npm run db:migrate`, `npm run db:status`, and `npm run case:doctor` remain direct Node 22 `--experimental-strip-types` entrypoints.
+- `npm run db:migrate`, `npm run db:status`, `npm run intake:list-ready`, and `npm run case:doctor` remain direct Node 22 `--experimental-strip-types` entrypoints.
 - Existing SQLite databases created before M17 can be upgraded in place. The cases-table hardening migration preserves minimal case metadata, normalizes column names to the committed snake_case schema, and drops unsupported legacy columns.
 - Existing SQLite databases created before M20 can be upgraded in place. Duplicate `draft` rows are remediated deterministically by `created_at ASC, case_id ASC`, and future duplicate `draft` inserts for the same `subjectId` fail at the SQLite schema boundary.
 - The migration boundary is intentionally separate from OpenWA startup so transport smoke behavior stays unchanged when technical persistence is disabled.
@@ -200,4 +207,8 @@ M21 adds safe error mapping for that SQLite uniqueness rule and an operator-only
   - `npm run case:doctor` logs `case_doctor_starting`, `case_doctor_checked`, or `case_doctor_failed`
   - `npm run case:doctor` prints only sanitized aggregate counts plus a remediation summary
   - the live OpenWA runtime still does not create cases automatically
+- M22 adds a second operator-only read surface for the same manual boundary:
+  - `npm run intake:list-ready` logs `intake_list_ready_starting`, `intake_list_ready_checked`, or `intake_list_ready_failed`
+  - `npm run intake:list-ready` prints only operator-safe completed-intake candidates
+  - operators must still run `npm run case:create-from-intake` explicitly to create a draft case
 - The live OpenWA runtime still does not create cases automatically, store full transcripts, or persist raw message bodies.

@@ -22,6 +22,7 @@ import {
   resolveSqliteDatabasePath,
   sqliteMigrations
 } from "../persistence/sqlite/index.ts";
+import { isOperatorSubjectId, resolveOperatorSubjectId } from "./operatorSubjectId.ts";
 
 export interface CaseCreateFromIntakeCommandOptions {
   argv?: string[];
@@ -184,12 +185,33 @@ export const runCaseCreateFromIntakeCommand = async ({
   let persistence: SqlitePersistenceService | undefined;
 
   try {
-    const subjectId = parseSubjectIdArg(argv);
+    const requestedSubjectId = parseSubjectIdArg(argv);
     const env = loadEnv(envSource);
     verifyMigrationsApplied({
       databaseUrl: env.DATABASE_URL,
       cwd
     });
+
+    const subjectId = isOperatorSubjectId(requestedSubjectId)
+      ? (() => {
+          const databasePath = resolveSqliteDatabasePath(env.DATABASE_URL, cwd);
+          const database = new DatabaseSync(databasePath);
+
+          try {
+            const resolvedSubjectId = resolveOperatorSubjectId(database, requestedSubjectId);
+
+            if (!resolvedSubjectId) {
+              throw new Error(
+                "Unknown operator subjectId. Run npm run intake:list-ready again before manual case creation."
+              );
+            }
+
+            return resolvedSubjectId;
+          } finally {
+            database.close();
+          }
+        })()
+      : requestedSubjectId;
 
     logger.info("case_create_from_intake_starting");
 

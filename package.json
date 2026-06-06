@@ -11,6 +11,7 @@
     "case:create-from-intake": "node --experimental-strip-types src/app/caseCreateFromIntake.ts",
     "db:migrate": "node --experimental-strip-types src/app/dbMigrate.ts",
     "db:status": "node --experimental-strip-types src/app/dbStatus.ts",
+    "intake:list-ready": "node --experimental-strip-types src/app/intakeListReady.ts",
     "smoke:openwa": "node --experimental-strip-types src/app/openwaSmoke.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

@@ -49,4 +49,5 @@
 - Bounded startup retry is controlled by `OPENWA_STARTUP_MAX_ATTEMPTS` and `OPENWA_STARTUP_RETRY_DELAY_SECONDS`.
 - After readiness, transport liveness uses a read-only heartbeat loop controlled by `OPENWA_LIVENESS_INTERVAL_SECONDS` and `OPENWA_LIVENESS_FAILURE_THRESHOLD`.
 - Shutdown emits `openwa_shutdown_starting`, `openwa_shutdown_complete`, and `openwa_shutdown_failed`.
+- M22 adds the operator-only helper `npm run intake:list-ready`. It lists only consent-granted `intake_complete` records with both accepted intake fields present, emits operator-safe `subjectId` tokens instead of raw phone-derived identifiers, and still does not create cases automatically.
 - No live OpenWA flow path creates a legal case automatically in this milestone. Case creation exists only as an explicit operator command and application boundary, remains idempotent for repeated manual runs, and is not triggered from listener or intake-completion runtime code.
