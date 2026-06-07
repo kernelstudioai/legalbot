@@ -2,10 +2,11 @@
 
 ## Scope
 
-This runbook is for the current single-bot OpenWA runtime only.
+This runbook covers the current single-bot OpenWA runtime only.
 
-- No dashboard yet.
 - No `install.sh` yet.
+- No systemd yet.
+- No dashboard yet.
 - No multi-bot flow.
 - No automatic case creation.
 - No attachments or PDF handling.
@@ -13,14 +14,28 @@ This runbook is for the current single-bot OpenWA runtime only.
 
 Case creation remains operator-only after a completed intake.
 
-## Preconditions
+## Minimal `.env`
 
-- Use Node `22.x`.
-- Keep runtime, browser, session, and database artifacts local and untracked.
-- Use explicit environment variables for runtime commands. Do not rely on automatic migration during OpenWA startup.
-- If `TECHNICAL_PERSISTENCE_ENABLED=true`, run the database commands first against the same `DATABASE_URL`.
+The only required operator-specific runtime value is:
 
-## Manual Flow
+```dotenv
+LAWYER_PHONE_E164=+15551234567
+```
+
+Safe defaults come from `src/config/env.ts`, including:
+
+- `BOT_MODE=smoke`
+- `OPENWA_SESSION_ID=legalbot-smoke`
+- `OPENWA_STATUS_SERVER_ENABLED=true`
+- `OPENWA_STATUS_SERVER_HOST=127.0.0.1`
+- `OPENWA_STATUS_SERVER_PORT=3001`
+- `TECHNICAL_PERSISTENCE_ENABLED=true`
+- `DATABASE_URL=file:./data/legalbot.sqlite`
+- `DATABASE_MIGRATIONS_ENABLED=true`
+
+Set `OPENWA_BROWSER_EXECUTABLE_PATH` only when the local machine cannot safely discover Chrome or Chromium.
+
+## Local Direct Run
 
 1. Use Node 22.
 
@@ -28,40 +43,31 @@ Case creation remains operator-only after a completed intake.
    node -v
    ```
 
-2. Run migrations.
+2. Apply migrations for the default or overridden `DATABASE_URL`.
 
    ```bash
-   DATABASE_URL="file:./tmp/legalbot-live.sqlite" DATABASE_MIGRATIONS_ENABLED="true" npm run db:migrate
+   npm run db:migrate
    ```
 
 3. Check migration status.
 
    ```bash
-   DATABASE_URL="file:./tmp/legalbot-live.sqlite" DATABASE_MIGRATIONS_ENABLED="true" npm run db:status
+   npm run db:status
    ```
 
 4. Run the case consistency check.
 
    ```bash
-   DATABASE_URL="file:./tmp/legalbot-live.sqlite" DATABASE_MIGRATIONS_ENABLED="true" npm run case:doctor
+   npm run case:doctor
    ```
 
-5. Start the OpenWA smoke runtime with technical persistence enabled.
+5. Start the OpenWA smoke runtime.
 
    ```bash
-   BOT_MODE="smoke" \
-   OPENWA_SESSION_ID="<single-bot-session-id>" \
-   LAWYER_PHONE_E164="<operator-phone-e164>" \
-   OPENWA_STATUS_SERVER_ENABLED="true" \
-   OPENWA_STATUS_SERVER_HOST="127.0.0.1" \
-   OPENWA_STATUS_SERVER_PORT="3001" \
-   TECHNICAL_PERSISTENCE_ENABLED="true" \
-   DATABASE_URL="file:./tmp/legalbot-live.sqlite" \
-   DATABASE_MIGRATIONS_ENABLED="true" \
    npm run smoke:openwa
    ```
 
-6. Check the local operator status surface.
+6. Check the local status surface.
 
    ```bash
    curl http://127.0.0.1:3001/health
@@ -69,7 +75,7 @@ Case creation remains operator-only after a completed intake.
    curl http://127.0.0.1:3001/status
    ```
 
-7. Send the first WhatsApp message from the client phone to the single bot.
+7. Send the first WhatsApp message from the client phone to the bot.
 
 8. Grant explicit consent with an allowed positive consent phrase.
 
@@ -77,10 +83,10 @@ Case creation remains operator-only after a completed intake.
 
 10. Provide a valid short problem summary when the bot asks for it.
 
-11. List completed intake candidates safely.
+11. List completed intake candidates.
 
    ```bash
-   DATABASE_URL="file:./tmp/legalbot-live.sqlite" DATABASE_MIGRATIONS_ENABLED="true" npm run intake:list-ready
+   npm run intake:list-ready
    ```
 
    The command prints only:
@@ -90,24 +96,66 @@ Case creation remains operator-only after a completed intake.
    - `updatedAt`
    - `fieldNamesPresent`
 
-   `subjectId` is an operator-safe token for the completed intake. The command does not print raw message bodies, transcripts, secrets, raw rows, or full phone numbers.
-
-12. Run manual case creation with the `subjectId` returned by step 11.
+12. Create a draft case manually from the returned `subjectId`.
 
    ```bash
-   DATABASE_URL="file:./tmp/legalbot-live.sqlite" DATABASE_MIGRATIONS_ENABLED="true" npm run case:create-from-intake -- --subject <subjectId-from-intake-list-ready>
+   npm run case:create-from-intake -- --subject <subjectId-from-intake-list-ready>
    ```
 
-13. Run the case consistency check again.
+13. Re-run the case consistency check.
 
    ```bash
-   DATABASE_URL="file:./tmp/legalbot-live.sqlite" DATABASE_MIGRATIONS_ENABLED="true" npm run case:doctor
+   npm run case:doctor
    ```
 
-## Expected Operator Boundary
+## Docker Runtime
+
+The Docker baseline is for local and product-like development only. It is not the final VPS installer.
+
+1. Keep the same minimal `.env` with `LAWYER_PHONE_E164`.
+
+2. Build the image.
+
+   ```bash
+   npm run docker:build
+   ```
+
+3. Start the container.
+
+   ```bash
+   npm run docker:up
+   ```
+
+   The Compose service runs `npm run db:migrate` before `npm run smoke:openwa`, mounts `./data` to `/app/data`, mounts `/app/openwa-session` to a named volume, and overrides only Docker-specific runtime values:
+
+   - `OPENWA_HEADLESS=true`
+   - `OPENWA_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium`
+   - `OPENWA_STATUS_SERVER_HOST=0.0.0.0`
+
+4. Inspect logs.
+
+   ```bash
+   npm run docker:logs
+   ```
+
+5. Check the host status surface.
+
+   ```bash
+   curl http://127.0.0.1:3001/health
+   curl http://127.0.0.1:3001/ready
+   curl http://127.0.0.1:3001/status
+   ```
+
+6. Stop the container.
+
+   ```bash
+   npm run docker:down
+   ```
+
+## Operator Boundary
 
 - Live OpenWA messages may advance consent and intake state only.
-- `npm run intake:list-ready` is the operator read surface for completed single-bot intakes.
+- `npm run intake:list-ready` is the operator read surface for completed intakes.
 - `npm run case:create-from-intake` is still the only case-draft creation path.
 - The runtime never creates cases automatically on intake completion.
 - The runtime and operator commands do not persist or print raw transcripts or raw inbound message bodies.

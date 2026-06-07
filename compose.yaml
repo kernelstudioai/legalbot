@@ -1,0 +1,20 @@
+services:
+  legalbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["sh", "-lc", "npm run db:migrate && npm run smoke:openwa"]
+    env_file:
+      - .env
+    environment:
+      OPENWA_BROWSER_EXECUTABLE_PATH: /usr/bin/chromium
+      OPENWA_HEADLESS: "true"
+      OPENWA_STATUS_SERVER_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - ./data:/app/data
+      - legalbot-openwa-session:/app/openwa-session
+
+volumes:
+  legalbot-openwa-session:

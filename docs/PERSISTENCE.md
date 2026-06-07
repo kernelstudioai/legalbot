@@ -26,6 +26,8 @@ M21 adds safe error mapping for that SQLite uniqueness rule and an operator-only
 
 M22 adds an operator-only `npm run intake:list-ready` helper plus a durable live E2E runbook. The helper lists only consent-granted completed intakes that already contain both accepted fields, prints only sanitized operator-safe `subjectId` tokens plus state metadata, and still does not create cases automatically.
 
+M23 makes the single-bot runtime default to SQLite-backed technical persistence plus the local status surface, while keeping the same no-transcript and no-auto-case boundaries and adding a Docker runtime baseline.
+
 ## Interfaces
 
 - `CaseStore`: minimal create/get/update support for case records built from accepted structured intake data only.
@@ -75,13 +77,15 @@ M22 adds an operator-only `npm run intake:list-ready` helper plus a durable live
 
 - `DATABASE_URL` defaults to `file:./data/legalbot.sqlite`.
 - `DATABASE_MIGRATIONS_ENABLED` defaults to `true`.
-- `TECHNICAL_PERSISTENCE_ENABLED` defaults to `false`.
+- `TECHNICAL_PERSISTENCE_ENABLED` defaults to `true`.
 - Operators can run `npm run db:migrate` to apply the committed SQLite schema explicitly.
 - Operators can run `npm run db:status` to inspect applied and pending migration ids without dumping table contents.
 - Operators can run `npm run intake:list-ready` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
 - Operators can run `npm run case:create-from-intake -- --subject <subjectId>` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
 - Operators can run `npm run case:doctor` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
 - The SQLite migration runner is explicit and testable through `runSqliteMigrations(...)`, `getSqliteMigrationStatus(...)`, and `SqliteMigrationRunner`.
+- The local direct smoke runtime defaults to `OPENWA_STATUS_SERVER_ENABLED=true` on `127.0.0.1:3001`.
+- The Docker baseline overrides only container-specific values: `OPENWA_STATUS_SERVER_HOST=0.0.0.0`, `OPENWA_HEADLESS=true`, and `OPENWA_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium`.
 - `0009_harden_cases_schema` safely rebuilds legacy `cases` tables when older SQLite files still use `reference`, camelCase columns, or extra transcript/body columns, and it copies forward only the minimal supported case fields.
 - `0010_enforce_draft_case_uniqueness` scans historical `draft` cases by `subjectId`, keeps the earliest `created_at` row as `draft`, marks later duplicates as `duplicate_archived`, and adds the partial unique index `cases_one_draft_per_subject_id` on `cases(subject_id) WHERE status = 'draft'`.
 - `npm run case:doctor` reports only aggregate counts: applied and pending migration counts, current `draft` case count, unique `draft` subject count, `duplicate_archived` count, duplicate-draft anomaly counts, and whether the committed draft-uniqueness index is present.
@@ -100,6 +104,8 @@ M22 adds an operator-only `npm run intake:list-ready` helper plus a durable live
 ## Data Boundaries
 
 - `data/` stays ignored by git, and runtime/session/browser/database artifacts must not be committed.
+- The Docker baseline bind-mounts `./data` to `/app/data` so the default SQLite file persists across container restarts.
+- The Docker baseline stores `openwa-session/` in a separate named volume so session/browser state does not enter the repo.
 - No WhatsApp message bodies are persisted.
 - OpenWA runtime dedupe persists only processed `messageId` markers plus redacted technical metadata needed by the current store contract.
 - Technical audit events are sanitized before persistence and must not include message bodies, legal facts, full phone numbers, browser paths, session paths, tokens, or QR data.
@@ -138,7 +144,7 @@ M22 adds an operator-only `npm run intake:list-ready` helper plus a durable live
 
 ## File Location And Backups
 
-- The default database file location is [data/legalbot.sqlite](/C:/Users/Jacopo/Documents/legalbot/data/legalbot.sqlite) when persistence is explicitly opened outside tests.
+- The default database file location is `data/legalbot.sqlite` when persistence is explicitly opened outside tests.
 - Test coverage uses temp directories so database files are created only under ephemeral test paths.
 - `data/` remains git-ignored because it may contain local SQLite files created by `npm run db:migrate` or `npm run db:status`.
 - Backups remain an operator concern. M8 does not add automated backup or retention jobs, so any future production use must define backup frequency, encryption, and restore verification before enabling real writes.
@@ -159,7 +165,7 @@ M22 adds an operator-only `npm run intake:list-ready` helper plus a durable live
 ## OpenWA Runtime Behavior
 
 - `TECHNICAL_PERSISTENCE_ENABLED=false`
-  The smoke runtime preserves current behavior exactly. It does not open SQLite, run migrations, or call runtime persistence.
+  The smoke runtime skips SQLite-backed technical persistence and keeps only process-local dedupe plus the existing non-persistent runtime behavior.
 - `TECHNICAL_PERSISTENCE_ENABLED=true`
   The smoke runtime keeps the existing in-memory duplicate guard as the first line of protection, then checks restart-safe dedupe through `PersistenceService.isMessageProcessed(messageId)` before the pipeline runs.
 - Successful dispatches call `markMessageProcessed(messageId, ...)` after dispatch succeeds.

@@ -1,0 +1,76 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(testDir, "../..");
+
+const readRepoFile = (relativePath: string): string =>
+  readFileSync(path.join(repoRoot, relativePath), "utf8");
+
+describe("docker runtime files", () => {
+  it("keeps the direct Node 22 strip-types scripts intact", () => {
+    const packageJson = JSON.parse(readRepoFile("package.json")) as {
+      scripts: Record<string, string>;
+    };
+
+    expect(packageJson.scripts["db:migrate"]).toBe(
+      "node --experimental-strip-types src/app/dbMigrate.ts"
+    );
+    expect(packageJson.scripts["db:status"]).toBe(
+      "node --experimental-strip-types src/app/dbStatus.ts"
+    );
+    expect(packageJson.scripts["case:doctor"]).toBe(
+      "node --experimental-strip-types src/app/caseDoctor.ts"
+    );
+    expect(packageJson.scripts["intake:list-ready"]).toBe(
+      "node --experimental-strip-types src/app/intakeListReady.ts"
+    );
+    expect(packageJson.scripts["smoke:openwa"]).toBe(
+      "node --experimental-strip-types src/app/openwaSmoke.ts"
+    );
+    expect(packageJson.scripts["docker:build"]).toBe("docker compose build");
+    expect(packageJson.scripts["docker:up"]).toBe("docker compose up -d");
+    expect(packageJson.scripts["docker:down"]).toBe("docker compose down");
+    expect(packageJson.scripts["docker:status"]).toBe("docker compose ps");
+  });
+
+  it("keeps runtime artifacts and env files out of Docker build context", () => {
+    const dockerignore = readRepoFile(".dockerignore");
+
+    expect(dockerignore).toContain(".env");
+    expect(dockerignore).toContain("data/");
+    expect(dockerignore).toContain("openwa-session/");
+    expect(dockerignore).toContain("tmp/");
+    expect(dockerignore).toContain("logs/");
+    expect(dockerignore).toContain(".chromium/");
+    expect(dockerignore).toContain("chrome-profile/");
+    expect(dockerignore).toContain("user-data/");
+  });
+
+  it("uses minimal operator input in compose without hardcoded secrets", () => {
+    const compose = readRepoFile("compose.yaml");
+    const dockerfile = readRepoFile("Dockerfile");
+
+    expect(compose).toContain("env_file:");
+    expect(compose).toContain("- .env");
+    expect(compose).toContain("./data:/app/data");
+    expect(compose).toContain("legalbot-openwa-session:/app/openwa-session");
+    expect(compose).toContain("OPENWA_BROWSER_EXECUTABLE_PATH: /usr/bin/chromium");
+    expect(compose).toContain('OPENWA_HEADLESS: "true"');
+    expect(compose).toContain("OPENWA_STATUS_SERVER_HOST: 0.0.0.0");
+    expect(compose).not.toMatch(/\+[1-9]\d{7,14}/);
+    expect(dockerfile).not.toContain("COPY .env");
+  });
+
+  it("documents the operator boundary for Docker and live runtime", () => {
+    const dockerDoc = readRepoFile("docs/DOCKER.md");
+    const runbook = readRepoFile("docs/LIVE_E2E_RUNBOOK.md");
+
+    expect(dockerDoc).toContain("No automatic case creation.");
+    expect(dockerDoc).toContain("No transcript or raw message-body persistence.");
+    expect(runbook).toContain("No automatic case creation.");
+    expect(runbook).toContain("No transcript or raw message-body persistence.");
+  });
+});

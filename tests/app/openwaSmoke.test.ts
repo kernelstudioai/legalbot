@@ -87,8 +87,9 @@ const createPersistenceService = (): PersistenceService => ({
 });
 
 describe("openwa smoke startup", () => {
-  it("keeps the status server disabled by default", async () => {
+  it("enables the status server by default for product-like runs", async () => {
     const logger = createLogger();
+    const persistenceService = createPersistenceService();
     const createClient = vi.fn().mockResolvedValue({
       onMessage: vi.fn().mockResolvedValue(undefined),
       sendText: vi.fn(),
@@ -97,23 +98,44 @@ describe("openwa smoke startup", () => {
 
     const app = await startOpenWaSmokeApp({
       envSource: {
-        BOT_MODE: "smoke",
-        OPENWA_SESSION_ID: "legalbot-smoke",
         OPENWA_HEADLESS: "false",
-        OPENWA_LIVENESS_INTERVAL_SECONDS: "30",
-        OPENWA_LIVENESS_FAILURE_THRESHOLD: "3",
-        OPENWA_RECOVERY_MODE: "manual",
         LAWYER_PHONE_E164: "+15551234567"
       },
       logger,
-      createClient
+      createClient,
+      persistenceService,
+      startStatusServer: async ({ config, logger: statusLogger }) => {
+        statusLogger.info("openwa_status_server_starting", {
+          host: config.host,
+          port: config.port
+        });
+        statusLogger.info("openwa_status_server_ready", {
+          host: config.host,
+          port: 3001
+        });
+
+        return {
+          enabled: true,
+          address: {
+            host: config.host,
+            port: 3001
+          },
+          stop: vi.fn().mockResolvedValue(undefined)
+        };
+      }
     });
 
-    expect(app.getStatusServerAddress()).toBeUndefined();
-    expect(logger.info).not.toHaveBeenCalledWith(
-      "openwa_status_server_ready",
-      expect.anything()
-    );
+    expect(app.env.BOT_MODE).toBe("smoke");
+    expect(app.env.OPENWA_SESSION_ID).toBe("legalbot-smoke");
+    expect(app.env.TECHNICAL_PERSISTENCE_ENABLED).toBe(true);
+    expect(app.getStatusServerAddress()).toEqual({
+      host: "127.0.0.1",
+      port: 3001
+    });
+    expect(logger.info).toHaveBeenCalledWith("openwa_status_server_ready", {
+      host: "127.0.0.1",
+      port: 3001
+    });
 
     await app.stop("test_shutdown");
   });
@@ -146,6 +168,7 @@ describe("openwa smoke startup", () => {
         OPENWA_STATUS_SERVER_ENABLED: "true",
         OPENWA_STATUS_SERVER_HOST: "127.0.0.1",
         OPENWA_STATUS_SERVER_PORT: "0",
+        TECHNICAL_PERSISTENCE_ENABLED: "false",
         LAWYER_PHONE_E164: "+15551234567"
       },
       logger,
@@ -329,6 +352,8 @@ describe("openwa smoke startup", () => {
         OPENWA_LIVENESS_INTERVAL_SECONDS: "30",
         OPENWA_LIVENESS_FAILURE_THRESHOLD: "3",
         OPENWA_RECOVERY_MODE: "manual",
+        OPENWA_STATUS_SERVER_ENABLED: "false",
+        TECHNICAL_PERSISTENCE_ENABLED: "false",
         LAWYER_PHONE_E164: "+15551234567"
       },
       logger,
@@ -361,6 +386,7 @@ describe("openwa smoke startup", () => {
           OPENWA_STATUS_SERVER_ENABLED: "true",
           OPENWA_STATUS_SERVER_HOST: "127.0.0.1",
           OPENWA_STATUS_SERVER_PORT: "3001",
+          TECHNICAL_PERSISTENCE_ENABLED: "false",
           LAWYER_PHONE_E164: "+15551234567"
         },
         logger,
@@ -402,6 +428,7 @@ describe("openwa smoke startup", () => {
         BOT_MODE: "smoke",
         OPENWA_SESSION_ID: "legalbot-smoke",
         OPENWA_HEADLESS: "false",
+        OPENWA_STATUS_SERVER_ENABLED: "false",
         TECHNICAL_PERSISTENCE_ENABLED: "false",
         LAWYER_PHONE_E164: "+15551234567"
       },
@@ -455,6 +482,7 @@ describe("openwa smoke startup", () => {
         BOT_MODE: "smoke",
         OPENWA_SESSION_ID: "legalbot-smoke",
         OPENWA_HEADLESS: "false",
+        OPENWA_STATUS_SERVER_ENABLED: "false",
         TECHNICAL_PERSISTENCE_ENABLED: "true",
         LAWYER_PHONE_E164: "+15551234567"
       },
