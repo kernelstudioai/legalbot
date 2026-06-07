@@ -47,6 +47,19 @@ describe("docker runtime files", () => {
     expect(dockerignore).toContain(".chromium/");
     expect(dockerignore).toContain("chrome-profile/");
     expect(dockerignore).toContain("user-data/");
+    expect(dockerignore).toContain("*.sqlite");
+    expect(dockerignore).toContain("*.db");
+  });
+
+  it("uses a Docker healthcheck that validates the local status server only", () => {
+    const compose = readRepoFile("compose.yaml");
+
+    expect(compose).toContain("healthcheck:");
+    expect(compose).toContain("http://127.0.0.1:3001/health");
+    expect(compose).not.toContain("http://127.0.0.1:3001/ready");
+    expect(compose).toContain("- node");
+    expect(compose).toContain('OPENWA_STATUS_SERVER_HOST: 0.0.0.0');
+    expect(compose).toContain('- "127.0.0.1:3001:3001"');
   });
 
   it("uses minimal operator input in compose without hardcoded secrets", () => {
@@ -70,7 +83,10 @@ describe("docker runtime files", () => {
 
     expect(dockerDoc).toContain("No automatic case creation.");
     expect(dockerDoc).toContain("No transcript or raw message-body persistence.");
+    expect(dockerDoc).toContain("`/health` means the process and status server are alive.");
+    expect(dockerDoc).toContain("`/ready` may stay 503 until QR pairing or session authentication completes.");
     expect(runbook).toContain("No automatic case creation.");
     expect(runbook).toContain("No transcript or raw message-body persistence.");
+    expect(runbook).toContain("Docker health is based on `/health`, not `/ready`.");
   });
 });

@@ -4,6 +4,16 @@ services:
       context: .
       dockerfile: Dockerfile
     command: ["sh", "-lc", "npm run db:migrate && npm run smoke:openwa"]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/health').then((res) => process.exit(res.status === 200 ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 45s
+      retries: 3
     env_file:
       - .env
     environment:

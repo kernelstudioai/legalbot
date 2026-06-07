@@ -123,7 +123,7 @@ The Docker baseline is for local and product-like development only. It is not th
 3. Start the container.
 
    ```bash
-   npm run docker:up
+   docker compose up -d
    ```
 
    The Compose service runs `npm run db:migrate` before `npm run smoke:openwa`, mounts `./data` to `/app/data`, mounts `/app/openwa-session` to a named volume, and overrides only Docker-specific runtime values:
@@ -132,13 +132,23 @@ The Docker baseline is for local and product-like development only. It is not th
    - `OPENWA_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium`
    - `OPENWA_STATUS_SERVER_HOST=0.0.0.0`
 
-4. Inspect logs.
+4. Inspect the container health.
 
    ```bash
-   npm run docker:logs
+   docker compose ps
    ```
 
-5. Check the host status surface.
+   Docker health is based on `/health`, not `/ready`.
+
+5. Inspect logs for startup and first-pairing state.
+
+   ```bash
+   docker compose logs --tail=200 -f legalbot
+   ```
+
+   The first pairing flow prints the QR in the logs. OpenWA is not ready until that QR is scanned or an existing authenticated session is restored.
+
+6. Check the host status surface.
 
    ```bash
    curl http://127.0.0.1:3001/health
@@ -146,11 +156,19 @@ The Docker baseline is for local and product-like development only. It is not th
    curl http://127.0.0.1:3001/status
    ```
 
-6. Stop the container.
+   Expected sequence before pairing completes:
+
+   - `/health` returns HTTP 200 once the process and status server are alive.
+   - `/status` returns HTTP 200 with a startup state while OpenWA is still pairing.
+   - `/ready` may return HTTP 503 until QR pairing or restored authentication completes.
+
+7. Stop the container.
 
    ```bash
-   npm run docker:down
+   docker compose down
    ```
+
+   Use `docker compose down --volumes` only when the named OpenWA session volume must be removed on purpose.
 
 ## Operator Boundary
 

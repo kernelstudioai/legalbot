@@ -30,25 +30,31 @@ The Compose service uses runtime defaults from `src/config/env.ts` and adds only
 Build:
 
 ```bash
-npm run docker:build
+docker compose build
 ```
 
 Start:
 
 ```bash
-npm run docker:up
+docker compose up
+```
+
+Background start:
+
+```bash
+docker compose up -d
 ```
 
 Logs:
 
 ```bash
-npm run docker:logs
+docker compose logs --tail=200 -f legalbot
 ```
 
 Status:
 
 ```bash
-npm run docker:status
+docker compose ps
 curl http://127.0.0.1:3001/health
 curl http://127.0.0.1:3001/ready
 curl http://127.0.0.1:3001/status
@@ -57,7 +63,13 @@ curl http://127.0.0.1:3001/status
 Stop:
 
 ```bash
-npm run docker:down
+docker compose down
+```
+
+Stop and remove the named OpenWA session volume only when the pairing state must be discarded:
+
+```bash
+docker compose down --volumes
 ```
 
 ## Persistence And Session State
@@ -66,11 +78,16 @@ npm run docker:down
 - `/app/openwa-session` is stored in the named volume `legalbot-openwa-session`.
 - The container runs `npm run db:migrate` before `npm run smoke:openwa`.
 - Runtime, browser, session, and database artifacts remain untracked by git.
+- The Compose healthcheck uses the bundled Node runtime to request `http://127.0.0.1:3001/health`, so no extra `curl` or `wget` dependency is required in the image.
 
-## QR And Pairing Caveats
+## Health And Readiness
 
-- The container can expose the status server before WhatsApp pairing is complete.
-- `/ready` may stay non-ready until the OpenWA client finishes startup and pairing.
+- `docker compose up -d` only starts the container in the background. Use `docker compose ps` to inspect the container health state.
+- `/health` means the process and status server are alive.
+- `/status` returns the current runtime state and should be reachable when the status server is up.
+- `/ready` may stay 503 until QR pairing or session authentication completes.
+- Docker health is based on `/health`, not `/ready`, so the container can become healthy before WhatsApp is paired.
+- During the first pairing flow, the QR code is printed in the container logs.
 - The session volume preserves pairing state across restarts.
 
 ## Mac And Linux Notes
