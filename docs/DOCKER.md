@@ -25,6 +25,9 @@ The Compose service uses runtime defaults from `src/config/env.ts` and adds only
 - `OPENWA_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium`
 - `OPENWA_STATUS_SERVER_HOST=0.0.0.0`
 
+OpenWA launches Chromium with `--no-sandbox` and `--disable-setuid-sandbox`.
+This avoids Chromium sandbox failures in Docker but weakens Chromium's process isolation, so keep this Compose service single-purpose, local-bound, and isolated from untrusted workloads.
+
 ## Commands
 
 Build:
@@ -79,16 +82,42 @@ docker compose down --volumes
 - The container runs `npm run db:migrate` before `npm run smoke:openwa`.
 - Runtime, browser, session, and database artifacts remain untracked by git.
 - The Compose healthcheck uses the bundled Node runtime to request `http://127.0.0.1:3001/health`, so no extra `curl` or `wget` dependency is required in the image.
+- LegalBot removes only Chromium `Singleton*` profile lock files before OpenWA launch. This clears stale browser locks left by a previous crashed container without deleting WhatsApp auth/session data.
 
 ## Health And Readiness
 
 - `docker compose up -d` only starts the container in the background. Use `docker compose ps` to inspect the container health state.
+- Expected startup sequence:
+  `npm run db:migrate` completes, the status server binds, Chromium launches, the QR is printed for first-time pairing, `/health` returns 200, `/status` returns 200, and `/ready` stays 503 until QR pairing or restored auth completes.
 - `/health` means the process and status server are alive.
 - `/status` returns the current runtime state and should be reachable when the status server is up.
 - `/ready` may stay 503 until QR pairing or session authentication completes.
 - Docker health is based on `/health`, not `/ready`, so the container can become healthy before WhatsApp is paired.
 - During the first pairing flow, the QR code is printed in the container logs.
 - The session volume preserves pairing state across restarts.
+
+## Chromium Diagnostics
+
+Run these checks inside the image or container when Chromium fails to launch:
+
+```bash
+docker run --rm --entrypoint sh legalbot-legalbot -lc 'node --version'
+docker run --rm --entrypoint sh legalbot-legalbot -lc 'which chromium'
+docker run --rm --entrypoint sh legalbot-legalbot -lc 'chromium --version'
+docker run --rm --entrypoint sh legalbot-legalbot -lc 'ldd /usr/lib/chromium/chromium'
+docker run --rm --entrypoint sh legalbot-legalbot -lc 'id && stat -c "%U:%G %a %n" /app /app/data /app/openwa-session'
+```
+
+If Chromium exits with `No usable sandbox!`, confirm the effective OpenWA/Puppeteer launch args include `--no-sandbox` and `--disable-setuid-sandbox`.
+If Chromium reports that the profile is already in use by another Chromium process, check for stale `SingletonCookie`, `SingletonLock`, or `SingletonSocket` files under the OpenWA browser profile directory.
+
+For an isolated Chromium-only probe, use:
+
+```bash
+docker run --rm --entrypoint sh legalbot-legalbot -lc 'chromium --headless --disable-gpu --no-sandbox --dump-dom about:blank'
+```
+
+This should print a minimal HTML document. If it fails before OpenWA starts, inspect `docker compose logs --tail=200 legalbot` before changing application code.
 
 ## Mac And Linux Notes
 

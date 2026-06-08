@@ -83,6 +83,12 @@ describe("docker runtime files", () => {
 
     expect(dockerDoc).toContain("No automatic case creation.");
     expect(dockerDoc).toContain("No transcript or raw message-body persistence.");
+    expect(dockerDoc).toContain("OpenWA launches Chromium with `--no-sandbox` and `--disable-setuid-sandbox`.");
+    expect(dockerDoc).toContain("LegalBot removes only Chromium `Singleton*` profile lock files before OpenWA launch.");
+    expect(dockerDoc).toContain("node --version");
+    expect(dockerDoc).toContain("which chromium");
+    expect(dockerDoc).toContain("chromium --version");
+    expect(dockerDoc).toContain("ldd /usr/lib/chromium/chromium");
     expect(dockerDoc).toContain("`/health` means the process and status server are alive.");
     expect(dockerDoc).toContain("`/ready` may stay 503 until QR pairing or session authentication completes.");
     expect(runbook).toContain("No automatic case creation.");

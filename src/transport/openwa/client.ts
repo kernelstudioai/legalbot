@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { create, type Client, type ConfigObject, type Message } from "@open-wa/wa-automate";
 import { createOpenWaLivenessCheck } from "./liveness.ts";
@@ -17,6 +17,12 @@ export interface OpenWaConfig {
 export const OPENWA_SESSION_PATH = "openwa-session";
 export const OPENWA_DEFAULT_QR_TIMEOUT_SECONDS = 180;
 export const OPENWA_DEFAULT_AUTH_TIMEOUT_SECONDS = 180;
+export const OPENWA_CHROMIUM_PROFILE_PREFIX = "_IGNORE_";
+export const OPENWA_CHROMIUM_SINGLETON_LOCK_FILES = [
+  "SingletonCookie",
+  "SingletonLock",
+  "SingletonSocket"
+] as const;
 
 const normalizeTimestamp = (
   timestamp: number | undefined,
@@ -83,8 +89,22 @@ export const createOpenWaConfig = ({
   return config;
 };
 
+export const removeOpenWaChromiumSingletonLocks = (
+  config: Pick<OpenWaConfig, "sessionDataPath" | "sessionId">
+): void => {
+  const profilePath = path.join(
+    config.sessionDataPath,
+    `${OPENWA_CHROMIUM_PROFILE_PREFIX}${config.sessionId}`
+  );
+
+  for (const lockFile of OPENWA_CHROMIUM_SINGLETON_LOCK_FILES) {
+    rmSync(path.join(profilePath, lockFile), { force: true });
+  }
+};
+
 export const toOpenWaConfigObject = (config: OpenWaConfig): ConfigObject => {
   mkdirSync(config.sessionDataPath, { recursive: true });
+  removeOpenWaChromiumSingletonLocks(config);
 
   return {
     sessionId: config.sessionId,
