@@ -64,13 +64,19 @@ Business persistence is required for live client intake. Technical persistence m
    npm run case:doctor
    ```
 
-5. Start the OpenWA smoke runtime.
+5. Run the business-state aggregate check before live traffic.
+
+   ```bash
+   npm run business:check
+   ```
+
+6. Start the OpenWA smoke runtime.
 
    ```bash
    npm run smoke:openwa
    ```
 
-6. Check the local status surface.
+7. Check the local status surface.
 
    ```bash
    curl http://127.0.0.1:3001/health
@@ -78,11 +84,11 @@ Business persistence is required for live client intake. Technical persistence m
    curl http://127.0.0.1:3001/status
    ```
 
-7. Send the first WhatsApp message from the client phone to the bot.
+8. Send the first WhatsApp message from the client phone to the bot.
 
-8. Grant explicit consent with the short formal command `Acconsento`.
+9. Grant explicit consent with the short formal command `Acconsento`.
 
-9. Provide identity data in one message when the bot asks for it.
+10. Provide identity data in one message when the bot asks for it.
 
    Example:
 
@@ -90,9 +96,9 @@ Business persistence is required for live client intake. Technical persistence m
    Mario Rossi, 01/01/1980, Roma
    ```
 
-10. Provide a valid short problem summary when the bot asks for it.
+11. Provide a valid short problem summary when the bot asks for it.
 
-11. List completed intake candidates.
+12. List completed intake candidates.
 
    ```bash
    npm run intake:list-ready
@@ -105,16 +111,22 @@ Business persistence is required for live client intake. Technical persistence m
    - `updatedAt`
    - `fieldNamesPresent`
 
-12. Create a draft case manually from the returned `subjectId`.
+13. Create a draft case manually from the returned `subjectId`.
 
    ```bash
    npm run case:create-from-intake -- --subject <subjectId-from-intake-list-ready>
    ```
 
-13. Re-run the case consistency check.
+14. Re-run the case consistency check.
 
    ```bash
    npm run case:doctor
+   ```
+
+15. Optionally create a post-test business backup after a successful live intake and manual case-creation check.
+
+   ```bash
+   npm run business:backup
    ```
 
 Validated M26 live flow summary:
@@ -172,6 +184,7 @@ The Docker baseline is for local and product-like development only. It is not th
    curl http://127.0.0.1:3001/health
    curl http://127.0.0.1:3001/ready
    curl http://127.0.0.1:3001/status
+   npm run docker:diagnose
    ```
 
    Expected sequence before pairing completes:

@@ -21,6 +21,12 @@ describe("docker runtime files", () => {
     expect(packageJson.scripts["db:status"]).toBe(
       "node --experimental-strip-types src/app/dbStatus.ts"
     );
+    expect(packageJson.scripts["business:backup"]).toBe(
+      "node --experimental-strip-types src/app/businessBackup.ts"
+    );
+    expect(packageJson.scripts["business:check"]).toBe(
+      "node --experimental-strip-types src/app/businessCheck.ts"
+    );
     expect(packageJson.scripts["case:doctor"]).toBe(
       "node --experimental-strip-types src/app/caseDoctor.ts"
     );
@@ -31,6 +37,9 @@ describe("docker runtime files", () => {
       "node --experimental-strip-types src/app/openwaSmoke.ts"
     );
     expect(packageJson.scripts["docker:build"]).toBe("docker compose build");
+    expect(packageJson.scripts["docker:diagnose"]).toBe(
+      "node --experimental-strip-types src/app/dockerDiagnose.ts"
+    );
     expect(packageJson.scripts["docker:up"]).toBe("docker compose up -d");
     expect(packageJson.scripts["docker:down"]).toBe("docker compose down");
     expect(packageJson.scripts["docker:status"]).toBe("docker compose ps");
@@ -47,6 +56,7 @@ describe("docker runtime files", () => {
     expect(dockerignore).toContain(".chromium/");
     expect(dockerignore).toContain("chrome-profile/");
     expect(dockerignore).toContain("user-data/");
+    expect(readRepoFile(".gitignore")).toContain("backups/");
     expect(dockerignore).toContain("*.sqlite");
     expect(dockerignore).toContain("*.db");
   });
@@ -80,6 +90,8 @@ describe("docker runtime files", () => {
   it("documents the operator boundary for Docker and live runtime", () => {
     const dockerDoc = readRepoFile("docs/DOCKER.md");
     const runbook = readRepoFile("docs/LIVE_E2E_RUNBOOK.md");
+    const persistenceDoc = readRepoFile("docs/PERSISTENCE.md");
+    const securityDoc = readRepoFile("docs/SECURITY.md");
 
     expect(dockerDoc).toContain("No automatic case creation.");
     expect(dockerDoc).toContain("No transcript or raw message-body persistence.");
@@ -91,8 +103,16 @@ describe("docker runtime files", () => {
     expect(dockerDoc).toContain("ldd /usr/lib/chromium/chromium");
     expect(dockerDoc).toContain("`/health` means the process and status server are alive.");
     expect(dockerDoc).toContain("`/ready` may stay 503 until QR pairing or session authentication completes.");
+    expect(dockerDoc).toContain("npm run docker:diagnose");
+    expect(dockerDoc).toContain("host access can fail even when in-container probes succeed.");
     expect(runbook).toContain("No automatic case creation.");
     expect(runbook).toContain("No transcript or raw message-body persistence.");
     expect(runbook).toContain("Docker health is based on `/health`, not `/ready`.");
+    expect(runbook).toContain("npm run business:check");
+    expect(persistenceDoc).toContain("npm run business:backup");
+    expect(persistenceDoc).toContain("npm run business:check");
+    expect(persistenceDoc).toContain("backups/ remains git-ignored");
+    expect(securityDoc).toContain("Backups may contain personal data.");
+    expect(securityDoc).toContain("Backups must not be committed.");
   });
 });

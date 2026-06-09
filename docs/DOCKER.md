@@ -61,6 +61,7 @@ docker compose ps
 curl http://127.0.0.1:3001/health
 curl http://127.0.0.1:3001/ready
 curl http://127.0.0.1:3001/status
+npm run docker:diagnose
 ```
 
 Stop:
@@ -93,8 +94,25 @@ docker compose down --volumes
 - `/status` returns the current runtime state and should be reachable when the status server is up.
 - `/ready` may stay 503 until QR pairing or session authentication completes.
 - Docker health is based on `/health`, not `/ready`, so the container can become healthy before WhatsApp is paired.
+- `npm run docker:diagnose` compares host probes against in-container probes and prints a sanitized JSON summary instead of raw logs or session details.
+- `npm run docker:diagnose` is intended to distinguish:
+  - container not running
+  - container unhealthy
+  - app healthy inside the container but host port unreachable
+  - app not ready because WhatsApp auth is still pending
+  - app ready
+- Host access can fail even when in-container probes succeed. That usually points to a host port mapping issue or a Docker Desktop/network problem rather than an application-readiness problem.
+- host access can fail even when in-container probes succeed.
 - During the first pairing flow, the QR code is printed in the container logs.
 - The session volume preserves pairing state across restarts.
+
+## Host Vs In-Container Checks
+
+- Host checks target `http://127.0.0.1:3001/{health,ready,status}` and validate the published loopback port.
+- In-container checks use `docker compose exec -T legalbot` and validate the status server from inside the running service.
+- If `/health` is 200 in-container but host probes fail, inspect the published port and Docker Desktop networking before changing application code.
+- If `/health` is 200 and `/ready` is 503 both on host and in-container, the process is alive but WhatsApp pairing or restored auth is still incomplete.
+- The named `legalbot-openwa-session` volume preserves authenticated session state across `docker compose down` and `docker compose up -d` restarts unless it is removed intentionally with `docker compose down --volumes`.
 
 ## Chromium Diagnostics
 

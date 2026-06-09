@@ -18,6 +18,7 @@ sessions/
 openwa-session/
 data/
 logs/
+backups/
 *.data.json
 *.node-persist*
 *.sqlite

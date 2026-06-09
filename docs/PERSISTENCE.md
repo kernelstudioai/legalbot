@@ -32,6 +32,8 @@ M23 makes the single-bot runtime default to SQLite-backed technical persistence 
 
 M27 splits live business-state persistence from technical runtime persistence explicitly. Consent state, consent events, intake state, accepted intake fields, intake events, and manual case creation now flow through `BusinessPersistenceService`, while restart-safe dedupe and technical runtime audit stay behind the separate technical persistence surface.
 
+M28 adds operator-safe business backup/check tooling. `npm run business:check` reports only aggregate business-state consistency counts, and `npm run business:backup` creates timestamped SQLite backups under the ignored `backups/` directory without dumping rows or secrets.
+
 ## Interfaces
 
 - `CaseStore`: minimal create/get/update support for case records built from accepted structured intake data only.
@@ -92,6 +94,8 @@ M27 splits live business-state persistence from technical runtime persistence ex
 - Operators can run `npm run intake:list-ready` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
 - Operators can run `npm run case:create-from-intake -- --subject <subjectId>` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
 - Operators can run `npm run case:doctor` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
+- Operators can run `npm run business:check` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
+- Operators can run `npm run business:backup` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
 - The SQLite migration runner is explicit and testable through `runSqliteMigrations(...)`, `getSqliteMigrationStatus(...)`, and `SqliteMigrationRunner`.
 - The local direct smoke runtime defaults to `OPENWA_STATUS_SERVER_ENABLED=true` on `127.0.0.1:3001`.
 - The Docker baseline overrides only container-specific values: `OPENWA_STATUS_SERVER_HOST=0.0.0.0`, `OPENWA_HEADLESS=true`, and `OPENWA_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium`.
@@ -151,6 +155,7 @@ M27 splits live business-state persistence from technical runtime persistence ex
 - M20 remediation never stores transcripts, message bodies, or rejected values. It changes only case status metadata inside the existing `cases` table and preserves duplicate rows as `duplicate_archived` instead of deleting them.
 - M21 uniqueness-error mapping and `case:doctor` output are sanitized by policy. They must not expose SQL statements, database paths, raw rows, message bodies, transcripts, rejected values, or secrets.
 - M22 `intake:list-ready` output is sanitized by policy. It must not expose raw subject ids, full phone numbers, SQL text, database paths, raw rows, message bodies, transcripts, rejected values, or secrets.
+- M28 `business:check` and `business:backup` outputs are sanitized by policy. They must not expose full phone numbers, subject ids, raw rows, transcripts, message bodies, QR data, session data, or secrets.
 - Live WhatsApp runtime writes never create or update cases automatically.
 - M13 live consent wiring never stores inbound message body text in consent state metadata or consent events.
 - M15 live intake wiring persists only accepted structured `firstName`, `lastName`, `birthDate`, `city`, and `problemSummary` values plus sanitized metadata after explicit `granted` consent.
@@ -162,16 +167,22 @@ M27 splits live business-state persistence from technical runtime persistence ex
 - The default database file location is `data/legalbot.sqlite` when persistence is explicitly opened outside tests.
 - Test coverage uses temp directories so database files are created only under ephemeral test paths.
 - `data/` remains git-ignored because it may contain local SQLite files created by `npm run db:migrate` or `npm run db:status`.
-- Backups remain an operator concern. M8 does not add automated backup or retention jobs, so any future production use must define backup frequency, encryption, and restore verification before enabling real writes.
+- `backups/` remains git-ignored because operator-created business backups may contain personal data copied from the SQLite business database.
+- backups/ remains git-ignored.
+- `npm run business:backup` creates a timestamped SQLite copy under `backups/` and prints only `{ status, sourceDatabase, backupPath, createdAt, sizeBytes, migrationCount }`.
+- `npm run business:check` prints only aggregate migration, consent, intake, completed-intake, and draft-case counts plus sanitized consistency error codes.
+- Backups remain an operator concern. M28 does not add automated backup, encryption, restore verification, or retention jobs, so any future production use must define those controls before enabling real writes.
 
 ## Migration Control
 
 - When `DATABASE_MIGRATIONS_ENABLED=true`, `npm run db:migrate` creates parent directories as needed and applies the committed migration list.
 - When `DATABASE_MIGRATIONS_ENABLED=false`, `npm run db:migrate` reports pending migrations and skips schema changes.
 - `npm run db:status` reports applied and pending migration ids and counts without reading or printing table contents.
+- `npm run business:check` exits `0` only when migrations are fully applied and the aggregate business-state checks are healthy. It exits nonzero for pending migrations or consistency anomalies.
+- `npm run business:backup` exits `0` only after business persistence is enabled, migrations are fully applied, and the timestamped SQLite backup file is written successfully.
 - `npm run intake:list-ready` fails safely when migrations are missing or incomplete, exits `0` on success, exits nonzero on failure, and prints only operator-safe completed-intake metadata.
 - `npm run case:doctor` fails safely when migrations are missing or incomplete, exits `0` only when the migrated database is healthy, and exits nonzero when migration readiness or draft-case anomalies require operator action.
-- `npm run db:migrate`, `npm run db:status`, `npm run intake:list-ready`, and `npm run case:doctor` remain direct Node 22 `--experimental-strip-types` entrypoints.
+- `npm run db:migrate`, `npm run db:status`, `npm run business:check`, `npm run business:backup`, `npm run intake:list-ready`, and `npm run case:doctor` remain direct Node 22 `--experimental-strip-types` entrypoints.
 - Existing SQLite databases created before M17 can be upgraded in place. The cases-table hardening migration preserves minimal case metadata, normalizes column names to the committed snake_case schema, and drops unsupported legacy columns.
 - Existing SQLite databases created before M20 can be upgraded in place. Duplicate `draft` rows are remediated deterministically by `created_at ASC, case_id ASC`, and future duplicate `draft` inserts for the same `subjectId` fail at the SQLite schema boundary.
 - The migration boundary is intentionally separate from OpenWA startup so transport smoke behavior stays unchanged when technical persistence is disabled.

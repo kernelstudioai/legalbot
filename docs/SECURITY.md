@@ -18,6 +18,7 @@
 - M19 makes repeated manual case-creation attempts idempotent by `subjectId` plus existing `draft` case. An idempotent hit may append only sanitized structured metadata, must not persist raw body or transcript content, and still must not enable any automatic live OpenWA case creation.
 - M20 adds schema-level enforcement for the same manual-only boundary. The SQLite migration may remediate duplicate historical `draft` rows only by changing later duplicates to `duplicate_archived`; it must not dump table contents, persist transcripts, or enable automatic live OpenWA case creation.
 - M21 adds sanitized operator hardening for that same boundary. SQLite duplicate-draft violations must map to a safe application error, and `npm run case:doctor` must report only migration and case-count aggregates plus remediation guidance, never SQL text, database paths, raw rows, message bodies, transcripts, or secrets.
+- M28 adds operator backup/check tooling. `npm run business:check` must print only aggregate counts and sanitized consistency codes, and `npm run business:backup` must not print secrets, raw rows, full phone numbers, subject ids, transcripts, or message bodies.
 - Consent persistence uses a generic `subjectId` string and does not require phone-number semantics.
 - Live OpenWA transport stays transport-only even though the application layer can now inject consent and intake persistence into the client runtime.
 
@@ -38,6 +39,9 @@
 - The SQLite cases-table hardening migration may copy forward only minimal case fields and must drop legacy transcript/body columns instead of preserving them under new names.
 - The SQLite draft-case uniqueness migration must keep only the earliest `draft` row per `subjectId`, archive later duplicates without deleting rows, and allow non-`draft` history for the same subject.
 - Raw SQLite uniqueness messages must not leak through the application boundary for duplicate `draft` cases.
+- Backups may contain personal data.
+- Backups must not be committed.
+- Operators must handle backups with explicit retention, storage, and deletion discipline because this phase does not add encryption at rest or automated retention controls.
 - Live OpenWA listener and client-intake runtime code must not call case creation automatically in M16 or M17.
 - Rejected intake replies and ambiguous consent replies must not be persisted.
 - The `subjectId` for consent state is the canonical sender/chat id. Any stored metadata must avoid restating the full phone number and must remain sanitized through the persistence boundary.

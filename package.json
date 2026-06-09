@@ -7,11 +7,14 @@
     "node": ">=22 <23"
   },
   "scripts": {
+    "business:backup": "node --experimental-strip-types src/app/businessBackup.ts",
+    "business:check": "node --experimental-strip-types src/app/businessCheck.ts",
     "case:doctor": "node --experimental-strip-types src/app/caseDoctor.ts",
     "case:create-from-intake": "node --experimental-strip-types src/app/caseCreateFromIntake.ts",
     "db:migrate": "node --experimental-strip-types src/app/dbMigrate.ts",
     "db:status": "node --experimental-strip-types src/app/dbStatus.ts",
     "docker:build": "docker compose build",
+    "docker:diagnose": "node --experimental-strip-types src/app/dockerDiagnose.ts",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs --tail=100 -f legalbot",
     "docker:status": "docker compose ps",
