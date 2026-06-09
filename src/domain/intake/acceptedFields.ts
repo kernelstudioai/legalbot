@@ -78,7 +78,7 @@ const parseDateParts = (
   year: number;
 } | null => {
   const normalized = normalizeAcceptedStructuredValue(value);
-  const match = normalized.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  const match = normalized.match(/^(\d{1,2})(?:[\/.\-\s]+)(\d{1,2})(?:[\/.\-\s]+)(\d{4})$/);
 
   if (!match) {
     return null;

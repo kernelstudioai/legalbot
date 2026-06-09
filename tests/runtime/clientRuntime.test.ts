@@ -20,6 +20,23 @@ const createEnvelope = (body: string) => ({
   }
 });
 
+const createEnvelopeWithSubject = ({
+  body,
+  senderId,
+  chatId
+}: {
+  body: string;
+  senderId: string;
+  chatId: string;
+}) => ({
+  ...createEnvelope(body),
+  senderId,
+  transportMetadata: {
+    chatId,
+    fromMe: false
+  }
+});
+
 const createConsentPersistence = (
   consentState: "unknown" | "requested" | "granted" | "denied"
 ): ClientConsentPersistence & {
@@ -222,6 +239,33 @@ describe("client runtime wiring", () => {
       "15551234567@c.us",
       "city",
       "Roma",
+      expect.any(Object)
+    );
+  });
+
+  it("uses the same transport chat subject for consent and intake persistence", async () => {
+    const consentPersistence = createConsentPersistence("requested");
+    const intakePersistence = createIntakePersistence();
+
+    const result = await runClientRuntime({
+      envelope: createEnvelopeWithSubject({
+        body: "Acconsento",
+        senderId: "participant-42@c.us",
+        chatId: "thread-42@c.us"
+      }),
+      consentPersistence,
+      intakePersistence
+    });
+
+    expect(result.subjectId).toBe("thread-42@c.us");
+    expect(consentPersistence.setConsentState).toHaveBeenCalledWith(
+      "thread-42@c.us",
+      "granted",
+      expect.any(Object)
+    );
+    expect(intakePersistence.setIntakeState).toHaveBeenCalledWith(
+      "thread-42@c.us",
+      "asking_identity",
       expect.any(Object)
     );
   });

@@ -114,6 +114,10 @@ export const startOpenWaSmokeApp = async ({
           });
         })())
       : undefined;
+  const defaultRuntimePersistence =
+    clientConsentPersistence || clientIntakePersistence
+      ? undefined
+      : persistenceService ?? technicalPersistenceService;
   const shouldClosePersistence =
     technicalPersistenceService !== undefined && persistenceService === undefined;
   const technicalPersistence =
@@ -173,12 +177,20 @@ export const startOpenWaSmokeApp = async ({
               ? {
                   clientConsentPersistence
                 }
-              : {}),
+              : defaultRuntimePersistence
+                ? {
+                    clientConsentPersistence: defaultRuntimePersistence
+                  }
+                : {}),
             ...(clientIntakePersistence
               ? {
                   clientIntakePersistence
                 }
-              : {})
+              : defaultRuntimePersistence
+                ? {
+                    clientIntakePersistence: defaultRuntimePersistence
+                  }
+                : {})
           })
       }),
     ...(technicalPersistence ? { technicalPersistence } : {})

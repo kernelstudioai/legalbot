@@ -2,11 +2,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { runInboundPipeline } from "../../src/app/index.ts";
 import type { Logger } from "../../src/logging/logger.ts";
 import { createSqlitePersistenceService } from "../../src/persistence/index.ts";
 import { runSqliteMigrations } from "../../src/persistence/sqlite/index.ts";
 import { runIntakeListReadyCommand } from "../../src/app/intakeListReady.ts";
 import { toOperatorSubjectId } from "../../src/app/operatorSubjectId.ts";
+import type { OpenWaMessage } from "../../src/transport/openwa/types.ts";
 
 const tempDirectories: string[] = [];
 
@@ -226,5 +228,89 @@ describe("ready-intake listing command", () => {
     expect(logger.info).toHaveBeenCalledWith("intake_list_ready_checked", {
       candidate_count: 2
     });
+  });
+
+  it("lists a sanitized ready candidate after the completed live intake flow", async () => {
+    const tempDir = createTempDir();
+    const logger = createLogger();
+    const stdout = createStdout();
+    const databaseUrl = "file:./data/legalbot.sqlite";
+    const subjectId = "15551230000@c.us";
+    const createMessage = (id: string, body: string): OpenWaMessage => ({
+      id,
+      from: subjectId,
+      chatId: subjectId,
+      body,
+      sender: {
+        pushname: "Client"
+      },
+      fromMe: false,
+      timestamp: Date.parse("2026-06-09T09:00:00.000Z")
+    });
+
+    runSqliteMigrations({
+      databaseUrl,
+      cwd: tempDir,
+      enabled: true
+    });
+
+    const persistence = createSqlitePersistenceService({
+      databaseUrl,
+      cwd: tempDir
+    });
+
+    try {
+      await runInboundPipeline(createMessage("wamid.flow-1", "ciao"), {
+        clientConsentPersistence: persistence,
+        clientIntakePersistence: persistence
+      });
+      await runInboundPipeline(createMessage("wamid.flow-2", "Acconsento"), {
+        clientConsentPersistence: persistence,
+        clientIntakePersistence: persistence
+      });
+      await runInboundPipeline(
+        createMessage("wamid.flow-3", "Mario barone roma 01 01 1976"),
+        {
+          clientConsentPersistence: persistence,
+          clientIntakePersistence: persistence
+        }
+      );
+      await runInboundPipeline(
+        createMessage(
+          "wamid.flow-4",
+          "Ho bisogno di assistenza per un problema di lavoro."
+        ),
+        {
+          clientConsentPersistence: persistence,
+          clientIntakePersistence: persistence
+        }
+      );
+    } finally {
+      persistence.close();
+    }
+
+    const summary = runIntakeListReadyCommand({
+      cwd: tempDir,
+      envSource: {
+        DATABASE_URL: databaseUrl,
+        DATABASE_MIGRATIONS_ENABLED: "true"
+      },
+      logger,
+      stdout
+    });
+
+    expect(summary.exitCode).toBe(0);
+    expect(summary.candidates).toEqual([
+      {
+        subjectId: toOperatorSubjectId(subjectId),
+        intakeState: "intake_complete",
+        updatedAt: expect.any(String),
+        fieldNamesPresent: ["firstName", "lastName", "birthDate", "city", "problemSummary"]
+      }
+    ]);
+    expect(stdout.output).not.toContain(subjectId);
+    expect(stdout.output).not.toContain("15551230000");
+    expect(stdout.output).not.toContain("Mario");
+    expect(stdout.output).not.toContain("problema di lavoro");
   });
 });

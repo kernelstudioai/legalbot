@@ -78,6 +78,9 @@ const DatabaseUrlSchema = z.preprocess(
   z.string().min(1)
 );
 
+export const DatabaseMigrationsEnabledSchema =
+  createBooleanEnvSchema(DEFAULT_DATABASE_MIGRATIONS_ENABLED);
+
 const OptionalRecoveryMaxAttemptsSchema = z.preprocess(
   (value) => {
     if (value === undefined) {
@@ -98,7 +101,7 @@ const EnvSchema = z.object({
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default(DEFAULT_LOG_LEVEL),
   OPENWA_HEADLESS: createBooleanEnvSchema("true"),
   DATABASE_URL: DatabaseUrlSchema,
-  DATABASE_MIGRATIONS_ENABLED: createBooleanEnvSchema(DEFAULT_DATABASE_MIGRATIONS_ENABLED),
+  DATABASE_MIGRATIONS_ENABLED: DatabaseMigrationsEnabledSchema,
   TECHNICAL_PERSISTENCE_ENABLED: createBooleanEnvSchema(DEFAULT_TECHNICAL_PERSISTENCE_ENABLED)
 });
 

@@ -46,6 +46,29 @@ describe("client intake runtime", () => {
     });
   });
 
+  it("accepts the live lowercase identity format with a spaced birth date", () => {
+    const result = resolveClientIntakeRuntimeDecision({
+      subjectId: "client-1",
+      intakeRecord: {
+        subjectId: "client-1",
+        state: "asking_identity",
+        updatedAt: "2026-06-09T09:00:00.000Z"
+      },
+      inboundText: "Mario barone roma 01 01 1976"
+    });
+
+    expect(result.intakeState).toBe("asking_problem_summary");
+    expect(result.runtimeDecision.action).toBe("intake_ask_problem_summary");
+    expect(result.nextRecord).toMatchObject({
+      subjectId: "client-1",
+      state: "asking_problem_summary",
+      firstName: "Mario",
+      lastName: "Barone",
+      birthDate: "01/01/1976",
+      city: "Roma"
+    });
+  });
+
   it("asks for formal clarification when identity extraction is incomplete", () => {
     const result = resolveClientIntakeRuntimeDecision({
       subjectId: "client-1",

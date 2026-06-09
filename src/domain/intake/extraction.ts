@@ -33,7 +33,7 @@ export interface IdentityExtractionProvider {
 }
 
 const WORD_PATTERN = /\p{L}+(?:['-]\p{L}+)*/gu;
-const DATE_PATTERN = /\b(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})\b/u;
+const DATE_PATTERN = /\b(\d{1,2})(?:[\/.\-\s]+)(\d{1,2})(?:[\/.\-\s]+)(\d{4})\b/u;
 const LEADING_LABEL_PATTERN =
   /^(?:mi chiamo|sono|io sono|nome|cognome|data di nascita|nato il|nata il|nato a|nata a|vivo a|abito a|residente a|residente in|citta|città)\b[\s,:-]*/iu;
 
@@ -69,7 +69,7 @@ const removeBirthDate = (text: string): string =>
 const tryExtractCityFromContext = (text: string): string | undefined => {
   const contextPatterns = [
     /\b(?:vivo|abito|risiedo|resiedo|residente|domiciliato|domiciliata)\s+a\s+([\p{L}' -]+)$/iu,
-    /\b(?:nato|nata)\s+il\s+\d{1,2}[\/.-]\d{1,2}[\/.-]\d{4}\s+a\s+([\p{L}' -]+)$/iu,
+    /\b(?:nato|nata)\s+il\s+\d{1,2}(?:[\/.\-\s]+)\d{1,2}(?:[\/.\-\s]+)\d{4}\s+a\s+([\p{L}' -]+)$/iu,
     /\ba\s+([\p{L}' -]+)$/iu
   ];
 
@@ -216,6 +216,26 @@ export class DeterministicIdentityExtractionProvider implements IdentityExtracti
     }
 
     const tokens = buildTokenRemainder(textWithoutDate, acceptedFields.city);
+
+    if (
+      !acceptedFields.firstName &&
+      !acceptedFields.lastName &&
+      !acceptedFields.city &&
+      birthDate &&
+      !explicitFirstLastOrder &&
+      !preferSurnameFirst &&
+      tokens.length === 3
+    ) {
+      const parsedFirstName = validateAcceptedFirstName(tokens[0]);
+      const parsedLastName = validateAcceptedLastName(tokens[1]);
+      const parsedCity = validateAcceptedCity(tokens[2]);
+
+      if (parsedFirstName.valid && parsedLastName.valid && parsedCity.valid) {
+        acceptedFields.firstName = parsedFirstName.value;
+        acceptedFields.lastName = parsedLastName.value;
+        acceptedFields.city = parsedCity.value;
+      }
+    }
 
     if ((!acceptedFields.firstName || !acceptedFields.lastName) && tokens.length >= 2) {
       const parsedName = parseNameTokens(tokens, {

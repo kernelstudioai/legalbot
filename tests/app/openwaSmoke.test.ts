@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { createServer } from "node:http";
 import type { Logger } from "../../src/logging/logger";
-import type { PersistenceService } from "../../src/persistence";
+import {
+  createInMemoryPersistenceService,
+  type PersistenceService
+} from "../../src/persistence";
 import type { OpenWaStatusServer } from "../../src/app/openwaStatusServer";
 import {
   installOpenWaSignalHandlers,
@@ -326,6 +329,76 @@ describe("openwa smoke startup", () => {
       port: 4012
     });
     expect(kill).toHaveBeenCalledWith("test_shutdown");
+  });
+
+  it("uses the shared persistence service for the live consent and intake flow", async () => {
+    const logger = createLogger();
+    const persistenceService = createInMemoryPersistenceService();
+    const sendText = vi.fn().mockResolvedValue(undefined);
+    let onMessageListener:
+      | ((message: {
+          id: string;
+          from: string;
+          chatId: string;
+          body: string;
+          fromMe: boolean;
+          timestamp: number;
+          notifyName?: string;
+        }) => Promise<void> | void)
+      | undefined;
+    const createClient = vi.fn().mockResolvedValue({
+      onMessage: vi.fn().mockImplementation(async (listener) => {
+        onMessageListener = listener;
+      }),
+      sendText,
+      kill: vi.fn().mockResolvedValue(true)
+    });
+
+    const app = await startOpenWaSmokeApp({
+      envSource: {
+        BOT_MODE: "smoke",
+        OPENWA_SESSION_ID: "legalbot-smoke",
+        OPENWA_HEADLESS: "false",
+        OPENWA_STATUS_SERVER_ENABLED: "false",
+        TECHNICAL_PERSISTENCE_ENABLED: "true",
+        LAWYER_PHONE_E164: "+15551234567"
+      },
+      logger,
+      createClient,
+      persistenceService
+    });
+
+    const createMessage = (id: string, body: string) => ({
+      id,
+      from: "15551239999@c.us",
+      chatId: "15551239999@c.us",
+      body,
+      fromMe: false,
+      timestamp: Date.parse("2026-06-09T09:00:00.000Z"),
+      notifyName: "Client"
+    });
+
+    await onMessageListener?.(createMessage("wamid.live-1", "ciao"));
+    await onMessageListener?.(createMessage("wamid.live-2", "Acconsento"));
+    await onMessageListener?.(createMessage("wamid.live-3", "Mario barone roma 01 01 1976"));
+
+    expect(sendText).toHaveBeenNthCalledWith(
+      1,
+      "15551239999@c.us",
+      expect.stringContaining("- Acconsento")
+    );
+    expect(sendText).toHaveBeenNthCalledWith(
+      2,
+      "15551239999@c.us",
+      expect.stringContaining("Per iniziare")
+    );
+    expect(sendText).toHaveBeenNthCalledWith(
+      3,
+      "15551239999@c.us",
+      "La ringrazio. Descriva brevemente il problema per cui desidera assistenza."
+    );
+
+    await app.stop("test_shutdown");
   });
 
   it("installs signal handlers that trigger client cleanup when available", async () => {
