@@ -3,6 +3,8 @@
 ## Data Handling
 
 - Do not read `.env`, secrets, tokens, browser sessions, or WhatsApp session files during foundation work.
+- `./install.sh` may load `.env` only to pass existing values into `npm run db:migrate` and `npm run ops:preflight`. It must never print `.env` contents, secret values, QR payloads, browser profile paths, session paths, or full phone numbers while doing so.
+- `./install.sh` may create `.env` only when it is missing, using a guided prompt for `LAWYER_PHONE_E164` plus non-secret runtime defaults. If `.env` already exists, the installer must ask before appending missing keys and must not display the file contents.
 - Sanitize free-text inbound content before logging or downstream planning.
 - Keep transport metadata minimal and typed.
 - Keep OpenWA runtime state under the ignored `openwa-session/` path.
@@ -45,6 +47,7 @@
 - Operators must handle backups with explicit retention, storage, and deletion discipline because this phase does not add encryption at rest or automated retention controls.
 - `ops:preflight` must treat missing Node 22, pending migrations, disabled business persistence, or missing git-ignore coverage for runtime artifact directories as blocking operator failures.
 - `ops:post-start` may report that the process is alive while WhatsApp auth is still pending, but it must not expose QR payloads or sensitive error text while doing so.
+- `./install.sh` must not install a real systemd service in this milestone, must not start the bot without explicit operator approval in the prompt flow, and must not remove runtime data, backup, session, log, or database files.
 - Live OpenWA listener and client-intake runtime code must not call case creation automatically in M16 or M17.
 - Rejected intake replies and ambiguous consent replies must not be persisted.
 - The `subjectId` for consent state is the canonical sender/chat id. Any stored metadata must avoid restating the full phone number and must remain sanitized through the persistence boundary.

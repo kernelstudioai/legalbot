@@ -4,7 +4,7 @@
 
 This runbook defines the operator workflow for a future Linux VPS deployment of the current single-bot OpenWA runtime.
 
-- No `install.sh` installer yet.
+- `install.sh` now provides a guided single-bot VPS preparation flow.
 - No systemd unit is installed automatically in this milestone.
 - No dashboard yet.
 - No multi-bot runtime yet.
@@ -31,6 +31,45 @@ LAWYER_PHONE_E164=+15551234567
 Safe defaults still come from `src/config/env.ts`. For VPS/systemd operation, set `DATABASE_MIGRATIONS_ENABLED` explicitly to `true` or `false` in the external env file so the migration policy is not implicit.
 
 Do not store the real env file in the repo, and do not print or inspect its contents during operator checks.
+
+## Guided Installer
+
+Preview the installer without changing files:
+
+```bash
+./install.sh --dry-run
+```
+
+Apply the guided install flow:
+
+```bash
+./install.sh
+```
+
+The installer is conservative and idempotent. It:
+
+- runs on Linux only
+- requires Node 22 and `npm`
+- checks for Chrome or Chromium and prints install guidance if neither is present
+- verifies the project directory is writable
+- creates `data/`, `backups/`, `openwa-session/`, and `logs/` when missing
+- creates `.env` only when it is missing, using a prompt for `LAWYER_PHONE_E164` plus safe non-secret defaults
+- never prints existing `.env` contents or secret values
+- asks before appending missing `.env` keys when `.env` already exists
+- runs `npm ci`
+- runs `npm run db:migrate`
+- runs `npm run ops:preflight`
+- asks before starting `npm run smoke:openwa`
+
+The installer does not:
+
+- install a real systemd service
+- enable multi-bot orchestration
+- delete `data/`, `backups/`, `openwa-session/`, `logs/`, or SQLite files
+- print QR data, session data, `.env` contents, or full phone numbers
+- replace the post-start operator workflow
+
+If Chrome or Chromium is still missing after installation, install it before starting the bot and rerun `npm run ops:preflight` when needed.
 
 ## Preflight Before Start
 
@@ -178,9 +217,18 @@ Operator notes:
 - Run `npm run ops:preflight` before `systemctl start` or `systemctl restart`.
 - Run `npm run ops:post-start` after the service reaches active state.
 
+## Post-Install Commands
+
+After `./install.sh` completes, the operator flow remains:
+
+1. `npm run business:backup` when an intentional snapshot is needed
+2. `npm run smoke:openwa` when the operator explicitly wants to start the runtime
+3. `npm run ops:post-start` after the runtime is up
+4. `OPS_POST_START_MODE=docker npm run ops:post-start` only for Docker-mode troubleshooting
+
 ## Current Limits
 
 - No dashboard operator surface yet.
 - No multi-bot process model yet.
 - No automated backup retention, restore verification, or encryption at rest yet.
-- No real installer or real systemd provisioning yet.
+- No real systemd provisioning yet.
