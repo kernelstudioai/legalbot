@@ -129,6 +129,10 @@ describe("docker runtime files", () => {
     expect(vpsRunbook).toContain("npm run ops:preflight");
     expect(vpsRunbook).toContain("npm run ops:post-start");
     expect(vpsRunbook).toContain("ExecStart=/usr/bin/npm run smoke:openwa");
+    expect(vpsRunbook).toContain("./scripts/provision-systemd.sh --install");
+    expect(vpsRunbook).toContain("legalbot-openwa.service");
     expect(vpsRunbook).toContain("No multi-bot runtime yet.");
+    expect(securityDoc).toContain("Systemd unit files must not contain secrets.");
+    expect(securityDoc).toContain("Systemd env files must stay outside the repo");
   });
 });

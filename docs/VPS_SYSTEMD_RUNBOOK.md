@@ -5,7 +5,8 @@
 This runbook defines the operator workflow for a future Linux VPS deployment of the current single-bot OpenWA runtime.
 
 - `install.sh` now provides a guided single-bot VPS preparation flow.
-- No systemd unit is installed automatically in this milestone.
+- `scripts/provision-systemd.sh` provides explicit optional systemd provisioning for a single bot.
+- No systemd unit is installed automatically by `install.sh`.
 - No dashboard yet.
 - No multi-bot runtime yet.
 - No automatic case creation.
@@ -31,6 +32,33 @@ LAWYER_PHONE_E164=+15551234567
 Safe defaults still come from `src/config/env.ts`. For VPS/systemd operation, set `DATABASE_MIGRATIONS_ENABLED` explicitly to `true` or `false` in the external env file so the migration policy is not implicit.
 
 Do not store the real env file in the repo, and do not print or inspect its contents during operator checks.
+
+## Real Linux Validation Status
+
+- Windows and Git Bash validation from earlier milestones is no longer treated as sufficient evidence for Linux apply mode.
+- This milestone adds a real Linux validation checklist and an explicit systemd provisioner, but this repository snapshot was not executed on an actual Linux VPS from this Codex session.
+- Treat the Linux/VPS apply flow as documented and statically validated until an operator runs it on a Linux host.
+
+## Real Linux Validation Checklist
+
+Run these on a real Linux VPS or Linux VM when available:
+
+```bash
+./install.sh --dry-run
+./install.sh
+npm run ops:preflight
+./scripts/provision-systemd.sh --dry-run
+./scripts/provision-systemd.sh --install --project-root /srv/legalbot --env-file /etc/legalbot/legalbot.env --service-user legalbot
+systemctl status legalbot-openwa.service
+```
+
+Only if the operator explicitly wants reversibility testing:
+
+```bash
+./scripts/provision-systemd.sh --uninstall --project-root /srv/legalbot --env-file /etc/legalbot/legalbot.env --service-user legalbot
+```
+
+Do not start or enable the service during validation unless the operator explicitly approves that step.
 
 ## Guided Installer
 
@@ -60,14 +88,27 @@ The installer is conservative and idempotent. It:
 - runs `npm run db:migrate`
 - runs `npm run ops:preflight`
 - asks before starting `npm run smoke:openwa`
+- asks before previewing `./scripts/provision-systemd.sh --dry-run`
 
 The installer does not:
 
-- install a real systemd service
+- install a real systemd service by itself
 - enable multi-bot orchestration
 - delete `data/`, `backups/`, `openwa-session/`, `logs/`, or SQLite files
 - print QR data, session data, `.env` contents, or full phone numbers
 - replace the post-start operator workflow
+
+## install.sh Apply Mode Checklist
+
+Before running `./install.sh` in apply mode on Linux:
+
+- confirm Node 22 is installed
+- confirm Chrome or Chromium is available or installable
+- confirm the operator is ready to provide `LAWYER_PHONE_E164` if `.env` is absent
+- confirm `.env` lives outside version control and will not be printed
+- confirm `data/`, `backups/`, `openwa-session/`, and `logs/` should be preserved if already present
+- confirm no bot start should happen unless the operator answers yes
+- confirm no systemd install should happen unless the operator later runs `scripts/provision-systemd.sh`
 
 If Chrome or Chromium is still missing after installation, install it before starting the bot and rerun `npm run ops:preflight` when needed.
 
@@ -181,6 +222,33 @@ Safe operator flow:
 
 Do not delete `openwa-session/`, browser profile state, or SQLite files as part of routine restarts.
 
+## Optional systemd Provisioning
+
+The systemd provisioner is separate from `install.sh` and is single-bot only. It creates or removes the documented `legalbot-openwa.service` unit, never prints `.env` contents, and never deletes runtime data, backups, sessions, logs, or database files.
+
+Usage:
+
+```bash
+./scripts/provision-systemd.sh --dry-run --project-root /srv/legalbot --env-file /etc/legalbot/legalbot.env --service-user legalbot
+./scripts/provision-systemd.sh --status --project-root /srv/legalbot --env-file /etc/legalbot/legalbot.env --service-user legalbot
+sudo ./scripts/provision-systemd.sh --install --project-root /srv/legalbot --env-file /etc/legalbot/legalbot.env --service-user legalbot
+sudo ./scripts/provision-systemd.sh --uninstall --project-root /srv/legalbot --env-file /etc/legalbot/legalbot.env --service-user legalbot
+```
+
+Behavior by mode:
+
+- `--dry-run` prints the planned service-unit configuration and shows whether start or enable would remain off by default.
+- `--install` writes or refreshes `/etc/systemd/system/legalbot-openwa.service` and runs `systemctl daemon-reload`.
+- `--uninstall` removes only the unit file and reloads systemd metadata.
+- `--status` reports whether the unit file exists and shows `systemctl status legalbot-openwa.service` when systemd knows the service.
+
+Explicit service activation remains opt-in:
+
+- `--install` alone does not start the service.
+- `--install` alone does not enable the service.
+- `--install --start` starts the service only when the operator explicitly requests it.
+- `--install --enable` enables the service only when the operator explicitly requests it.
+
 ## Session Persistence Expectations
 
 - Restarting the process should preserve the WhatsApp session as long as `openwa-session/` remains intact.
@@ -188,9 +256,9 @@ Do not delete `openwa-session/`, browser profile state, or SQLite files as part 
 - A first-time or reset session may leave `/ready` at HTTP 503 until QR pairing completes.
 - The status surface can be healthy before WhatsApp authentication is complete.
 
-## Draft systemd Unit
+## Documented systemd Unit
 
-This sample is documentation only. Do not install it automatically in this milestone.
+This is the unit that `scripts/provision-systemd.sh --install` writes after explicit operator action.
 
 ```ini
 [Unit]
@@ -199,6 +267,7 @@ After=network.target
 
 [Service]
 Type=simple
+User=legalbot
 WorkingDirectory=/srv/legalbot
 EnvironmentFile=/etc/legalbot/legalbot.env
 ExecStart=/usr/bin/npm run smoke:openwa
@@ -214,8 +283,34 @@ Operator notes:
 - Keep the VPS on Node 22.
 - Keep Chrome or Chromium installed and available to OpenWA.
 - Keep the env file outside the repo.
+- Keep secrets only in the env file, never in the unit.
 - Run `npm run ops:preflight` before `systemctl start` or `systemctl restart`.
 - Run `npm run ops:post-start` after the service reaches active state.
+
+## Safe Start, Stop, And Restart Commands
+
+Run preflight before any start or restart:
+
+```bash
+npm run ops:preflight
+sudo systemctl start legalbot-openwa.service
+sudo systemctl stop legalbot-openwa.service
+sudo systemctl restart legalbot-openwa.service
+systemctl status legalbot-openwa.service
+journalctl -u legalbot-openwa.service -n 100 --no-pager
+```
+
+After a successful start or restart:
+
+```bash
+npm run ops:post-start
+```
+
+QR pairing expectations:
+
+- first-time startup may require QR pairing before `/ready` reports success
+- pairing progress may appear in service logs, but QR contents must not be copied into docs or reports
+- preserve `openwa-session/` if you want session reuse across restarts
 
 ## Post-Install Commands
 
@@ -224,11 +319,12 @@ After `./install.sh` completes, the operator flow remains:
 1. `npm run business:backup` when an intentional snapshot is needed
 2. `npm run smoke:openwa` when the operator explicitly wants to start the runtime
 3. `npm run ops:post-start` after the runtime is up
-4. `OPS_POST_START_MODE=docker npm run ops:post-start` only for Docker-mode troubleshooting
+4. `./scripts/provision-systemd.sh --dry-run` when the operator wants to review systemd provisioning
+5. `OPS_POST_START_MODE=docker npm run ops:post-start` only for Docker-mode troubleshooting
 
 ## Current Limits
 
 - No dashboard operator surface yet.
 - No multi-bot process model yet.
 - No automated backup retention, restore verification, or encryption at rest yet.
-- No real systemd provisioning yet.
+- No real Linux VPS execution evidence was captured from this Codex session.

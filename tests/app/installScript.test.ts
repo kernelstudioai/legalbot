@@ -21,6 +21,7 @@ describe("install.sh", () => {
     expect(script).toContain("npm run db:migrate");
     expect(script).toContain("npm run ops:preflight");
     expect(script).toContain("Start the bot now with 'npm run smoke:openwa'?");
-    expect(script).toContain("Systemd service installation is intentionally not included");
+    expect(script).toContain("./scripts/provision-systemd.sh --dry-run");
+    expect(script).toContain("Systemd service installation stays explicit and separate from this installer.");
   });
 });

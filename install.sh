@@ -24,6 +24,7 @@ readonly ENV_KEYS_WITH_DEFAULTS=(
 
 DRY_RUN=0
 START_BOT=0
+REVIEW_SYSTEMD=0
 ENV_LOADED=0
 BROWSER_PATH=""
 
@@ -419,6 +420,26 @@ ask_to_start_bot() {
   fi
 }
 
+ask_to_review_systemd() {
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log "DRY-RUN: would ask whether to preview optional systemd provisioning."
+    return 0
+  fi
+
+  if prompt_yes_no "Preview the optional systemd provisioning helper with './scripts/provision-systemd.sh --dry-run'?" "n"; then
+    REVIEW_SYSTEMD=1
+  fi
+}
+
+preview_systemd_if_approved() {
+  if [[ "$REVIEW_SYSTEMD" -ne 1 ]]; then
+    log "Optional systemd provisioning was not previewed."
+    return 0
+  fi
+
+  run_cmd "$PROJECT_ROOT/scripts/provision-systemd.sh" --dry-run --project-root "$PROJECT_ROOT"
+}
+
 start_bot_if_approved() {
   if [[ "$START_BOT" -ne 1 ]]; then
     log "Bot was not started automatically."
@@ -431,8 +452,9 @@ start_bot_if_approved() {
 
 print_summary() {
   log "Installer complete."
-  log "Systemd service installation is intentionally not included in this milestone."
-  log "Use docs/VPS_SYSTEMD_RUNBOOK.md for the sample unit and post-install workflow."
+  log "Systemd service installation stays explicit and separate from this installer."
+  log "Use ./scripts/provision-systemd.sh for dry-run, install, uninstall, or status checks."
+  log "Use docs/VPS_SYSTEMD_RUNBOOK.md for the documented unit and post-install workflow."
 }
 
 main() {
@@ -451,7 +473,9 @@ main() {
   run_db_migrate
   run_ops_preflight
   ask_to_start_bot
+  ask_to_review_systemd
   print_summary
+  preview_systemd_if_approved
   start_bot_if_approved
 }
 
