@@ -336,4 +336,15 @@ describe("client runtime wiring", () => {
       })
     );
   });
+
+  it("fails safely when business persistence is required but missing", async () => {
+    await expect(
+      runClientRuntime({
+        envelope: createEnvelope("Acconsento"),
+        requireBusinessPersistence: true
+      })
+    ).rejects.toThrow(
+      "Business persistence is required for client runtime. Provide explicit consent and intake persistence."
+    );
+  });
 });

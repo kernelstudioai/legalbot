@@ -55,6 +55,7 @@ export interface RunClientRuntimeInput {
   envelope: CanonicalEnvelopeType;
   consentPersistence?: ClientConsentPersistence;
   intakePersistence?: ClientIntakePersistence;
+  requireBusinessPersistence?: boolean;
 }
 
 export interface RunClientRuntimeResult {
@@ -159,8 +160,15 @@ const persistIntakeRecord = async (
 export const runClientRuntime = async ({
   envelope,
   consentPersistence,
-  intakePersistence
+  intakePersistence,
+  requireBusinessPersistence = false
 }: RunClientRuntimeInput): Promise<RunClientRuntimeResult> => {
+  if (requireBusinessPersistence && (!consentPersistence || !intakePersistence)) {
+    throw new Error(
+      "Business persistence is required for client runtime. Provide explicit consent and intake persistence."
+    );
+  }
+
   const subjectId = deriveConsentSubjectId(envelope);
   const currentConsentState = consentPersistence
     ? await consentPersistence.getConsentState(subjectId)

@@ -1,5 +1,3 @@
-import { existsSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
 import { ZodError } from "zod";
 import {
   CaseCreationPreconditionError,
@@ -10,19 +8,17 @@ import { loadEnv } from "../config/env.ts";
 import { consoleLogger, type Logger } from "../logging/logger.ts";
 import {
   CaseDraftUniquenessError,
-  createSqlitePersistenceService,
-  type SqlitePersistenceService
+  createSqliteBusinessPersistenceService,
+  type BusinessPersistenceService,
+  type SqliteBusinessPersistenceService
 } from "../persistence/index.ts";
 import {
   exitWithCode,
   isDirectExecution,
   type DbCommandSummary
 } from "./dbCommandCommon.ts";
-import {
-  resolveSqliteDatabasePath,
-  sqliteMigrations
-} from "../persistence/sqlite/index.ts";
-import { isOperatorSubjectId, resolveOperatorSubjectId } from "./operatorSubjectId.ts";
+import { assertSqliteMigrationsApplied } from "../persistence/sqlite/index.ts";
+import { isOperatorSubjectId } from "./operatorSubjectId.ts";
 
 export interface CaseCreateFromIntakeCommandOptions {
   argv?: string[];
@@ -32,17 +28,14 @@ export interface CaseCreateFromIntakeCommandOptions {
   stdout?: {
     write(chunk: string): void;
   };
-  createSqlitePersistenceServiceFactory?: (config: {
+  createSqliteBusinessPersistenceServiceFactory?: (config: {
     databaseUrl: string;
     cwd: string;
-  }) => SqlitePersistenceService;
+  }) => SqliteBusinessPersistenceService;
   createCaseCreationServiceFactory?: (options: {
-    persistence: SqlitePersistenceService;
+    persistence: BusinessPersistenceService;
   }) => CaseCreationService;
-  verifyMigrationsApplied?: (options: { databaseUrl: string; cwd: string }) => {
-    appliedMigrationIds: string[];
-    databasePath: string;
-  };
+  verifyMigrationsApplied?: (options: { databaseUrl: string; cwd: string }) => void;
 }
 
 export interface CaseCreateFromIntakeSummary extends DbCommandSummary {
@@ -95,64 +88,29 @@ const toErrorMessage = (error: unknown): string => {
   return error instanceof Error ? error.message : "unknown_error";
 };
 
-const verifySqliteMigrationsApplied = ({
+const toManualCaseCreationMigrationMessage = (message: string): string =>
+  message
+    .replace("Technical persistence", "Manual case creation")
+    .replace(" before enabling TECHNICAL_PERSISTENCE_ENABLED", " first");
+
+const verifySqliteMigrationsAppliedForCaseCreation = ({
   databaseUrl,
   cwd
 }: {
   databaseUrl: string;
   cwd: string;
-}): {
-  appliedMigrationIds: string[];
-  databasePath: string;
-} => {
-  const databasePath = resolveSqliteDatabasePath(databaseUrl, cwd);
-
-  if (databasePath !== ":memory:" && !existsSync(databasePath)) {
-    throw new Error(
-      "Manual case creation requires an existing migrated SQLite database. Run npm run db:migrate first."
-    );
-  }
-
-  const database = new DatabaseSync(databasePath);
-
+}): void => {
   try {
-    const migrationTable = database
-      .prepare(
-        `
-          SELECT name
-          FROM sqlite_master
-          WHERE type = 'table' AND name = 'schema_migrations'
-        `
-      )
-      .get() as { name: string } | undefined;
-
-    if (!migrationTable) {
-      throw new Error(
-        "Manual case creation requires existing migrations. Run npm run db:migrate first."
-      );
+    assertSqliteMigrationsApplied({
+      databaseUrl,
+      cwd
+    });
+  } catch (error) {
+    if (!(error instanceof Error)) {
+      throw error;
     }
 
-    const appliedMigrationIds = (
-      database
-        .prepare("SELECT migration_id FROM schema_migrations ORDER BY migration_id ASC")
-        .all() as Array<{ migration_id: string }>
-    ).map((row) => row.migration_id);
-    const pendingMigrationIds = sqliteMigrations
-      .map((migration) => migration.id)
-      .filter((migrationId) => !appliedMigrationIds.includes(migrationId));
-
-    if (pendingMigrationIds.length > 0) {
-      throw new Error(
-        `Manual case creation requires completed migrations. Pending migrations: ${pendingMigrationIds.join(", ")}. Run npm run db:migrate first.`
-      );
-    }
-
-    return {
-      appliedMigrationIds,
-      databasePath
-    };
-  } finally {
-    database.close();
+    throw new Error(toManualCaseCreationMigrationMessage(error.message));
   }
 };
 
@@ -178,11 +136,11 @@ export const runCaseCreateFromIntakeCommand = async ({
   envSource = process.env,
   logger = consoleLogger,
   stdout = process.stdout,
-  createSqlitePersistenceServiceFactory = createSqlitePersistenceService,
+  createSqliteBusinessPersistenceServiceFactory = createSqliteBusinessPersistenceService,
   createCaseCreationServiceFactory = createCaseCreationService,
-  verifyMigrationsApplied = verifySqliteMigrationsApplied
+  verifyMigrationsApplied = verifySqliteMigrationsAppliedForCaseCreation
 }: CaseCreateFromIntakeCommandOptions = {}): Promise<CaseCreateFromIntakeSummary> => {
-  let persistence: SqlitePersistenceService | undefined;
+  let businessPersistence: SqliteBusinessPersistenceService | undefined;
 
   try {
     const requestedSubjectId = parseSubjectIdArg(argv);
@@ -192,36 +150,23 @@ export const runCaseCreateFromIntakeCommand = async ({
       cwd
     });
 
-    const subjectId = isOperatorSubjectId(requestedSubjectId)
-      ? (() => {
-          const databasePath = resolveSqliteDatabasePath(env.DATABASE_URL, cwd);
-          const database = new DatabaseSync(databasePath);
-
-          try {
-            const resolvedSubjectId = resolveOperatorSubjectId(database, requestedSubjectId);
-
-            if (!resolvedSubjectId) {
-              throw new Error(
-                "Unknown operator subjectId. Run npm run intake:list-ready again before manual case creation."
-              );
-            }
-
-            return resolvedSubjectId;
-          } finally {
-            database.close();
-          }
-        })()
-      : requestedSubjectId;
-
     logger.info("case_create_from_intake_starting");
 
-    persistence = createSqlitePersistenceServiceFactory({
+    businessPersistence = createSqliteBusinessPersistenceServiceFactory({
       databaseUrl: env.DATABASE_URL,
       cwd
     });
+    const subjectId = isOperatorSubjectId(requestedSubjectId)
+      ? ((await businessPersistence.resolveReadyIntakeSubjectId(requestedSubjectId)) ??
+        (() => {
+          throw new Error(
+            "Unknown operator subjectId. Run npm run intake:list-ready again before manual case creation."
+          );
+        })())
+      : requestedSubjectId;
 
     const caseCreationService = createCaseCreationServiceFactory({
-      persistence
+      persistence: businessPersistence
     });
     const result = await caseCreationService.createCaseFromCompletedIntake(subjectId);
     const sanitizedResult = toSanitizedResult(result);
@@ -245,7 +190,7 @@ export const runCaseCreateFromIntakeCommand = async ({
       exitCode: 1
     };
   } finally {
-    persistence?.close();
+    businessPersistence?.close?.();
   }
 };
 

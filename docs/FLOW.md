@@ -18,6 +18,7 @@
 - M13 wires that consent state into the live client runtime path only.
 - M14 adds the intake state machine under `src/runtime/client/intake.ts`.
 - M15 adds consent-gated intake persistence under `src/persistence/*` and keeps SQLite wiring behind `PersistenceService`.
+- M27 adds an explicit `BusinessPersistenceService` boundary for consent, intake, and manual case creation so live client state does not depend on technical audit or dedupe wiring.
 - M26 adds a transport-agnostic identity-extraction boundary under `src/domain/intake/*`. The default provider is deterministic and local, and it is the only place intended to change when a future behind-the-scenes AI extractor is approved.
 - M16 adds an explicit application-only case-creation boundary under `src/domain/cases/caseCreationService.ts`.
 - When consent is `unknown`, the client runtime returns `request_consent` and upgrades stored consent to `requested` when a consent persistence adapter is available.
@@ -37,7 +38,7 @@
   - `problemSummary`
 - The runtime persists intake state transitions separately from accepted fields and appends sanitized intake events without storing raw message text.
 - Invalid intake replies are rejected in-memory and are not persisted.
-- If no dedicated intake persistence is injected, the intake skeleton can still remain in process-local injected memory only.
+- The live OpenWA smoke runtime now requires explicit business persistence before startup. Tests may still inject process-local adapters deliberately, but runtime startup does not silently fall back to in-memory consent or intake state.
 - When consent is already `denied`, the runtime returns a safe no-processing close response.
 - Before consent is `granted`, the runtime may request consent or clarification, but it must not persist message transcripts, message bodies, legal facts, or create cases.
 - Consent persistence remains separate from M10 technical dedupe and technical audit writes.
@@ -54,4 +55,5 @@
 - After readiness, transport liveness uses a read-only heartbeat loop controlled by `OPENWA_LIVENESS_INTERVAL_SECONDS` and `OPENWA_LIVENESS_FAILURE_THRESHOLD`. Malformed OpenWA liveness response shapes are logged as sanitized warnings and do not count as disconnect failures by themselves.
 - Shutdown emits `openwa_shutdown_starting`, `openwa_shutdown_complete`, and `openwa_shutdown_failed`.
 - M22 adds the operator-only helper `npm run intake:list-ready`. It lists only consent-granted `intake_complete` records with all accepted intake fields present, emits operator-safe `subjectId` tokens instead of raw phone-derived identifiers, and still does not create cases automatically.
+- M27 keeps `intake:list-ready` and `case:create-from-intake` on the same explicit business persistence boundary used by the live client runtime.
 - No live OpenWA flow path creates a legal case automatically in this milestone. Case creation exists only as an explicit operator command and application boundary, remains idempotent for repeated manual runs, and is not triggered from listener or intake-completion runtime code.

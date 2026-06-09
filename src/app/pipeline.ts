@@ -25,6 +25,7 @@ export interface PipelineResult {
 export interface RunInboundPipelineOptions {
   clientConsentPersistence?: ClientConsentPersistence;
   clientIntakePersistence?: ClientIntakePersistence;
+  requireBusinessPersistence?: boolean;
 }
 
 export const runInboundPipeline = async (
@@ -38,6 +39,7 @@ export const runInboundPipeline = async (
     envelope,
     routingDecision,
     runtimeContext,
+    requireBusinessPersistence: options.requireBusinessPersistence ?? false,
     ...(options.clientConsentPersistence
       ? {
           clientConsentPersistence: options.clientConsentPersistence

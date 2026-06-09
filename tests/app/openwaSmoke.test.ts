@@ -145,6 +145,7 @@ describe("openwa smoke startup", () => {
 
   it("logs sanitized startup diagnostics and passes the resolved OpenWA config", async () => {
     const logger = createLogger();
+    const persistenceService = createInMemoryPersistenceService();
     const kill = vi.fn().mockResolvedValue(true);
     const createClient = vi.fn().mockResolvedValue({
       onMessage: vi.fn().mockResolvedValue(undefined),
@@ -176,6 +177,7 @@ describe("openwa smoke startup", () => {
       },
       logger,
       createClient,
+      persistenceService,
       startStatusServer: async ({ config, logger: statusLogger }) => {
         statusLogger.info("openwa_status_server_starting", {
           host: config.host,
@@ -227,6 +229,7 @@ describe("openwa smoke startup", () => {
       openwa_recovery_retry_delay_seconds: 11,
       openwa_startup_max_attempts: 2,
       openwa_startup_retry_delay_seconds: 9,
+      business_persistence_enabled: true,
       technical_persistence_enabled: false
     });
     expect(logger.info).toHaveBeenCalledWith(
@@ -247,6 +250,7 @@ describe("openwa smoke startup", () => {
         openwa_recovery_retry_delay_seconds: 11,
         openwa_startup_max_attempts: 2,
         openwa_startup_retry_delay_seconds: 9,
+        business_persistence_enabled: true,
         technical_persistence_enabled: false
       })
     );
@@ -403,6 +407,7 @@ describe("openwa smoke startup", () => {
 
   it("installs signal handlers that trigger client cleanup when available", async () => {
     const logger = createLogger();
+    const persistenceService = createInMemoryPersistenceService();
     const kill = vi.fn().mockResolvedValue(true);
     const createClient = vi.fn().mockResolvedValue({
       onMessage: vi.fn().mockResolvedValue(undefined),
@@ -430,7 +435,8 @@ describe("openwa smoke startup", () => {
         LAWYER_PHONE_E164: "+15551234567"
       },
       logger,
-      createClient
+      createClient,
+      persistenceService
     });
 
     installOpenWaSignalHandlers(app, processLike);
@@ -445,6 +451,7 @@ describe("openwa smoke startup", () => {
 
   it("does not start WhatsApp when the enabled status server cannot bind", async () => {
     const logger = createLogger();
+    const persistenceService = createInMemoryPersistenceService();
     const createClient = vi.fn();
 
     await expect(
@@ -464,6 +471,7 @@ describe("openwa smoke startup", () => {
         },
         logger,
         createClient,
+        persistenceService,
         startStatusServer: async ({ config, logger: statusLogger }) => {
           statusLogger.info("openwa_status_server_starting", {
             host: config.host,
@@ -489,6 +497,7 @@ describe("openwa smoke startup", () => {
 
   it("does not open sqlite persistence when technical persistence is disabled", async () => {
     const logger = createLogger();
+    const persistenceService = createInMemoryPersistenceService();
     const createClient = vi.fn().mockResolvedValue({
       onMessage: vi.fn().mockResolvedValue(undefined),
       sendText: vi.fn(),
@@ -507,6 +516,7 @@ describe("openwa smoke startup", () => {
       },
       logger,
       createClient,
+      persistenceService,
       createSqlitePersistence
     });
 
@@ -535,6 +545,30 @@ describe("openwa smoke startup", () => {
       })
     ).rejects.toThrow(
       "Technical persistence requires an existing migrated SQLite database. Run npm run db:migrate before enabling TECHNICAL_PERSISTENCE_ENABLED."
+    );
+
+    expect(createClient).not.toHaveBeenCalled();
+  });
+
+  it("fails safely before startup when business persistence is disabled", async () => {
+    const logger = createLogger();
+    const createClient = vi.fn();
+
+    await expect(
+      startOpenWaSmokeApp({
+        envSource: {
+          BOT_MODE: "smoke",
+          OPENWA_SESSION_ID: "legalbot-smoke",
+          OPENWA_HEADLESS: "false",
+          BUSINESS_PERSISTENCE_ENABLED: "false",
+          TECHNICAL_PERSISTENCE_ENABLED: "false",
+          LAWYER_PHONE_E164: "+15551234567"
+        },
+        logger,
+        createClient
+      })
+    ).rejects.toThrow(
+      "Business persistence is required for live client intake. Enable BUSINESS_PERSISTENCE_ENABLED before starting the OpenWA runtime."
     );
 
     expect(createClient).not.toHaveBeenCalled();

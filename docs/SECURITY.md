@@ -10,6 +10,7 @@
 - Treat client-content persistence as consent-gated: no transcript storage, message-body storage, legal-fact storage, or case creation before explicit `granted` consent.
 - Intake remains consent-gated and stores only accepted structured `firstName`, `lastName`, `birthDate`, `city`, and `problemSummary` fields in this phase.
 - Keep M10 technical dedupe markers and sanitized audit events separate from any future consent-gated client content persistence.
+- Keep business-state persistence explicit and separate from technical dedupe or audit toggles. Live client runtime startup must fail safely instead of silently falling back to in-memory consent or intake state.
 - M13 runtime consent wiring still stores only consent state plus sanitized metadata; it must strip `messageBody`, `body`, `content`, and `text`, and must not retain full phone numbers, tokens, or browser/session/QR paths.
 - M15 intake persistence remains consent-gated. It must not persist raw message bodies or full transcripts, and it may retain only explicitly accepted structured intake fields after `granted` consent.
 - M16 and M17 case creation remain explicit application boundaries only. They may create a `draft` case only from `granted` consent, an `intake_complete` snapshot, and revalidated accepted identity fields plus `problemSummary`, and the bundled persistence implementations now commit the case row plus sanitized audit append transactionally.
@@ -24,7 +25,7 @@
 
 - Transport code is isolated under `src/transport/openwa`.
 - Domain decisions occur in dedicated pipeline modules, not in listener callbacks.
-- Persistence is abstracted behind interfaces so storage concerns can be audited before implementation.
+- Persistence is abstracted behind `PersistenceService` and `BusinessPersistenceService` so storage concerns can be audited before implementation and so technical runtime persistence cannot disable consent/intake/case state accidentally.
 - Dispatcher only sends text actions from `OutputPlan`.
 - The consent parser must accept only strict explicit yes/no phrases and must treat vague replies such as `ok`, `va bene`, `si`, and `procedi` as non-consent that requires clarification.
 - The client runtime may persist only consent state transitions and append-only consent events. It must not persist inbound message bodies, legal facts, or create case records.

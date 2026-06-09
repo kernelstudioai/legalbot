@@ -2,7 +2,10 @@ import { pathToFileURL } from "node:url";
 import { loadSmokeRuntimeEnv, type SmokeRuntimeEnv } from "../config/env.ts";
 import { consoleLogger, type Logger } from "../logging/logger.ts";
 import {
+  createBusinessPersistenceService,
   createSqlitePersistenceService,
+  createSqliteBusinessPersistenceServiceFromPersistence,
+  type BusinessPersistenceService,
   type PersistenceService,
   type SqlitePersistenceService
 } from "../persistence/index.ts";
@@ -49,12 +52,16 @@ export interface StartOpenWaSmokeAppOptions {
   logger?: Logger;
   createClient?: (config: OpenWaConfig) => Promise<OpenWaRuntimeClient>;
   persistenceService?: PersistenceService;
+  businessPersistenceService?: BusinessPersistenceService;
   clientConsentPersistence?: ClientConsentPersistence;
   clientIntakePersistence?: ClientIntakePersistence;
   createSqlitePersistence?: (config: {
     databaseUrl: string;
     cwd?: string;
   }) => SqlitePersistenceService;
+  createBusinessPersistence?: (
+    persistenceService: PersistenceService
+  ) => BusinessPersistenceService;
   startStatusServer?: (options: {
     config: {
       enabled: boolean;
@@ -86,24 +93,46 @@ const createSmokeOpenWaConfig = (env: SmokeRuntimeEnv): OpenWaConfig =>
       : {})
   });
 
+const isSqlitePersistenceService = (
+  persistenceService: PersistenceService
+): persistenceService is SqlitePersistenceService =>
+  "databasePath" in persistenceService &&
+  "close" in persistenceService &&
+  typeof persistenceService.close === "function";
+
 export const startOpenWaSmokeApp = async ({
   cwd = process.cwd(),
   envSource = process.env,
   logger = consoleLogger,
   createClient = createDefaultClient,
   persistenceService,
+  businessPersistenceService,
   clientConsentPersistence,
   clientIntakePersistence,
   createSqlitePersistence = createSqlitePersistenceService,
+  createBusinessPersistence = createBusinessPersistenceService,
   startStatusServer = startOpenWaStatusServer
 }: StartOpenWaSmokeAppOptions = {}): Promise<OpenWaSmokeApp> => {
   const env = loadSmokeRuntimeEnv(envSource);
   const config = createSmokeOpenWaConfig(env);
   const startupMeta = toOpenWaStartupMeta(config);
-  const technicalPersistenceService =
-    env.TECHNICAL_PERSISTENCE_ENABLED === true
-      ? (persistenceService ??
-        (() => {
+  if (env.BUSINESS_PERSISTENCE_ENABLED !== true) {
+    throw new Error(
+      "Business persistence is required for live client intake. Enable BUSINESS_PERSISTENCE_ENABLED before starting the OpenWA runtime."
+    );
+  }
+
+  const needsDerivedBusinessPersistence =
+    businessPersistenceService === undefined &&
+    (clientConsentPersistence === undefined || clientIntakePersistence === undefined);
+  const shouldCreateSharedPersistence =
+    persistenceService === undefined &&
+    (env.TECHNICAL_PERSISTENCE_ENABLED === true ||
+      (env.BUSINESS_PERSISTENCE_ENABLED === true && needsDerivedBusinessPersistence));
+  const sharedPersistenceService =
+    persistenceService ??
+    (shouldCreateSharedPersistence
+      ? (() => {
           assertSqliteMigrationsApplied({
             databaseUrl: env.DATABASE_URL,
             cwd
@@ -112,20 +141,44 @@ export const startOpenWaSmokeApp = async ({
             databaseUrl: env.DATABASE_URL,
             cwd
           });
-        })())
-      : undefined;
-  const defaultRuntimePersistence =
-    clientConsentPersistence || clientIntakePersistence
-      ? undefined
-      : persistenceService ?? technicalPersistenceService;
+        })()
+      : undefined);
   const shouldClosePersistence =
-    technicalPersistenceService !== undefined && persistenceService === undefined;
+    sharedPersistenceService !== undefined && persistenceService === undefined;
+  const defaultBusinessPersistence =
+    businessPersistenceService ??
+    (sharedPersistenceService
+      ? isSqlitePersistenceService(sharedPersistenceService)
+        ? createSqliteBusinessPersistenceServiceFromPersistence(sharedPersistenceService)
+        : createBusinessPersistence(sharedPersistenceService)
+      : undefined);
+  const resolvedConsentPersistence =
+    clientConsentPersistence ?? defaultBusinessPersistence;
+  const resolvedIntakePersistence =
+    clientIntakePersistence ?? defaultBusinessPersistence;
+
+  if (!resolvedConsentPersistence || !resolvedIntakePersistence) {
+    throw new Error(
+      "Business persistence is required for live client intake. Provide explicit consent and intake persistence before startup."
+    );
+  }
+
   const technicalPersistence =
-    technicalPersistenceService !== undefined
-      ? createOpenWaTechnicalPersistence(technicalPersistenceService, {
+    env.TECHNICAL_PERSISTENCE_ENABLED === true && sharedPersistenceService !== undefined
+      ? createOpenWaTechnicalPersistence(sharedPersistenceService, {
           sessionId: env.OPENWA_SESSION_ID
         })
       : undefined;
+  const closeSharedPersistence = () => {
+    if (
+      shouldClosePersistence &&
+      sharedPersistenceService &&
+      "close" in sharedPersistenceService &&
+      typeof sharedPersistenceService.close === "function"
+    ) {
+      sharedPersistenceService.close();
+    }
+  };
 
   logger.info("openwa_smoke_preflight", {
     node_version: process.version,
@@ -141,6 +194,7 @@ export const startOpenWaSmokeApp = async ({
     openwa_recovery_retry_delay_seconds: env.OPENWA_RECOVERY_RETRY_DELAY_SECONDS,
     openwa_startup_max_attempts: env.OPENWA_STARTUP_MAX_ATTEMPTS,
     openwa_startup_retry_delay_seconds: env.OPENWA_STARTUP_RETRY_DELAY_SECONDS,
+    business_persistence_enabled: env.BUSINESS_PERSISTENCE_ENABLED,
     technical_persistence_enabled: env.TECHNICAL_PERSISTENCE_ENABLED
   });
 
@@ -154,6 +208,7 @@ export const startOpenWaSmokeApp = async ({
     openwa_recovery_retry_delay_seconds: env.OPENWA_RECOVERY_RETRY_DELAY_SECONDS,
     openwa_startup_max_attempts: env.OPENWA_STARTUP_MAX_ATTEMPTS,
     openwa_startup_retry_delay_seconds: env.OPENWA_STARTUP_RETRY_DELAY_SECONDS,
+    business_persistence_enabled: env.BUSINESS_PERSISTENCE_ENABLED,
     technical_persistence_enabled: env.TECHNICAL_PERSISTENCE_ENABLED
   });
 
@@ -173,24 +228,9 @@ export const startOpenWaSmokeApp = async ({
         ...dependencies,
         pipelineRunner: (message) =>
           runInboundPipeline(message, {
-            ...(clientConsentPersistence
-              ? {
-                  clientConsentPersistence
-                }
-              : defaultRuntimePersistence
-                ? {
-                    clientConsentPersistence: defaultRuntimePersistence
-                  }
-                : {}),
-            ...(clientIntakePersistence
-              ? {
-                  clientIntakePersistence
-                }
-              : defaultRuntimePersistence
-                ? {
-                    clientIntakePersistence: defaultRuntimePersistence
-                  }
-                : {})
+            requireBusinessPersistence: true,
+            clientConsentPersistence: resolvedConsentPersistence,
+            clientIntakePersistence: resolvedIntakePersistence
           })
       }),
     ...(technicalPersistence ? { technicalPersistence } : {})
@@ -204,9 +244,7 @@ export const startOpenWaSmokeApp = async ({
     logger,
     getHealth: () => supervisor.getHealth()
   }).catch((error: unknown) => {
-    if (shouldClosePersistence) {
-      technicalPersistence?.close?.();
-    }
+    closeSharedPersistence();
 
     throw error;
   });
@@ -217,9 +255,7 @@ export const startOpenWaSmokeApp = async ({
     client = await supervisor.start();
   } catch (error) {
     await statusServer.stop();
-    if (shouldClosePersistence) {
-      technicalPersistence?.close?.();
-    }
+    closeSharedPersistence();
     throw error;
   }
 
@@ -275,9 +311,7 @@ export const startOpenWaSmokeApp = async ({
           }
           await supervisor.stop(reason);
           await statusServer.stop();
-          if (shouldClosePersistence) {
-            technicalPersistence?.close?.();
-          }
+          closeSharedPersistence();
 
           logger.info("openwa_shutdown_complete", {
             reason,
@@ -285,9 +319,7 @@ export const startOpenWaSmokeApp = async ({
           });
         } catch (error) {
           await statusServer.stop();
-          if (shouldClosePersistence) {
-            technicalPersistence?.close?.();
-          }
+          closeSharedPersistence();
           logger.error("openwa_shutdown_failed", {
             reason,
             client_cleanup_available: clientCleanupAvailable,

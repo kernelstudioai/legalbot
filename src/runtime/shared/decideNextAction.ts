@@ -13,6 +13,7 @@ export interface DecideNextActionInput {
   runtimeContext: RuntimeContext;
   clientConsentPersistence?: ClientConsentPersistence;
   clientIntakePersistence?: ClientIntakePersistence;
+  requireBusinessPersistence?: boolean;
 }
 
 export const decideNextAction = ({
@@ -20,11 +21,13 @@ export const decideNextAction = ({
   routingDecision,
   runtimeContext,
   clientConsentPersistence,
-  clientIntakePersistence
+  clientIntakePersistence,
+  requireBusinessPersistence = false
 }: DecideNextActionInput): Promise<RuntimeDecisionType> => {
   if (runtimeContext.runtime === "client") {
     return runClientRuntime({
       envelope,
+      requireBusinessPersistence,
       ...(clientConsentPersistence
         ? {
             consentPersistence: clientConsentPersistence

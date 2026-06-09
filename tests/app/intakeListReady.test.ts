@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { runInboundPipeline } from "../../src/app/index.ts";
 import type { Logger } from "../../src/logging/logger.ts";
 import { createSqlitePersistenceService } from "../../src/persistence/index.ts";
+import { startOpenWaSmokeApp } from "../../src/app/openwaSmoke.ts";
 import { runSqliteMigrations } from "../../src/persistence/sqlite/index.ts";
 import { runIntakeListReadyCommand } from "../../src/app/intakeListReady.ts";
 import { toOperatorSubjectId } from "../../src/app/operatorSubjectId.ts";
@@ -70,12 +71,12 @@ const setCompleteIdentity = async (
 };
 
 describe("ready-intake listing command", () => {
-  it("fails safely when migrations are missing", () => {
+  it("fails safely when migrations are missing", async () => {
     const tempDir = createTempDir();
     const logger = createLogger();
     const stdout = createStdout();
 
-    const summary = runIntakeListReadyCommand({
+    const summary = await runIntakeListReadyCommand({
       cwd: tempDir,
       envSource: {
         DATABASE_URL: "file:./data/legalbot.sqlite",
@@ -176,7 +177,7 @@ describe("ready-intake listing command", () => {
       persistence.close();
     }
 
-    const summary = runIntakeListReadyCommand({
+    const summary = await runIntakeListReadyCommand({
       cwd: tempDir,
       envSource: {
         DATABASE_URL: databaseUrl,
@@ -289,7 +290,7 @@ describe("ready-intake listing command", () => {
       persistence.close();
     }
 
-    const summary = runIntakeListReadyCommand({
+    const summary = await runIntakeListReadyCommand({
       cwd: tempDir,
       envSource: {
         DATABASE_URL: databaseUrl,
@@ -311,6 +312,110 @@ describe("ready-intake listing command", () => {
     expect(stdout.output).not.toContain(subjectId);
     expect(stdout.output).not.toContain("15551230000");
     expect(stdout.output).not.toContain("Mario");
+    expect(stdout.output).not.toContain("problema di lavoro");
+  });
+
+  it("keeps business-state persistence active when technical persistence is disabled", async () => {
+    const tempDir = createTempDir();
+    const logger = createLogger();
+    const stdout = createStdout();
+    const databaseUrl = "file:./data/legalbot.sqlite";
+    const subjectId = "15551230001@c.us";
+    let onMessageListener:
+      | ((message: OpenWaMessage) => Promise<void> | void)
+      | undefined;
+
+    runSqliteMigrations({
+      databaseUrl,
+      cwd: tempDir,
+      enabled: true
+    });
+
+    const app = await startOpenWaSmokeApp({
+      cwd: tempDir,
+      envSource: {
+        BOT_MODE: "smoke",
+        OPENWA_SESSION_ID: "legalbot-smoke",
+        OPENWA_HEADLESS: "false",
+        OPENWA_STATUS_SERVER_ENABLED: "false",
+        TECHNICAL_PERSISTENCE_ENABLED: "false",
+        LAWYER_PHONE_E164: "+15551234567",
+        DATABASE_URL: databaseUrl,
+        DATABASE_MIGRATIONS_ENABLED: "true"
+      },
+      logger,
+      createClient: async () => ({
+        onMessage: vi.fn().mockImplementation(async (listener) => {
+          onMessageListener = listener;
+        }),
+        sendText: vi.fn().mockResolvedValue(undefined),
+        kill: vi.fn().mockResolvedValue(true)
+      })
+    });
+
+    const createMessage = (id: string, body: string): OpenWaMessage => ({
+      id,
+      from: subjectId,
+      chatId: subjectId,
+      body,
+      sender: {
+        pushname: "Client"
+      },
+      fromMe: false,
+      timestamp: Date.parse("2026-06-09T09:00:00.000Z")
+    });
+
+    await onMessageListener?.(createMessage("wamid.m27-1", "ciao"));
+    await onMessageListener?.(createMessage("wamid.m27-2", "Acconsento"));
+    await onMessageListener?.(createMessage("wamid.m27-3", "Mario barone roma 01 01 1976"));
+    await onMessageListener?.(
+      createMessage("wamid.m27-4", "Ho bisogno di assistenza per un problema di lavoro.")
+    );
+    await app.stop("test_shutdown");
+
+    const persistence = createSqlitePersistenceService({
+      databaseUrl,
+      cwd: tempDir
+    });
+
+    try {
+      await expect(persistence.getConsentState(subjectId)).resolves.toBe("granted");
+      await expect(persistence.getIntakeSnapshot(subjectId)).resolves.toMatchObject({
+        subjectId,
+        state: "intake_complete",
+        fields: {
+          firstName: "Mario",
+          lastName: "Barone",
+          birthDate: "01/01/1976",
+          city: "Roma",
+          problemSummary: "Ho bisogno di assistenza per un problema di lavoro."
+        }
+      });
+    } finally {
+      persistence.close();
+    }
+
+    const summary = await runIntakeListReadyCommand({
+      cwd: tempDir,
+      envSource: {
+        DATABASE_URL: databaseUrl,
+        DATABASE_MIGRATIONS_ENABLED: "true"
+      },
+      logger,
+      stdout
+    });
+
+    expect(summary.exitCode).toBe(0);
+    expect(summary.candidates).toEqual([
+      {
+        subjectId: toOperatorSubjectId(subjectId),
+        intakeState: "intake_complete",
+        updatedAt: expect.any(String),
+        fieldNamesPresent: ["firstName", "lastName", "birthDate", "city", "problemSummary"]
+      }
+    ]);
+    expect(stdout.output).not.toContain(subjectId);
+    expect(stdout.output).not.toContain("15551230001");
     expect(stdout.output).not.toContain("problema di lavoro");
   });
 });

@@ -6,6 +6,7 @@ export const DEFAULT_NODE_ENV = "development";
 export const DEFAULT_LOG_LEVEL = "info";
 export const DEFAULT_DATABASE_URL = "file:./data/legalbot.sqlite";
 export const DEFAULT_DATABASE_MIGRATIONS_ENABLED = "true";
+export const DEFAULT_BUSINESS_PERSISTENCE_ENABLED = "true";
 export const DEFAULT_TECHNICAL_PERSISTENCE_ENABLED = "true";
 export const DEFAULT_OPENWA_STARTUP_MAX_ATTEMPTS = "1";
 export const DEFAULT_OPENWA_STARTUP_RETRY_DELAY_SECONDS = "5";
@@ -102,6 +103,7 @@ const EnvSchema = z.object({
   OPENWA_HEADLESS: createBooleanEnvSchema("true"),
   DATABASE_URL: DatabaseUrlSchema,
   DATABASE_MIGRATIONS_ENABLED: DatabaseMigrationsEnabledSchema,
+  BUSINESS_PERSISTENCE_ENABLED: createBooleanEnvSchema(DEFAULT_BUSINESS_PERSISTENCE_ENABLED),
   TECHNICAL_PERSISTENCE_ENABLED: createBooleanEnvSchema(DEFAULT_TECHNICAL_PERSISTENCE_ENABLED)
 });
 

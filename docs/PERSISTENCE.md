@@ -30,6 +30,8 @@ M26 adds a durable identity-extraction boundary. The live runtime still uses a d
 
 M23 makes the single-bot runtime default to SQLite-backed technical persistence plus the local status surface, while keeping the same no-transcript and no-auto-case boundaries and adding a Docker runtime baseline.
 
+M27 splits live business-state persistence from technical runtime persistence explicitly. Consent state, consent events, intake state, accepted intake fields, intake events, and manual case creation now flow through `BusinessPersistenceService`, while restart-safe dedupe and technical runtime audit stay behind the separate technical persistence surface.
+
 ## Interfaces
 
 - `CaseStore`: minimal create/get/update support for case records built from accepted structured intake data only.
@@ -38,6 +40,7 @@ M23 makes the single-bot runtime default to SQLite-backed technical persistence 
 - `ProcessedMessageStore`: duplicate-detection markers keyed by transport message id.
 - `AuditLogStore`: append-only audit events with optional JSON metadata.
 - `PersistenceService`: the only application boundary that future intake/runtime code should use when it needs persistence.
+- `BusinessPersistenceService`: the explicit live business-state boundary for consent, intake, operator ready-intake reads, and manual case creation.
 
 ## Persistence Service Boundary
 
@@ -61,8 +64,10 @@ M23 makes the single-bot runtime default to SQLite-backed technical persistence 
   - `updateCaseStatus(caseId, status)`
 - `createSqlitePersistenceService(config)` opens a SQLite-backed service against an explicit `file:` database path.
 - `createInMemoryPersistenceService()` provides a process-local service for tests and non-SQLite callers.
+- `createBusinessPersistenceService(persistence)` narrows a shared persistence implementation to the consent/intake/case business boundary.
+- `createSqliteBusinessPersistenceService(config)` exposes the same business boundary plus ready-intake lookup helpers for operator commands.
 - The service sanitizes processed-message metadata, audit payloads, consent metadata, and intake metadata before they can cross the boundary.
-- The OpenWA smoke runtime can inject an existing `PersistenceService` or create a SQLite-backed one only when `TECHNICAL_PERSISTENCE_ENABLED=true`.
+- The OpenWA smoke runtime can inject an existing shared `PersistenceService`, derive `BusinessPersistenceService` from it, or create one SQLite-backed shared implementation when either business persistence or technical persistence needs durable storage.
 - Client runtime wiring uses narrow application-layer adapters so consent-gated intake writes stay separate from M10 technical dedupe and audit wiring.
 - `src/domain/cases/caseCreationService.ts` is the explicit application boundary that reads consent and intake through `PersistenceService`, revalidates accepted fields, creates a `draft` case, and appends a sanitized `case_created_from_intake` audit event.
 - On repeated manual runs for the same subject, that boundary first looks up an existing `draft` case through `findDraftCaseBySubjectId(subjectId)`. If one exists, it returns the existing case and appends only a sanitized `case_create_from_intake_idempotent_hit` audit event.
@@ -70,16 +75,18 @@ M23 makes the single-bot runtime default to SQLite-backed technical persistence 
 - When a direct SQLite-backed caller still attempts to create or restore a second `draft` case for the same `subjectId`, the persistence boundary maps the partial-index failure to `CaseDraftUniquenessError` with the safe code `draft_case_already_exists`.
 - `createCaseWithAudit(...)` is transactional for the bundled SQLite and in-memory persistence implementations so a case row and its audit event commit or roll back together.
 - M16 does not wire that service into the live OpenWA listener or intake-completion runtime path yet.
-- `src/app/caseCreateFromIntake.ts` is the operator entrypoint for manual case creation. It loads env through the shared loader, requires an already migrated SQLite database, accepts `--subject <subjectId>`, and prints only `{ caseId, status, createdAt }`. Repeated runs for the same completed-intake subject return the existing draft case instead of creating another one.
+- `src/app/caseCreateFromIntake.ts` is the operator entrypoint for manual case creation. It loads env through the shared loader, requires an already migrated SQLite database, resolves operator-safe `subjectId` tokens through `SqliteBusinessPersistenceService`, and prints only `{ caseId, status, createdAt }`. Repeated runs for the same completed-intake subject return the existing draft case instead of creating another one.
 - `src/app/caseDoctor.ts` is the operator entrypoint for persistence consistency checks. It loads env through the shared loader, requires an already migrated SQLite database, checks only migration and case-count aggregates, and never prints raw rows, SQL text, database paths, message bodies, transcripts, secrets, or full phone numbers.
-- `src/app/intakeListReady.ts` is the operator entrypoint for completed-intake discovery. It loads env through the shared loader, requires an already migrated SQLite database, lists only consent-granted `intake_complete` subjects that already have all accepted intake fields, and prints only `{ subjectId, intakeState, updatedAt, fieldNamesPresent }`.
+- `src/app/intakeListReady.ts` is the operator entrypoint for completed-intake discovery. It loads env through the shared loader, requires an already migrated SQLite database, reads through `SqliteBusinessPersistenceService`, lists only consent-granted `intake_complete` subjects that already have all accepted intake fields, and prints only `{ subjectId, intakeState, updatedAt, fieldNamesPresent }`.
 - The `subjectId` printed by `npm run intake:list-ready` is an operator-safe token accepted by `npm run case:create-from-intake -- --subject <subjectId>`. It does not print the raw phone-derived subject identifier.
 
 ## SQLite Foundation
 
 - `DATABASE_URL` defaults to `file:./data/legalbot.sqlite`.
 - `DATABASE_MIGRATIONS_ENABLED` defaults to `true`.
+- `BUSINESS_PERSISTENCE_ENABLED` defaults to `true`.
 - `TECHNICAL_PERSISTENCE_ENABLED` defaults to `true`.
+- The minimal required runtime env remains `LAWYER_PHONE_E164`. Business persistence stays enabled by default and does not add a new required operator input.
 - Operators can run `npm run db:migrate` to apply the committed SQLite schema explicitly.
 - Operators can run `npm run db:status` to inspect applied and pending migration ids without dumping table contents.
 - Operators can run `npm run intake:list-ready` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
@@ -93,6 +100,7 @@ M23 makes the single-bot runtime default to SQLite-backed technical persistence 
 - `0011_normalize_intake_schema_for_identity_fields` upgrades intake state and field storage to the formal single-message identity flow and preserves only supported structured values in the new schema.
 - `npm run case:doctor` reports only aggregate counts: applied and pending migration counts, current `draft` case count, unique `draft` subject count, `duplicate_archived` count, duplicate-draft anomaly counts, and whether the committed draft-uniqueness index is present.
 - Technical runtime startup never runs migrations. When `TECHNICAL_PERSISTENCE_ENABLED=true`, startup requires `npm run db:migrate` to have been completed already or it fails safely with a clear error.
+- Live OpenWA runtime startup also fails safely before accepting client traffic when business persistence is disabled or when the business persistence boundary cannot be constructed.
 - Current tables:
   - `cases`
   - `consent_states`
@@ -146,6 +154,7 @@ M23 makes the single-bot runtime default to SQLite-backed technical persistence 
 - Live WhatsApp runtime writes never create or update cases automatically.
 - M13 live consent wiring never stores inbound message body text in consent state metadata or consent events.
 - M15 live intake wiring persists only accepted structured `firstName`, `lastName`, `birthDate`, `city`, and `problemSummary` values plus sanitized metadata after explicit `granted` consent.
+- M27 keeps business-state persistence explicit even when technical persistence is disabled. Turning off technical persistence must not disable or bypass consent, intake, or manual case-creation reads.
 - M16 case creation requires `granted` consent, `intake_complete`, and valid accepted identity fields plus `problemSummary`. It remains a separate application boundary with its own tests and review.
 
 ## File Location And Backups
@@ -171,9 +180,11 @@ M23 makes the single-bot runtime default to SQLite-backed technical persistence 
 ## OpenWA Runtime Behavior
 
 - `TECHNICAL_PERSISTENCE_ENABLED=false`
-  The smoke runtime skips SQLite-backed technical persistence and keeps only process-local dedupe plus the existing non-persistent runtime behavior.
+  The smoke runtime skips restart-safe technical dedupe and technical audit persistence, but business-state persistence still stays active and required for live client intake.
 - `TECHNICAL_PERSISTENCE_ENABLED=true`
   The smoke runtime keeps the existing in-memory duplicate guard as the first line of protection, then checks restart-safe dedupe through `PersistenceService.isMessageProcessed(messageId)` before the pipeline runs.
+- `BUSINESS_PERSISTENCE_ENABLED=false`
+  Live OpenWA smoke startup fails safely before listener registration. There is no silent fallback to in-memory consent or intake state in client mode.
 - Successful dispatches call `markMessageProcessed(messageId, ...)` after dispatch succeeds.
 - Sanitized audit events are appended for:
   - `openwa_runtime_started`

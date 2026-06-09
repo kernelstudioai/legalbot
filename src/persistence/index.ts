@@ -27,6 +27,15 @@ export type {
 export { intakeFieldNames, intakeStates } from "./intakeStore.ts";
 export { sanitizePersistenceMetadata } from "./metadataSanitizer.ts";
 export {
+  createBusinessPersistenceService,
+  createSqliteBusinessPersistenceService,
+  createSqliteBusinessPersistenceServiceFromPersistence,
+  type BusinessPersistenceService,
+  type BusinessReadyIntakeCandidate,
+  type SqliteBusinessPersistenceService
+} from "./businessPersistenceService.ts";
+export { isOperatorSubjectId, toOperatorSubjectId } from "./operatorSubjectId.ts";
+export {
   createInMemoryPersistenceService,
   createPersistenceService,
   createSqlitePersistenceService,

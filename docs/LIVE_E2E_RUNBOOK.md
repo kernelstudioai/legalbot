@@ -29,11 +29,14 @@ Safe defaults come from `src/config/env.ts`, including:
 - `OPENWA_STATUS_SERVER_ENABLED=true`
 - `OPENWA_STATUS_SERVER_HOST=127.0.0.1`
 - `OPENWA_STATUS_SERVER_PORT=3001`
+- `BUSINESS_PERSISTENCE_ENABLED=true`
 - `TECHNICAL_PERSISTENCE_ENABLED=true`
 - `DATABASE_URL=file:./data/legalbot.sqlite`
 - `DATABASE_MIGRATIONS_ENABLED=true`
 
 Set `OPENWA_BROWSER_EXECUTABLE_PATH` only when the local machine cannot safely discover Chrome or Chromium.
+
+Business persistence is required for live client intake. Technical persistence may be disabled for diagnostics, but consent, intake, `intake:list-ready`, and manual case creation still rely on the business persistence boundary.
 
 ## Local Direct Run
 
@@ -114,6 +117,15 @@ Set `OPENWA_BROWSER_EXECUTABLE_PATH` only when the local machine cannot safely d
    npm run case:doctor
    ```
 
+Validated M26 live flow summary:
+
+- `ciao` -> consent prompt
+- `Acconsento` -> identity prompt
+- one-message identity -> problem-summary prompt
+- problem summary -> `intake_complete`
+- `npm run intake:list-ready` returns only sanitized candidates
+- `npm run case:create-from-intake` remains the only draft-case creation path
+
 ## Docker Runtime
 
 The Docker baseline is for local and product-like development only. It is not the final VPS installer.
@@ -188,3 +200,4 @@ The Docker baseline is for local and product-like development only. It is not th
 - `npm run case:create-from-intake` is still the only case-draft creation path.
 - The runtime never creates cases automatically on intake completion.
 - The runtime and operator commands do not persist or print raw transcripts or raw inbound message bodies.
+- If business persistence is disabled or unavailable, startup must fail before the bot accepts live client messages.

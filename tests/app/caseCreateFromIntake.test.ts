@@ -7,6 +7,7 @@ import type { Logger } from "../../src/logging/logger.ts";
 import {
   createSqlitePersistenceService,
   type PersistenceCreateCaseWithAuditInput,
+  type SqliteBusinessPersistenceService,
   type SqlitePersistenceService
 } from "../../src/persistence/index.ts";
 import {
@@ -580,8 +581,10 @@ describe("manual case creation command", () => {
           problemSummary: "Structured summary"
         }
       }),
-      createCaseWithAudit
-    } as unknown as SqlitePersistenceService;
+      createCaseWithAudit,
+      listReadyIntakeCandidates: vi.fn().mockResolvedValue([]),
+      resolveReadyIntakeSubjectId: vi.fn().mockResolvedValue(null)
+    } as unknown as SqliteBusinessPersistenceService;
 
     const summary = await runCaseCreateFromIntakeCommand({
       argv: ["node", "src/app/caseCreateFromIntake.ts", "--subject", "subject-123"],
@@ -590,15 +593,8 @@ describe("manual case creation command", () => {
       },
       logger,
       stdout,
-      verifyMigrationsApplied: () => ({
-        appliedMigrationIds: [
-          "0001_create_cases",
-          "0009_harden_cases_schema",
-          "0010_enforce_draft_case_uniqueness"
-        ],
-        databasePath: "/tmp/legalbot.sqlite"
-      }),
-      createSqlitePersistenceServiceFactory: () => persistence,
+      verifyMigrationsApplied: () => undefined,
+      createSqliteBusinessPersistenceServiceFactory: () => persistence,
       createCaseCreationServiceFactory: ({ persistence: commandPersistence }) =>
         createCaseCreationService({
           persistence: commandPersistence,
