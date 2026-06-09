@@ -14,9 +14,10 @@ This runbook defines the operator workflow for a future Linux VPS deployment of 
 
 ## Target Shape
 
-- Target host: Linux VPS
-- Runtime: Node 22
-- Browser: Chrome or Chromium available on the host
+- Target host: Ubuntu 24.04.4 LTS VPS
+- Runtime: Node 22, validated with Node v22.22.3 installed through `nvm`
+- npm: validated with npm 10.9.8 from the same Node 22 `nvm` install
+- Browser: Chrome or Chromium available on the host, validated with `/snap/bin/chromium`
 - Database: SQLite at `data/legalbot.sqlite` by default
 - OpenWA session state: persisted under the ignored `openwa-session/` path
 - Operator commands: `npm run ops:preflight` before start and `npm run ops:post-start` after start
@@ -35,9 +36,32 @@ Do not store the real env file in the repo, and do not print or inspect its cont
 
 ## Real Linux Validation Status
 
-- Windows and Git Bash validation from earlier milestones is no longer treated as sufficient evidence for Linux apply mode.
-- This milestone adds a real Linux validation checklist and an explicit systemd provisioner, but this repository snapshot was not executed on an actual Linux VPS from this Codex session.
-- Treat the Linux/VPS apply flow as documented and statically validated until an operator runs it on a Linux host.
+- M32 was validated on a real Ubuntu 24.04.4 LTS VPS with systemd 255.
+- Validation host details:
+  - operator user `sayan` with `sudo`
+  - Node v22.22.3 via `nvm`
+  - npm 10.9.8 via `nvm`
+  - Chromium at `/snap/bin/chromium`
+- Validated commands:
+  - `npm ci` passed before installer changes
+  - `npm run typecheck` passed
+  - `npm test` passed with 32 files and 185 tests before this hardening pass
+  - `bash -n install.sh` passed
+  - `bash -n scripts/provision-systemd.sh` passed
+  - `./install.sh --dry-run` passed
+  - `npm ci --include=dev` passed
+  - `npm run db:migrate` passed with 11 migrations
+  - `npm run ops:preflight` returned `ready`
+  - `./scripts/provision-systemd.sh --dry-run` passed
+  - `sudo ./scripts/provision-systemd.sh --install` passed
+  - `./scripts/provision-systemd.sh --status` showed the unit loaded, inactive, and disabled
+  - `sudo ./scripts/provision-systemd.sh --uninstall` passed
+- Root causes found on the VPS:
+  - the repo was not tracking the executable bit for `install.sh` and `scripts/provision-systemd.sh`
+  - `install.sh` sourced `.env`, inherited `NODE_ENV=production`, and then ran plain `npm ci`, which omitted `patch-package`
+  - the provisioner hardcoded `/usr/bin/npm`, which did not match the validated Node 22 `nvm` runtime
+  - the provisioner defaulted the service user to `legalbot`, while the validated operator user was `sayan`
+  - the provisioner defaulted `EnvironmentFile=` to `/etc/legalbot/legalbot.env` without clearly matching the project-local `.env` created by `install.sh`
 
 ## Real Linux Validation Checklist
 
@@ -48,14 +72,14 @@ Run these on a real Linux VPS or Linux VM when available:
 ./install.sh
 npm run ops:preflight
 ./scripts/provision-systemd.sh --dry-run
-./scripts/provision-systemd.sh --install --project-root /srv/legalbot --env-file /etc/legalbot/legalbot.env --service-user legalbot
+sudo ./scripts/provision-systemd.sh --install --project-root /srv/legalbot --user "$USER"
 systemctl status legalbot-openwa.service
 ```
 
 Only if the operator explicitly wants reversibility testing:
 
 ```bash
-./scripts/provision-systemd.sh --uninstall --project-root /srv/legalbot --env-file /etc/legalbot/legalbot.env --service-user legalbot
+sudo ./scripts/provision-systemd.sh --uninstall --project-root /srv/legalbot --user "$USER"
 ```
 
 Do not start or enable the service during validation unless the operator explicitly approves that step.
@@ -84,7 +108,7 @@ The installer is conservative and idempotent. It:
 - creates `.env` only when it is missing, using a prompt for `LAWYER_PHONE_E164` plus safe non-secret defaults
 - never prints existing `.env` contents or secret values
 - asks before appending missing `.env` keys when `.env` already exists
-- runs `npm ci`
+- runs `npm ci --include=dev` so repo tooling such as `patch-package` remains available even when `.env` sets `NODE_ENV=production`
 - runs `npm run db:migrate`
 - runs `npm run ops:preflight`
 - asks before starting `npm run smoke:openwa`
@@ -93,6 +117,7 @@ The installer is conservative and idempotent. It:
 The installer does not:
 
 - install a real systemd service by itself
+- install or enable a systemd unit automatically
 - enable multi-bot orchestration
 - delete `data/`, `backups/`, `openwa-session/`, `logs/`, or SQLite files
 - print QR data, session data, `.env` contents, or full phone numbers
@@ -229,10 +254,10 @@ The systemd provisioner is separate from `install.sh` and is single-bot only. It
 Usage:
 
 ```bash
-./scripts/provision-systemd.sh --dry-run --project-root /srv/legalbot --env-file /etc/legalbot/legalbot.env --service-user legalbot
-./scripts/provision-systemd.sh --status --project-root /srv/legalbot --env-file /etc/legalbot/legalbot.env --service-user legalbot
-sudo ./scripts/provision-systemd.sh --install --project-root /srv/legalbot --env-file /etc/legalbot/legalbot.env --service-user legalbot
-sudo ./scripts/provision-systemd.sh --uninstall --project-root /srv/legalbot --env-file /etc/legalbot/legalbot.env --service-user legalbot
+./scripts/provision-systemd.sh --dry-run --project-root /srv/legalbot
+./scripts/provision-systemd.sh --status --project-root /srv/legalbot
+sudo ./scripts/provision-systemd.sh --install --project-root /srv/legalbot --user "$USER"
+sudo ./scripts/provision-systemd.sh --uninstall --project-root /srv/legalbot --user "$USER"
 ```
 
 Behavior by mode:
@@ -248,6 +273,14 @@ Explicit service activation remains opt-in:
 - `--install` alone does not enable the service.
 - `--install --start` starts the service only when the operator explicitly requests it.
 - `--install --enable` enables the service only when the operator explicitly requests it.
+
+Default resolution behavior:
+
+- `--user` defaults to the current non-root operator account. Under `sudo`, the provisioner prefers `SUDO_USER` instead of `root`.
+- `--env-file` defaults to the project-local `.env` when it exists. If the repo has no `.env`, it falls back to `/etc/legalbot/legalbot.env`.
+- `--npm-path` defaults to `LEGALBOT_NPM_PATH` when exported, otherwise the provisioner uses `command -v npm` and writes that absolute path into `ExecStart=`.
+- The provisioner validates that the selected npm path is absolute, exists, and is executable before writing the unit.
+- The provisioner never copies `.env` into `/etc`. If the selected env file does not exist yet, install warns clearly and leaves service start as a separate manual step.
 
 ## Session Persistence Expectations
 
@@ -267,10 +300,10 @@ After=network.target
 
 [Service]
 Type=simple
-User=legalbot
+User=sayan
 WorkingDirectory=/srv/legalbot
-EnvironmentFile=/etc/legalbot/legalbot.env
-ExecStart=/usr/bin/npm run smoke:openwa
+EnvironmentFile=/srv/legalbot/.env
+ExecStart=/home/sayan/.nvm/versions/node/v22.22.3/bin/npm run smoke:openwa
 Restart=always
 RestartSec=10
 
@@ -281,9 +314,10 @@ WantedBy=multi-user.target
 Operator notes:
 
 - Keep the VPS on Node 22.
-- Keep Chrome or Chromium installed and available to OpenWA.
-- Keep the env file outside the repo.
+- Keep Chrome or Chromium installed and available to OpenWA. On the validated VPS, `/snap/bin/chromium` was detected successfully.
 - Keep secrets only in the env file, never in the unit.
+- Prefer the project-local `.env` generated by `./install.sh` unless you intentionally manage a separate external env file.
+- If Node 22 is managed by `nvm`, either run the provisioner from that shell so it discovers the correct npm path, or pass `--npm-path /absolute/path/to/npm`.
 - Run `npm run ops:preflight` before `systemctl start` or `systemctl restart`.
 - Run `npm run ops:post-start` after the service reaches active state.
 
@@ -321,10 +355,3 @@ After `./install.sh` completes, the operator flow remains:
 3. `npm run ops:post-start` after the runtime is up
 4. `./scripts/provision-systemd.sh --dry-run` when the operator wants to review systemd provisioning
 5. `OPS_POST_START_MODE=docker npm run ops:post-start` only for Docker-mode troubleshooting
-
-## Current Limits
-
-- No dashboard operator surface yet.
-- No multi-bot process model yet.
-- No automated backup retention, restore verification, or encryption at rest yet.
-- No real Linux VPS execution evidence was captured from this Codex session.

@@ -128,11 +128,13 @@ describe("docker runtime files", () => {
     expect(vpsRunbook).toContain("Chrome or Chromium");
     expect(vpsRunbook).toContain("npm run ops:preflight");
     expect(vpsRunbook).toContain("npm run ops:post-start");
-    expect(vpsRunbook).toContain("ExecStart=/usr/bin/npm run smoke:openwa");
+    expect(vpsRunbook).toContain("ExecStart=/home/sayan/.nvm/versions/node/v22.22.3/bin/npm run smoke:openwa");
+    expect(vpsRunbook).toContain("npm ci --include=dev");
+    expect(vpsRunbook).toContain("command -v npm");
     expect(vpsRunbook).toContain("./scripts/provision-systemd.sh --install");
     expect(vpsRunbook).toContain("legalbot-openwa.service");
     expect(vpsRunbook).toContain("No multi-bot runtime yet.");
     expect(securityDoc).toContain("Systemd unit files must not contain secrets.");
-    expect(securityDoc).toContain("Systemd env files must stay outside the repo");
+    expect(securityDoc).toContain("must never print env-file contents or copy `.env` into `/etc` automatically");
   });
 });

@@ -17,11 +17,17 @@ describe("install.sh", () => {
   });
 
   it("reuses the existing operator checks without starting automatically", () => {
-    expect(script).toContain("npm ci");
+    expect(script).toContain("npm ci --include=dev");
     expect(script).toContain("npm run db:migrate");
     expect(script).toContain("npm run ops:preflight");
     expect(script).toContain("Start the bot now with 'npm run smoke:openwa'?");
     expect(script).toContain("./scripts/provision-systemd.sh --dry-run");
     expect(script).toContain("Systemd service installation stays explicit and separate from this installer.");
+  });
+
+  it("keeps repo tooling available even when NODE_ENV is production", () => {
+    expect(script).not.toContain("npm audit fix");
+    expect(script).toContain("source \"$ENV_FILE\"");
+    expect(script).toContain("npm ci --include=dev");
   });
 });

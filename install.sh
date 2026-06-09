@@ -396,7 +396,7 @@ assert_runtime_env() {
 
 run_npm_ci() {
   load_env_file
-  run_cmd npm ci
+  run_cmd npm ci --include=dev
 }
 
 run_db_migrate() {

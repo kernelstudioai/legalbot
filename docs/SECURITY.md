@@ -4,8 +4,9 @@
 
 - Do not read `.env`, secrets, tokens, browser sessions, or WhatsApp session files during foundation work.
 - `./install.sh` may load `.env` only to pass existing values into `npm run db:migrate` and `npm run ops:preflight`. It must never print `.env` contents, secret values, QR payloads, browser profile paths, session paths, or full phone numbers while doing so.
+- `./install.sh` must use `npm ci --include=dev` so operator tooling such as `patch-package` remains available even when `.env` sets `NODE_ENV=production`. It must not run `npm audit fix`.
 - `./install.sh` may create `.env` only when it is missing, using a guided prompt for `LAWYER_PHONE_E164` plus non-secret runtime defaults. If `.env` already exists, the installer must ask before appending missing keys and must not display the file contents.
-- Systemd env files must stay outside the repo, for example under `/etc/legalbot/legalbot.env`.
+- `scripts/provision-systemd.sh` may default `EnvironmentFile=` to the project-local `.env` when it exists, or use an explicit `--env-file` override such as `/etc/legalbot/legalbot.env`. It must never print env-file contents or copy `.env` into `/etc` automatically.
 - Systemd unit files must not contain secrets. Keep secrets only in the external env file referenced by `EnvironmentFile=`.
 - Sanitize free-text inbound content before logging or downstream planning.
 - Keep transport metadata minimal and typed.
@@ -50,7 +51,8 @@
 - `ops:preflight` must treat missing Node 22, pending migrations, disabled business persistence, or missing git-ignore coverage for runtime artifact directories as blocking operator failures.
 - `ops:post-start` may report that the process is alive while WhatsApp auth is still pending, but it must not expose QR payloads or sensitive error text while doing so.
 - `./install.sh` must not install a real systemd service by itself, must not start the bot without explicit operator approval in the prompt flow, and must not remove runtime data, backup, session, log, or database files.
-- `scripts/provision-systemd.sh` must remain single-bot only, must require explicit `--install` or `--uninstall` operator action for systemd mutation, and must not start or enable the service unless the operator explicitly passes `--start` or `--enable`.
+- `scripts/provision-systemd.sh` must remain single-bot only, must require explicit `--install` or `--uninstall` operator action for systemd mutation, must resolve a Node 22-compatible absolute npm path instead of hardcoding `/usr/bin/npm`, and must not start or enable the service unless the operator explicitly passes `--start` or `--enable`.
+- `scripts/provision-systemd.sh` should default the service user to the current non-root operator account and allow explicit override with `--user` or `--service-user`.
 - `scripts/provision-systemd.sh` uninstall must remove only the unit file and must leave env files, runtime data, backups, sessions, logs, and database files untouched.
 - Live OpenWA listener and client-intake runtime code must not call case creation automatically in M16 or M17.
 - Rejected intake replies and ambiguous consent replies must not be persisted.

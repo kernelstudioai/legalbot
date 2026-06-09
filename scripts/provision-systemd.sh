@@ -6,9 +6,7 @@ readonly SCRIPT_NAME="$(basename "$0")"
 readonly DEFAULT_PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly SERVICE_NAME="legalbot-openwa.service"
 readonly DEFAULT_UNIT_PATH="/etc/systemd/system/$SERVICE_NAME"
-readonly DEFAULT_ENV_FILE="/etc/legalbot/legalbot.env"
-readonly DEFAULT_SERVICE_USER="legalbot"
-readonly DEFAULT_EXEC_START="/usr/bin/npm run smoke:openwa"
+readonly DEFAULT_ENV_FILE_FALLBACK="/etc/legalbot/legalbot.env"
 
 MODE=""
 DRY_RUN=0
@@ -16,9 +14,10 @@ START_SERVICE=0
 ENABLE_SERVICE=0
 PROJECT_ROOT="$DEFAULT_PROJECT_ROOT"
 UNIT_PATH="$DEFAULT_UNIT_PATH"
-ENV_FILE_PATH="$DEFAULT_ENV_FILE"
-SERVICE_USER="$DEFAULT_SERVICE_USER"
-EXEC_START="$DEFAULT_EXEC_START"
+ENV_FILE_PATH=""
+SERVICE_USER=""
+NPM_PATH="${LEGALBOT_NPM_PATH:-}"
+EXEC_START=""
 
 usage() {
   cat <<'EOF'
@@ -36,9 +35,10 @@ Required mode:
 
 Options:
   --project-root PATH   WorkingDirectory for the unit. Default: repo root.
-  --env-file PATH       External env file path. Default: /etc/legalbot/legalbot.env
-  --service-user USER   User for the unit. Default: legalbot
-  --exec-start CMD      ExecStart command. Default: /usr/bin/npm run smoke:openwa
+  --env-file PATH       Environment file path. Default: project .env when present, else /etc/legalbot/legalbot.env
+  --user USER           User for the unit. Default: current non-root operator user
+  --service-user USER   Alias for --user.
+  --npm-path PATH       Absolute npm path for ExecStart. Default: LEGALBOT_NPM_PATH or command -v npm
   --start               With --install only, start the service after install.
   --enable              With --install only, enable the service after install.
   -h, --help            Show this help.
@@ -67,6 +67,15 @@ run_cmd() {
   "$@"
 }
 
+current_operator_user() {
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    printf '%s\n' "$SUDO_USER"
+    return 0
+  fi
+
+  id -un
+}
+
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -90,14 +99,14 @@ parse_args() {
         ENV_FILE_PATH="$2"
         shift 2
         ;;
-      --service-user)
-        [[ $# -ge 2 ]] || fail "--service-user requires a value."
+      --user|--service-user)
+        [[ $# -ge 2 ]] || fail "$1 requires a value."
         SERVICE_USER="$2"
         shift 2
         ;;
-      --exec-start)
-        [[ $# -ge 2 ]] || fail "--exec-start requires a value."
-        EXEC_START="$2"
+      --npm-path)
+        [[ $# -ge 2 ]] || fail "--npm-path requires a value."
+        NPM_PATH="$2"
         shift 2
         ;;
       --start)
@@ -147,6 +156,53 @@ require_root_for_mutation() {
   fi
 }
 
+resolve_env_file_path() {
+  if [[ -n "$ENV_FILE_PATH" ]]; then
+    return 0
+  fi
+
+  if [[ -f "$PROJECT_ROOT/.env" ]]; then
+    ENV_FILE_PATH="$PROJECT_ROOT/.env"
+    return 0
+  fi
+
+  ENV_FILE_PATH="$DEFAULT_ENV_FILE_FALLBACK"
+}
+
+resolve_service_user() {
+  if [[ -n "$SERVICE_USER" ]]; then
+    return 0
+  fi
+
+  SERVICE_USER="$(current_operator_user)"
+}
+
+resolve_npm_path() {
+  local discovered_path=""
+
+  if [[ -z "$NPM_PATH" ]]; then
+    discovered_path="$(command -v npm 2>/dev/null || true)"
+    if [[ -z "$discovered_path" ]]; then
+      fail "npm was not found. Install Node.js 22 and npm before provisioning systemd."
+    fi
+    NPM_PATH="$discovered_path"
+  fi
+
+  if [[ "$NPM_PATH" != /* ]]; then
+    fail "--npm-path must be an absolute path. Found: $NPM_PATH"
+  fi
+
+  if [[ ! -e "$NPM_PATH" ]]; then
+    fail "Selected npm path does not exist: $NPM_PATH"
+  fi
+
+  if [[ ! -x "$NPM_PATH" ]]; then
+    fail "Selected npm path is not executable: $NPM_PATH"
+  fi
+
+  EXEC_START="$NPM_PATH run smoke:openwa"
+}
+
 validate_inputs() {
   if [[ "$PROJECT_ROOT" != /* ]]; then
     fail "--project-root must be an absolute path."
@@ -165,11 +221,15 @@ validate_inputs() {
   fi
 
   if [[ -z "$SERVICE_USER" ]]; then
-    fail "--service-user must not be empty."
+    fail "--user must not be empty."
+  fi
+
+  if [[ -z "$NPM_PATH" ]]; then
+    fail "npm path resolution failed."
   fi
 
   if [[ -z "$EXEC_START" ]]; then
-    fail "--exec-start must not be empty."
+    fail "ExecStart resolution failed."
   fi
 }
 
@@ -205,8 +265,9 @@ print_mode_summary() {
 install_unit() {
   local tmp_unit
 
-  if [[ ! -x /usr/bin/npm ]]; then
-    warn "/usr/bin/npm was not found. The documented ExecStart expects Node/npm to be installed there."
+  if [[ ! -f "$ENV_FILE_PATH" ]]; then
+    warn "Environment file not found yet: $ENV_FILE_PATH"
+    warn "Install will still write the unit, but manual start will fail until the env file exists."
   fi
 
   log "Recommended before service start: npm run ops:preflight"
@@ -307,6 +368,9 @@ main() {
   parse_args "$@"
   require_linux
   require_systemctl
+  resolve_env_file_path
+  resolve_service_user
+  resolve_npm_path
   validate_inputs
   require_root_for_mutation
   print_mode_summary
