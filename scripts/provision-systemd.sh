@@ -177,11 +177,24 @@ resolve_service_user() {
   SERVICE_USER="$(current_operator_user)"
 }
 
-resolve_npm_path() {
+discover_npm_path() {
   local discovered_path=""
 
-  if [[ -z "$NPM_PATH" ]]; then
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" && "$(id -u)" -eq 0 ]]; then
+    discovered_path="$(su - "$SUDO_USER" -c 'command -v npm' 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$discovered_path" ]]; then
     discovered_path="$(command -v npm 2>/dev/null || true)"
+  fi
+
+  printf '%s\n' "$discovered_path"
+}
+
+resolve_npm_path() {
+  if [[ -z "$NPM_PATH" ]]; then
+    local discovered_path=""
+    discovered_path="$(discover_npm_path)"
     if [[ -z "$discovered_path" ]]; then
       fail "npm was not found. Install Node.js 22 and npm before provisioning systemd."
     fi

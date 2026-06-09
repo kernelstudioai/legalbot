@@ -24,6 +24,7 @@ describe("scripts/provision-systemd.sh", () => {
     expect(script).toContain("LEGALBOT_NPM_PATH");
     expect(script).toContain("command -v npm");
     expect(script).toContain("current_operator_user");
+    expect(script).toContain("su - \"$SUDO_USER\" -c 'command -v npm'");
     expect(script).toContain("PROJECT_ROOT/.env");
     expect(script).toContain("npm run ops:preflight");
     expect(script).toContain("npm run ops:post-start");
