@@ -17,6 +17,8 @@
     "docker:diagnose": "node --experimental-strip-types src/app/dockerDiagnose.ts",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs --tail=100 -f legalbot",
+    "ops:post-start": "node --experimental-strip-types src/app/opsPostStart.ts",
+    "ops:preflight": "node --experimental-strip-types src/app/opsPreflight.ts",
     "docker:status": "docker compose ps",
     "docker:up": "docker compose up -d",
     "intake:list-ready": "node --experimental-strip-types src/app/intakeListReady.ts",

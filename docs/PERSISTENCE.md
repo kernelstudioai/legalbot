@@ -34,6 +34,8 @@ M27 splits live business-state persistence from technical runtime persistence ex
 
 M28 adds operator-safe business backup/check tooling. `npm run business:check` reports only aggregate business-state consistency counts, and `npm run business:backup` creates timestamped SQLite backups under the ignored `backups/` directory without dumping rows or secrets.
 
+M29 adds operator-safe VPS/systemd startup workflow commands. `npm run ops:preflight` aggregates Node/runtime/migration/business/case/git-ignore readiness into sanitized JSON before start, and `npm run ops:post-start` aggregates sanitized readiness probes after start without exposing secrets, QR data, session state, transcripts, or raw rows.
+
 ## Interfaces
 
 - `CaseStore`: minimal create/get/update support for case records built from accepted structured intake data only.
@@ -96,6 +98,8 @@ M28 adds operator-safe business backup/check tooling. `npm run business:check` r
 - Operators can run `npm run case:doctor` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
 - Operators can run `npm run business:check` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
 - Operators can run `npm run business:backup` only after `npm run db:migrate` has completed for the target `DATABASE_URL`.
+- Operators can run `npm run ops:preflight` before `npm run smoke:openwa` to confirm Node 22, explicit migration policy, migration readiness, business/case health, and repo hygiene.
+- Operators can run `npm run ops:post-start` after `npm run smoke:openwa` to check the sanitized `/health`, `/ready`, and `/status` surfaces.
 - The SQLite migration runner is explicit and testable through `runSqliteMigrations(...)`, `getSqliteMigrationStatus(...)`, and `SqliteMigrationRunner`.
 - The local direct smoke runtime defaults to `OPENWA_STATUS_SERVER_ENABLED=true` on `127.0.0.1:3001`.
 - The Docker baseline overrides only container-specific values: `OPENWA_STATUS_SERVER_HOST=0.0.0.0`, `OPENWA_HEADLESS=true`, and `OPENWA_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium`.
@@ -171,6 +175,8 @@ M28 adds operator-safe business backup/check tooling. `npm run business:check` r
 - backups/ remains git-ignored.
 - `npm run business:backup` creates a timestamped SQLite copy under `backups/` and prints only `{ status, sourceDatabase, backupPath, createdAt, sizeBytes, migrationCount }`.
 - `npm run business:check` prints only aggregate migration, consent, intake, completed-intake, and draft-case counts plus sanitized consistency error codes.
+- `npm run ops:preflight` prints only sanitized aggregate startup readiness data and never prints `.env` contents, database paths outside the configured relative URL, QR data, session data, raw rows, message bodies, transcripts, or full phone numbers.
+- `npm run ops:post-start` prints only sanitized readiness data and never prints QR contents, session paths, browser paths, raw transport errors, message bodies, transcripts, or full phone numbers.
 - Backups remain an operator concern. M28 does not add automated backup, encryption, restore verification, or retention jobs, so any future production use must define those controls before enabling real writes.
 
 ## Migration Control
@@ -182,7 +188,9 @@ M28 adds operator-safe business backup/check tooling. `npm run business:check` r
 - `npm run business:backup` exits `0` only after business persistence is enabled, migrations are fully applied, and the timestamped SQLite backup file is written successfully.
 - `npm run intake:list-ready` fails safely when migrations are missing or incomplete, exits `0` on success, exits nonzero on failure, and prints only operator-safe completed-intake metadata.
 - `npm run case:doctor` fails safely when migrations are missing or incomplete, exits `0` only when the migrated database is healthy, and exits nonzero when migration readiness or draft-case anomalies require operator action.
-- `npm run db:migrate`, `npm run db:status`, `npm run business:check`, `npm run business:backup`, `npm run intake:list-ready`, and `npm run case:doctor` remain direct Node 22 `--experimental-strip-types` entrypoints.
+- `npm run ops:preflight` exits `0` only when Node 22, runtime env, migration readiness, business/case checks, and git-ignore hygiene are all safe for startup.
+- `npm run ops:post-start` exits `0` only when the status surface reports `app_ready`. Pending WhatsApp auth remains nonzero in this milestone.
+- `npm run db:migrate`, `npm run db:status`, `npm run business:check`, `npm run business:backup`, `npm run intake:list-ready`, `npm run case:doctor`, `npm run ops:preflight`, and `npm run ops:post-start` remain direct Node 22 `--experimental-strip-types` entrypoints.
 - Existing SQLite databases created before M17 can be upgraded in place. The cases-table hardening migration preserves minimal case metadata, normalizes column names to the committed snake_case schema, and drops unsupported legacy columns.
 - Existing SQLite databases created before M20 can be upgraded in place. Duplicate `draft` rows are remediated deterministically by `created_at ASC, case_id ASC`, and future duplicate `draft` inserts for the same `subjectId` fail at the SQLite schema boundary.
 - The migration boundary is intentionally separate from OpenWA startup so transport smoke behavior stays unchanged when technical persistence is disabled.

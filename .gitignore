@@ -18,6 +18,7 @@ sessions/
 openwa-session/
 data/
 logs/
+tmp/
 backups/
 *.data.json
 *.node-persist*

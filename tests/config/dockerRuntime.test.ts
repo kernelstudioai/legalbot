@@ -40,6 +40,12 @@ describe("docker runtime files", () => {
     expect(packageJson.scripts["docker:diagnose"]).toBe(
       "node --experimental-strip-types src/app/dockerDiagnose.ts"
     );
+    expect(packageJson.scripts["ops:preflight"]).toBe(
+      "node --experimental-strip-types src/app/opsPreflight.ts"
+    );
+    expect(packageJson.scripts["ops:post-start"]).toBe(
+      "node --experimental-strip-types src/app/opsPostStart.ts"
+    );
     expect(packageJson.scripts["docker:up"]).toBe("docker compose up -d");
     expect(packageJson.scripts["docker:down"]).toBe("docker compose down");
     expect(packageJson.scripts["docker:status"]).toBe("docker compose ps");
@@ -92,6 +98,7 @@ describe("docker runtime files", () => {
     const runbook = readRepoFile("docs/LIVE_E2E_RUNBOOK.md");
     const persistenceDoc = readRepoFile("docs/PERSISTENCE.md");
     const securityDoc = readRepoFile("docs/SECURITY.md");
+    const vpsRunbook = readRepoFile("docs/VPS_SYSTEMD_RUNBOOK.md");
 
     expect(dockerDoc).toContain("No automatic case creation.");
     expect(dockerDoc).toContain("No transcript or raw message-body persistence.");
@@ -103,6 +110,7 @@ describe("docker runtime files", () => {
     expect(dockerDoc).toContain("ldd /usr/lib/chromium/chromium");
     expect(dockerDoc).toContain("`/health` means the process and status server are alive.");
     expect(dockerDoc).toContain("`/ready` may stay 503 until QR pairing or session authentication completes.");
+    expect(dockerDoc).toContain("OPS_POST_START_MODE=docker npm run ops:post-start");
     expect(dockerDoc).toContain("npm run docker:diagnose");
     expect(dockerDoc).toContain("host access can fail even when in-container probes succeed.");
     expect(runbook).toContain("No automatic case creation.");
@@ -111,8 +119,16 @@ describe("docker runtime files", () => {
     expect(runbook).toContain("npm run business:check");
     expect(persistenceDoc).toContain("npm run business:backup");
     expect(persistenceDoc).toContain("npm run business:check");
+    expect(persistenceDoc).toContain("npm run ops:preflight");
+    expect(persistenceDoc).toContain("npm run ops:post-start");
     expect(persistenceDoc).toContain("backups/ remains git-ignored");
     expect(securityDoc).toContain("Backups may contain personal data.");
     expect(securityDoc).toContain("Backups must not be committed.");
+    expect(vpsRunbook).toContain("Node 22");
+    expect(vpsRunbook).toContain("Chrome or Chromium");
+    expect(vpsRunbook).toContain("npm run ops:preflight");
+    expect(vpsRunbook).toContain("npm run ops:post-start");
+    expect(vpsRunbook).toContain("ExecStart=/usr/bin/npm run smoke:openwa");
+    expect(vpsRunbook).toContain("No multi-bot runtime yet.");
   });
 });

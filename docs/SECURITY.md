@@ -19,6 +19,7 @@
 - M20 adds schema-level enforcement for the same manual-only boundary. The SQLite migration may remediate duplicate historical `draft` rows only by changing later duplicates to `duplicate_archived`; it must not dump table contents, persist transcripts, or enable automatic live OpenWA case creation.
 - M21 adds sanitized operator hardening for that same boundary. SQLite duplicate-draft violations must map to a safe application error, and `npm run case:doctor` must report only migration and case-count aggregates plus remediation guidance, never SQL text, database paths, raw rows, message bodies, transcripts, or secrets.
 - M28 adds operator backup/check tooling. `npm run business:check` must print only aggregate counts and sanitized consistency codes, and `npm run business:backup` must not print secrets, raw rows, full phone numbers, subject ids, transcripts, or message bodies.
+- M29 adds startup/post-start operator checks. `npm run ops:preflight` and `npm run ops:post-start` must print sanitized JSON only and must not expose `.env` contents, QR data, session data, browser profile paths, raw message bodies, transcripts, raw rows, or full phone numbers.
 - Consent persistence uses a generic `subjectId` string and does not require phone-number semantics.
 - Live OpenWA transport stays transport-only even though the application layer can now inject consent and intake persistence into the client runtime.
 
@@ -42,6 +43,8 @@
 - Backups may contain personal data.
 - Backups must not be committed.
 - Operators must handle backups with explicit retention, storage, and deletion discipline because this phase does not add encryption at rest or automated retention controls.
+- `ops:preflight` must treat missing Node 22, pending migrations, disabled business persistence, or missing git-ignore coverage for runtime artifact directories as blocking operator failures.
+- `ops:post-start` may report that the process is alive while WhatsApp auth is still pending, but it must not expose QR payloads or sensitive error text while doing so.
 - Live OpenWA listener and client-intake runtime code must not call case creation automatically in M16 or M17.
 - Rejected intake replies and ambiguous consent replies must not be persisted.
 - The `subjectId` for consent state is the canonical sender/chat id. Any stored metadata must avoid restating the full phone number and must remain sanitized through the persistence boundary.

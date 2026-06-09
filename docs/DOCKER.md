@@ -61,6 +61,7 @@ docker compose ps
 curl http://127.0.0.1:3001/health
 curl http://127.0.0.1:3001/ready
 curl http://127.0.0.1:3001/status
+OPS_POST_START_MODE=docker npm run ops:post-start
 npm run docker:diagnose
 ```
 
@@ -95,6 +96,7 @@ docker compose down --volumes
 - `/ready` may stay 503 until QR pairing or session authentication completes.
 - Docker health is based on `/health`, not `/ready`, so the container can become healthy before WhatsApp is paired.
 - `npm run docker:diagnose` compares host probes against in-container probes and prints a sanitized JSON summary instead of raw logs or session details.
+- `OPS_POST_START_MODE=docker npm run ops:post-start` reuses the same Docker-oriented diagnosis model when operators want one post-start command across direct and containerized flows.
 - `npm run docker:diagnose` is intended to distinguish:
   - container not running
   - container unhealthy
