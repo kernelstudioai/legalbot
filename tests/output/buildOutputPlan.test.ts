@@ -31,7 +31,7 @@ describe("buildOutputPlan", () => {
       {
         kind: "text",
         to: "client-123@c.us",
-        body: expect.stringContaining("Acconsento al trattamento dei miei dati personali")
+        body: expect.stringContaining("Risponda:\n- Acconsento")
       }
     ]);
   });
@@ -56,11 +56,11 @@ describe("buildOutputPlan", () => {
       },
       runtimeDecision: {
         actor: "client",
-        action: "intake_ask_name",
+        action: "intake_ask_identity",
         rationale: "consent granted"
       }
     });
 
-    expect(plan.messages[0]?.body).toContain("nome e cognome");
+    expect(plan.messages[0]?.body).toContain("data di nascita");
   });
 });

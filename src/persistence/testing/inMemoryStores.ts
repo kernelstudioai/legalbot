@@ -203,7 +203,13 @@ export class InMemoryConsentStore implements ConsentStore {
   }
 }
 
-const acceptedIntakeFields = new Set<IntakeFieldName>(["name", "problemSummary"]);
+const acceptedIntakeFields = new Set<IntakeFieldName>([
+  "firstName",
+  "lastName",
+  "birthDate",
+  "city",
+  "problemSummary"
+]);
 
 export class InMemoryIntakeStore implements IntakeStore {
   private readonly intakeStates = new Map<string, IntakeStateRecord>();

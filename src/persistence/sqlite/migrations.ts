@@ -52,6 +52,20 @@ const getTableColumns = (database: DatabaseSync, tableName: string): string[] =>
   return rows.map((row) => row.name);
 };
 
+const getTableDefinition = (database: DatabaseSync, tableName: string): string | null => {
+  const row = database
+    .prepare(
+      `
+        SELECT sql
+        FROM sqlite_master
+        WHERE type = 'table' AND name = ?
+      `
+    )
+    .get(tableName) as { sql: string | null } | undefined;
+
+  return row?.sql ?? null;
+};
+
 const selectTextExpression = (
   availableColumns: string[],
   candidates: string[],
@@ -147,6 +161,216 @@ const createDraftCaseUniquenessIndex = (database: DatabaseSync): void => {
   `);
 };
 
+const normalizeLegacyNameField = (
+  database: DatabaseSync,
+  subjectId: string,
+  rawName: string
+): void => {
+  const trimmed = rawName.trim().replace(/\s+/g, " ");
+
+  if (trimmed.length === 0) {
+    return;
+  }
+
+  const parts = trimmed.split(" ");
+  const firstName = parts[0];
+  const lastName = parts.slice(1).join(" ");
+
+  if (!firstName) {
+    return;
+  }
+
+  database
+    .prepare(
+      `
+        INSERT INTO intake_fields__m26_new (
+          subject_id,
+          field_name,
+          field_value,
+          updated_at,
+          metadata_json
+        )
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP, NULL)
+      `
+    )
+    .run(subjectId, "firstName", firstName);
+
+  if (lastName.length > 0) {
+    database
+      .prepare(
+        `
+          INSERT INTO intake_fields__m26_new (
+            subject_id,
+            field_name,
+            field_value,
+            updated_at,
+            metadata_json
+          )
+          VALUES (?, ?, ?, CURRENT_TIMESTAMP, NULL)
+        `
+      )
+      .run(subjectId, "lastName", lastName);
+  }
+};
+
+const normalizeIntakeSchema = (database: DatabaseSync): void => {
+  if (!tableExists(database, "intake_states")) {
+    return;
+  }
+
+  const intakeStatesDefinition = getTableDefinition(database, "intake_states");
+  const intakeFieldsDefinition = getTableDefinition(database, "intake_fields");
+  const intakeEventsDefinition = getTableDefinition(database, "intake_events");
+  const alreadyNormalized =
+    intakeStatesDefinition?.includes("asking_identity") === true &&
+    intakeFieldsDefinition?.includes("firstName") === true &&
+    intakeEventsDefinition?.includes("firstName") === true;
+
+  if (alreadyNormalized) {
+    return;
+  }
+
+  database.exec("ALTER TABLE intake_states RENAME TO intake_states__m26_legacy;");
+  database.exec(`
+    CREATE TABLE intake_states__m26_new (
+      subject_id TEXT PRIMARY KEY,
+      intake_state TEXT NOT NULL CHECK (intake_state IN ('not_started', 'asking_identity', 'asking_problem_summary', 'intake_complete')),
+      updated_at TEXT NOT NULL,
+      metadata_json TEXT
+    );
+  `);
+
+  database.exec(`
+    INSERT INTO intake_states__m26_new (
+      subject_id,
+      intake_state,
+      updated_at,
+      metadata_json
+    )
+    SELECT
+      subject_id,
+      CASE intake_state
+        WHEN 'asking_name' THEN 'asking_identity'
+        WHEN 'intake_complete' THEN 'asking_identity'
+        ELSE intake_state
+      END,
+      updated_at,
+      metadata_json
+    FROM intake_states__m26_legacy;
+  `);
+  database.exec("DROP TABLE intake_states__m26_legacy;");
+  database.exec("ALTER TABLE intake_states__m26_new RENAME TO intake_states;");
+
+  if (tableExists(database, "intake_fields")) {
+    database.exec("ALTER TABLE intake_fields RENAME TO intake_fields__m26_legacy;");
+    database.exec(`
+      CREATE TABLE intake_fields__m26_new (
+        subject_id TEXT NOT NULL,
+        field_name TEXT NOT NULL CHECK (field_name IN ('firstName', 'lastName', 'birthDate', 'city', 'problemSummary')),
+        field_value TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        metadata_json TEXT,
+        PRIMARY KEY (subject_id, field_name)
+      );
+    `);
+
+    const legacyRows = database
+      .prepare(
+        `
+          SELECT subject_id, field_name, field_value, updated_at, metadata_json
+          FROM intake_fields__m26_legacy
+          ORDER BY subject_id ASC, field_name ASC
+        `
+      )
+      .all() as Array<{
+      subject_id: string;
+      field_name: string;
+      field_value: string;
+      updated_at: string;
+      metadata_json: string | null;
+    }>;
+
+    for (const row of legacyRows) {
+      if (row.field_name === "problemSummary") {
+        database
+          .prepare(
+            `
+              INSERT INTO intake_fields__m26_new (
+                subject_id,
+                field_name,
+                field_value,
+                updated_at,
+                metadata_json
+              )
+              VALUES (?, ?, ?, ?, ?)
+            `
+          )
+          .run(
+            row.subject_id,
+            row.field_name,
+            row.field_value,
+            row.updated_at,
+            row.metadata_json
+          );
+        continue;
+      }
+
+      if (row.field_name === "name") {
+        normalizeLegacyNameField(database, row.subject_id, row.field_value);
+      }
+    }
+
+    database.exec("DROP TABLE intake_fields__m26_legacy;");
+    database.exec("ALTER TABLE intake_fields__m26_new RENAME TO intake_fields;");
+  }
+
+  if (tableExists(database, "intake_events")) {
+    database.exec("ALTER TABLE intake_events RENAME TO intake_events__m26_legacy;");
+    database.exec(`
+      CREATE TABLE intake_events__m26_new (
+        event_id TEXT PRIMARY KEY,
+        subject_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        intake_state TEXT CHECK (intake_state IN ('not_started', 'asking_identity', 'asking_problem_summary', 'intake_complete')),
+        field_name TEXT CHECK (field_name IN ('firstName', 'lastName', 'birthDate', 'city', 'problemSummary')),
+        occurred_at TEXT NOT NULL,
+        metadata_json TEXT
+      );
+    `);
+
+    database.exec(`
+      INSERT INTO intake_events__m26_new (
+        event_id,
+        subject_id,
+        event_type,
+        intake_state,
+        field_name,
+        occurred_at,
+        metadata_json
+      )
+      SELECT
+        event_id,
+        subject_id,
+        event_type,
+        CASE intake_state
+          WHEN 'asking_name' THEN 'asking_identity'
+          WHEN 'intake_complete' THEN 'asking_identity'
+          ELSE intake_state
+        END,
+        CASE field_name
+          WHEN 'problemSummary' THEN 'problemSummary'
+          ELSE NULL
+        END,
+        occurred_at,
+        metadata_json
+      FROM intake_events__m26_legacy;
+    `);
+
+    database.exec("DROP TABLE intake_events__m26_legacy;");
+    database.exec("ALTER TABLE intake_events__m26_new RENAME TO intake_events;");
+  }
+};
+
 const enforceDraftCaseUniqueness = (database: DatabaseSync): void => {
   database.exec("BEGIN IMMEDIATE;");
 
@@ -229,7 +453,7 @@ export const sqliteMigrations: SqliteMigration[] = [
     sql: `
       CREATE TABLE IF NOT EXISTS intake_states (
         subject_id TEXT PRIMARY KEY,
-        intake_state TEXT NOT NULL CHECK (intake_state IN ('not_started', 'asking_name', 'asking_problem_summary', 'intake_complete')),
+        intake_state TEXT NOT NULL CHECK (intake_state IN ('not_started', 'asking_identity', 'asking_problem_summary', 'intake_complete')),
         updated_at TEXT NOT NULL,
         metadata_json TEXT
       );
@@ -240,7 +464,7 @@ export const sqliteMigrations: SqliteMigration[] = [
     sql: `
       CREATE TABLE IF NOT EXISTS intake_fields (
         subject_id TEXT NOT NULL,
-        field_name TEXT NOT NULL CHECK (field_name IN ('name', 'problemSummary')),
+        field_name TEXT NOT NULL CHECK (field_name IN ('firstName', 'lastName', 'birthDate', 'city', 'problemSummary')),
         field_value TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         metadata_json TEXT,
@@ -255,8 +479,8 @@ export const sqliteMigrations: SqliteMigration[] = [
         event_id TEXT PRIMARY KEY,
         subject_id TEXT NOT NULL,
         event_type TEXT NOT NULL,
-        intake_state TEXT CHECK (intake_state IN ('not_started', 'asking_name', 'asking_problem_summary', 'intake_complete')),
-        field_name TEXT CHECK (field_name IN ('name', 'problemSummary')),
+        intake_state TEXT CHECK (intake_state IN ('not_started', 'asking_identity', 'asking_problem_summary', 'intake_complete')),
+        field_name TEXT CHECK (field_name IN ('firstName', 'lastName', 'birthDate', 'city', 'problemSummary')),
         occurred_at TEXT NOT NULL,
         metadata_json TEXT
       );
@@ -272,6 +496,12 @@ export const sqliteMigrations: SqliteMigration[] = [
     id: "0010_enforce_draft_case_uniqueness",
     run(database) {
       enforceDraftCaseUniqueness(database);
+    }
+  },
+  {
+    id: "0011_normalize_intake_schema_for_identity_fields",
+    run(database) {
+      normalizeIntakeSchema(database);
     }
   }
 ];

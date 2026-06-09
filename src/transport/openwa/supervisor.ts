@@ -459,6 +459,16 @@ export const createOpenWaSupervisor = ({
         ...meta
       });
 
+      if (meta.warningCode) {
+        logger.warn("openwa_liveness_check_warning", {
+          warning_code: meta.warningCode,
+          warning_message: meta.warningMessage,
+          liveness_failure_count: livenessFailureCount,
+          liveness_failure_threshold: livenessFailureThreshold,
+          last_liveness_ok_at: lastLivenessOkAt
+        });
+      }
+
       if (state === "degraded" && activeClient !== undefined) {
         clearRecoveryDelay();
         recoveryInProgress = false;

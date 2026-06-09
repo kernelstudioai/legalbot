@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  CLIENT_NAME_MAX_LENGTH,
   CLIENT_PROBLEM_SUMMARY_MAX_LENGTH,
   InMemoryClientIntakeStore,
   intakeMessageTemplates,
@@ -8,31 +7,31 @@ import {
 } from "../../src/runtime/client/intake";
 
 describe("client intake runtime", () => {
-  it("starts intake by asking for the client name after consent is granted", () => {
+  it("starts intake by asking for structured identity after consent is granted", () => {
     const result = resolveClientIntakeRuntimeDecision({
       subjectId: "client-1",
       consentJustGranted: true,
-      inboundText: "Acconsento al trattamento dei miei dati personali."
+      inboundText: "Acconsento"
     });
 
-    expect(result.intakeState).toBe("asking_name");
-    expect(result.runtimeDecision.action).toBe("intake_ask_name");
-    expect(result.messageTemplate).toBe(intakeMessageTemplates.intake_ask_name);
+    expect(result.intakeState).toBe("asking_identity");
+    expect(result.runtimeDecision.action).toBe("intake_ask_identity");
+    expect(result.messageTemplate).toBe(intakeMessageTemplates.intake_ask_identity);
     expect(result.nextRecord).toMatchObject({
       subjectId: "client-1",
-      state: "asking_name"
+      state: "asking_identity"
     });
   });
 
-  it("accepts a valid name and advances to the problem summary", () => {
+  it("extracts messy identity input and advances to the problem summary", () => {
     const result = resolveClientIntakeRuntimeDecision({
       subjectId: "client-1",
       intakeRecord: {
         subjectId: "client-1",
-        state: "asking_name",
+        state: "asking_identity",
         updatedAt: "2026-06-04T12:00:00.000Z"
       },
-      inboundText: "  Mario   Rossi  "
+      inboundText: "mi chiamo mario rossi, sono nato il 1/1/1980 e vivo a roma"
     });
 
     expect(result.intakeState).toBe("asking_problem_summary");
@@ -40,34 +39,31 @@ describe("client intake runtime", () => {
     expect(result.nextRecord).toMatchObject({
       subjectId: "client-1",
       state: "asking_problem_summary",
-      name: "Mario Rossi"
+      firstName: "Mario",
+      lastName: "Rossi",
+      birthDate: "01/01/1980",
+      city: "Roma"
     });
   });
 
-  it("rejects empty and overly long names", () => {
-    const emptyResult = resolveClientIntakeRuntimeDecision({
+  it("asks for formal clarification when identity extraction is incomplete", () => {
+    const result = resolveClientIntakeRuntimeDecision({
       subjectId: "client-1",
       intakeRecord: {
         subjectId: "client-1",
-        state: "asking_name",
+        state: "asking_identity",
         updatedAt: "2026-06-04T12:00:00.000Z"
       },
-      inboundText: "   "
-    });
-    const longResult = resolveClientIntakeRuntimeDecision({
-      subjectId: "client-1",
-      intakeRecord: {
-        subjectId: "client-1",
-        state: "asking_name",
-        updatedAt: "2026-06-04T12:00:00.000Z"
-      },
-      inboundText: "x".repeat(CLIENT_NAME_MAX_LENGTH + 1)
+      inboundText: "mario rossi"
     });
 
-    expect(emptyResult.runtimeDecision.action).toBe("intake_invalid_response");
-    expect(longResult.runtimeDecision.action).toBe("intake_invalid_response");
-    expect(emptyResult.nextRecord).toBeUndefined();
-    expect(longResult.nextRecord).toBeUndefined();
+    expect(result.runtimeDecision.action).toBe("intake_clarify_identity");
+    expect(result.messageTemplate).toContain("- data di nascita");
+    expect(result.messageTemplate).toContain("- città");
+    expect(result.nextRecord).toMatchObject({
+      firstName: "Mario",
+      lastName: "Rossi"
+    });
   });
 
   it("accepts a valid problem summary and completes intake", () => {
@@ -77,7 +73,10 @@ describe("client intake runtime", () => {
         subjectId: "client-1",
         state: "asking_problem_summary",
         updatedAt: "2026-06-04T12:01:00.000Z",
-        name: "Mario Rossi"
+        firstName: "Mario",
+        lastName: "Rossi",
+        birthDate: "01/01/1980",
+        city: "Roma"
       },
       inboundText: "Problema con il contratto di lavoro e stipendio non pagato."
     });
@@ -87,7 +86,10 @@ describe("client intake runtime", () => {
     expect(result.nextRecord).toMatchObject({
       subjectId: "client-1",
       state: "intake_complete",
-      name: "Mario Rossi",
+      firstName: "Mario",
+      lastName: "Rossi",
+      birthDate: "01/01/1980",
+      city: "Roma",
       problemSummary: "Problema con il contratto di lavoro e stipendio non pagato."
     });
   });
@@ -99,7 +101,10 @@ describe("client intake runtime", () => {
         subjectId: "client-1",
         state: "asking_problem_summary",
         updatedAt: "2026-06-04T12:01:00.000Z",
-        name: "Mario Rossi"
+        firstName: "Mario",
+        lastName: "Rossi",
+        birthDate: "01/01/1980",
+        city: "Roma"
       },
       inboundText: "   "
     });
@@ -109,7 +114,10 @@ describe("client intake runtime", () => {
         subjectId: "client-1",
         state: "asking_problem_summary",
         updatedAt: "2026-06-04T12:01:00.000Z",
-        name: "Mario Rossi"
+        firstName: "Mario",
+        lastName: "Rossi",
+        birthDate: "01/01/1980",
+        city: "Roma"
       },
       inboundText: "x".repeat(CLIENT_PROBLEM_SUMMARY_MAX_LENGTH + 1)
     });
@@ -124,12 +132,18 @@ describe("client intake runtime", () => {
     await store.setIntakeRecord({
       subjectId: "client-1",
       state: "asking_problem_summary",
-      name: "Mario Rossi"
+      firstName: "Mario",
+      lastName: "Rossi",
+      birthDate: "01/01/1980",
+      city: "Roma"
     });
     await store.setIntakeRecord({
       subjectId: "client-1",
       state: "intake_complete",
-      name: "Mario Rossi",
+      firstName: "Mario",
+      lastName: "Rossi",
+      birthDate: "01/01/1980",
+      city: "Roma",
       problemSummary: "Sintesi breve del problema"
     });
 
@@ -137,10 +151,21 @@ describe("client intake runtime", () => {
       subjectId: "client-1",
       state: "intake_complete",
       updatedAt: expect.any(String),
-      name: "Mario Rossi",
+      firstName: "Mario",
+      lastName: "Rossi",
+      birthDate: "01/01/1980",
+      city: "Roma",
       problemSummary: "Sintesi breve del problema"
     });
     expect(store.snapshot()[0]).not.toHaveProperty("body");
     expect(store.snapshot()[0]).not.toHaveProperty("rawBody");
+  });
+
+  it("keeps intake templates in formal Italian register", () => {
+    for (const template of Object.values(intakeMessageTemplates)) {
+      expect(template).not.toContain(" tua ");
+      expect(template).not.toContain(" tu ");
+      expect(template).not.toContain("Rispondi");
+    }
   });
 });

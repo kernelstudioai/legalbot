@@ -23,9 +23,18 @@ export const resolveOperatorSubjectId = (
       FROM intake_states
       INNER JOIN consent_states
         ON consent_states.subject_id = intake_states.subject_id
-      INNER JOIN intake_fields AS name_field
-        ON name_field.subject_id = intake_states.subject_id
-       AND name_field.field_name = 'name'
+      INNER JOIN intake_fields AS first_name_field
+        ON first_name_field.subject_id = intake_states.subject_id
+       AND first_name_field.field_name = 'firstName'
+      INNER JOIN intake_fields AS last_name_field
+        ON last_name_field.subject_id = intake_states.subject_id
+       AND last_name_field.field_name = 'lastName'
+      INNER JOIN intake_fields AS birth_date_field
+        ON birth_date_field.subject_id = intake_states.subject_id
+       AND birth_date_field.field_name = 'birthDate'
+      INNER JOIN intake_fields AS city_field
+        ON city_field.subject_id = intake_states.subject_id
+       AND city_field.field_name = 'city'
       INNER JOIN intake_fields AS problem_summary_field
         ON problem_summary_field.subject_id = intake_states.subject_id
        AND problem_summary_field.field_name = 'problemSummary'

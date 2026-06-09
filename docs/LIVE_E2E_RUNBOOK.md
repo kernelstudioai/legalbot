@@ -77,9 +77,15 @@ Set `OPENWA_BROWSER_EXECUTABLE_PATH` only when the local machine cannot safely d
 
 7. Send the first WhatsApp message from the client phone to the bot.
 
-8. Grant explicit consent with an allowed positive consent phrase.
+8. Grant explicit consent with the short formal command `Acconsento`.
 
-9. Provide a valid client name when the bot asks for it.
+9. Provide identity data in one message when the bot asks for it.
+
+   Example:
+
+   ```text
+   Mario Rossi, 01/01/1980, Roma
+   ```
 
 10. Provide a valid short problem summary when the bot asks for it.
 
@@ -168,11 +174,16 @@ The Docker baseline is for local and product-like development only. It is not th
    docker compose down
    ```
 
-   Use `docker compose down --volumes` only when the named OpenWA session volume must be removed on purpose.
+   `docker compose down` preserves the named OpenWA session volume, so QR pairing is normally retained.
+
+   Use `docker compose down --volumes` only when the named OpenWA session volume must be removed on purpose. That removes the persisted OpenWA session and may require QR pairing again.
 
 ## Operator Boundary
 
 - Live OpenWA messages may advance consent and intake state only.
+- All client-facing Italian copy uses formal `Lei` / `Sua` register.
+- The runtime collects `firstName`, `lastName`, `birthDate`, `city`, and `problemSummary` only.
+- AI-style extraction, when introduced later, remains behind the scenes only. The runtime does not provide legal advice, does not make legal assessments, and does not decide whether to accept a case.
 - `npm run intake:list-ready` is the operator read surface for completed intakes.
 - `npm run case:create-from-intake` is still the only case-draft creation path.
 - The runtime never creates cases automatically on intake completion.

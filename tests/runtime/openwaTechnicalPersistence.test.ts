@@ -202,7 +202,8 @@ describe("openwa technical persistence", () => {
         "0007_create_intake_fields",
         "0008_create_intake_events",
         "0009_harden_cases_schema",
-        "0010_enforce_draft_case_uniqueness"
+        "0010_enforce_draft_case_uniqueness",
+        "0011_normalize_intake_schema_for_identity_fields"
       ],
       databasePath: path.join(tempDir, "data", "legalbot.sqlite")
     });

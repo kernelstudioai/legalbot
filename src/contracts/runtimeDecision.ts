@@ -10,12 +10,14 @@ export const RuntimeDecision = z.object({
     "consent_granted_ack",
     "consent_denied_close",
     "consent_clarification",
-    "intake_ask_name",
+    "intake_ask_identity",
+    "intake_clarify_identity",
     "intake_ask_problem_summary",
     "intake_complete_ack",
     "intake_invalid_response"
   ]),
-  rationale: z.string().min(1)
+  rationale: z.string().min(1),
+  messageOverride: z.string().min(1).optional()
 });
 
 export type RuntimeDecision = z.infer<typeof RuntimeDecision>;

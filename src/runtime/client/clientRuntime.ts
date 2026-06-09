@@ -90,7 +90,10 @@ const toClientIntakeRecord = (snapshot: IntakeSnapshot | null): ClientIntakeReco
         subjectId: snapshot.subjectId,
         state: snapshot.state,
         updatedAt: snapshot.updatedAt,
-        ...(snapshot.fields.name ? { name: snapshot.fields.name } : {}),
+        ...(snapshot.fields.firstName ? { firstName: snapshot.fields.firstName } : {}),
+        ...(snapshot.fields.lastName ? { lastName: snapshot.fields.lastName } : {}),
+        ...(snapshot.fields.birthDate ? { birthDate: snapshot.fields.birthDate } : {}),
+        ...(snapshot.fields.city ? { city: snapshot.fields.city } : {}),
         ...(snapshot.fields.problemSummary
           ? {
               problemSummary: snapshot.fields.problemSummary
@@ -123,7 +126,13 @@ const persistIntakeRecord = async (
     });
   }
 
-  for (const fieldName of ["name", "problemSummary"] as const) {
+  for (const fieldName of [
+    "firstName",
+    "lastName",
+    "birthDate",
+    "city",
+    "problemSummary"
+  ] as const) {
     const nextValue = nextRecord[fieldName];
     const currentValue = currentRecord?.[fieldName];
 
@@ -168,7 +177,7 @@ export const runClientRuntime = async ({
       });
     }
 
-    if (currentConsentState === "requested" && consentDecision.consentState === "granted") {
+    if (currentConsentState !== "granted" && consentDecision.consentState === "granted") {
       await consentPersistence.setConsentState(subjectId, "granted", {
         metadata: buildConsentMetadata(envelope)
       });
@@ -181,7 +190,7 @@ export const runClientRuntime = async ({
       });
     }
 
-    if (currentConsentState === "requested" && consentDecision.consentState === "denied") {
+    if (currentConsentState !== "denied" && consentDecision.consentState === "denied") {
       await consentPersistence.setConsentState(subjectId, "denied", {
         metadata: buildConsentMetadata(envelope)
       });

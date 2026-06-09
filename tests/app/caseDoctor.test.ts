@@ -71,7 +71,7 @@ describe("case doctor command", () => {
     expect(summary.report).toEqual({
       status: "healthy",
       migration_status: {
-        applied_migration_count: 10,
+        applied_migration_count: 11,
         pending_migration_count: 0
       },
       case_consistency: {
@@ -172,7 +172,7 @@ describe("case doctor command", () => {
     expect(summary.report).toEqual({
       status: "anomaly_detected",
       migration_status: {
-        applied_migration_count: 10,
+        applied_migration_count: 11,
         pending_migration_count: 0
       },
       case_consistency: {

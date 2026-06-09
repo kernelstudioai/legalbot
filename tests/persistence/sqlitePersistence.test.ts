@@ -23,7 +23,8 @@ const allMigrationIds = [
   "0007_create_intake_fields",
   "0008_create_intake_events",
   "0009_harden_cases_schema",
-  "0010_enforce_draft_case_uniqueness"
+  "0010_enforce_draft_case_uniqueness",
+  "0011_normalize_intake_schema_for_identity_fields"
 ] as const;
 const migrationIdsThrough0008 = allMigrationIds.slice(0, 8);
 const migrationIdsThrough0009 = allMigrationIds.slice(0, 9);
@@ -169,7 +170,8 @@ describe("sqlite persistence foundation", () => {
 
     expect(migrationResult.appliedMigrationIds).toEqual([
       "0009_harden_cases_schema",
-      "0010_enforce_draft_case_uniqueness"
+      "0010_enforce_draft_case_uniqueness",
+      "0011_normalize_intake_schema_for_identity_fields"
     ]);
     expect(migrationResult.pendingMigrationIds).toEqual([]);
 
@@ -306,7 +308,8 @@ describe("sqlite persistence foundation", () => {
     });
 
     expect(migrationResult.appliedMigrationIds).toEqual([
-      "0010_enforce_draft_case_uniqueness"
+      "0010_enforce_draft_case_uniqueness",
+      "0011_normalize_intake_schema_for_identity_fields"
     ]);
     expect(migrationResult.pendingMigrationIds).toEqual([]);
 
@@ -695,7 +698,7 @@ describe("sqlite persistence foundation", () => {
           source: "test"
         }
       });
-      const nameRecord = await store.setIntakeField("subject-1", "name", "Mario Rossi", {
+      const nameRecord = await store.setIntakeField("subject-1", "firstName", "Mario", {
         updatedAt: "2026-06-04T10:08:30.000Z",
         metadata: {
           source: "test"
@@ -723,8 +726,8 @@ describe("sqlite persistence foundation", () => {
       });
       expect(nameRecord).toEqual({
         subjectId: "subject-1",
-        fieldName: "name",
-        value: "Mario Rossi",
+        fieldName: "firstName",
+        value: "Mario",
         updatedAt: "2026-06-04T10:08:30.000Z",
         metadata: {
           source: "test"
@@ -758,12 +761,12 @@ describe("sqlite persistence foundation", () => {
         state: "asking_problem_summary",
         updatedAt: "2026-06-04T10:08:00.000Z",
         fields: {
-          name: "Mario Rossi",
+          firstName: "Mario",
           problemSummary: "Sintesi breve del problema"
         }
       });
       await expect(
-        store.setIntakeField("subject-1", "unknown" as "name", "bad")
+        store.setIntakeField("subject-1", "unknown" as "firstName", "bad")
       ).rejects.toThrow("Unsupported intake field: unknown");
 
       const stateRow = database
@@ -843,8 +846,8 @@ describe("sqlite persistence foundation", () => {
       expect(fieldRows).toEqual([
         {
           subject_id: "subject-1",
-          field_name: "name",
-          field_value: "Mario Rossi",
+          field_name: "firstName",
+          field_value: "Mario",
           updated_at: "2026-06-04T10:08:30.000Z",
           metadata_json: JSON.stringify({ source: "test" })
         },

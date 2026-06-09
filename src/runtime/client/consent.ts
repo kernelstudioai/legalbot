@@ -8,18 +8,19 @@ export type ConsentState = z.infer<typeof ConsentState>;
 
 export const consentMessageTemplates = {
   request_consent:
-    'Per continuare, posso trattare e conservare i messaggi che mi invii per gestire la tua richiesta? Rispondi solo con "Acconsento al trattamento dei miei dati personali" oppure "Non acconsento al trattamento dei miei dati personali".',
+    "Per continuare devo trattare i dati che mi invia per gestire la Sua richiesta.\n\nRisponda:\n- Acconsento\n- Non acconsento",
   consent_granted_ack:
-    "Grazie. Hai autorizzato il trattamento dei tuoi dati personali per i prossimi passaggi operativi.",
+    "La ringrazio. Il consenso al trattamento dei dati e stato registrato.",
   consent_denied_close:
-    "Ricevuto. Senza consenso non conservero contenuti dei messaggi. La conversazione si chiude qui.",
+    "Ricevuto. Senza consenso non posso proseguire nella raccolta dei dati. La conversazione si chiude qui.",
   consent_clarification:
-    'Non posso interpretare la tua risposta come consenso esplicito. Rispondi solo con "Acconsento al trattamento dei miei dati personali" oppure "Non acconsento al trattamento dei miei dati personali".'
+    "Non posso interpretare la Sua risposta come consenso esplicito.\n\nRisponda:\n- Acconsento\n- Non acconsento"
 } as const;
 
 export type ConsentRuntimeAction = keyof typeof consentMessageTemplates;
 
 const strictPositiveConsentForms = new Set<string>([
+  "acconsento",
   "acconsento al trattamento dei miei dati personali",
   "acconsento al trattamento dei miei dati",
   "autorizzo il trattamento dei miei dati personali",
@@ -33,6 +34,7 @@ const strictPositiveConsentForms = new Set<string>([
 ]);
 
 const strictNegativeConsentForms = new Set<string>([
+  "non acconsento",
   "non acconsento al trattamento dei miei dati personali",
   "non acconsento al trattamento dei miei dati",
   "non autorizzo il trattamento dei miei dati personali",

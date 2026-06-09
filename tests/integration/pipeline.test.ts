@@ -47,7 +47,7 @@ describe("inbound pipeline", () => {
     });
 
     expect(result.runtimeDecision.action).toBe("request_consent");
-    expect(result.outputPlan.messages[0]?.body).toContain("Acconsento al trattamento");
+    expect(result.outputPlan.messages[0]?.body).toContain("- Acconsento");
     expect(await consentStore.getConsentState("client-456@c.us")).toBe("requested");
     expect(await intakeStore.getIntakeSnapshot("client-456@c.us")).toBeNull();
   });

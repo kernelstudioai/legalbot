@@ -46,6 +46,27 @@ afterEach(() => {
   }
 });
 
+const setCompleteIdentity = async (
+  persistence: ReturnType<typeof createSqlitePersistenceService>,
+  subjectId: string,
+  values: {
+    firstName: string;
+    lastName: string;
+    birthDate: string;
+    city: string;
+    problemSummary?: string;
+  }
+) => {
+  await persistence.setIntakeField(subjectId, "firstName", values.firstName);
+  await persistence.setIntakeField(subjectId, "lastName", values.lastName);
+  await persistence.setIntakeField(subjectId, "birthDate", values.birthDate);
+  await persistence.setIntakeField(subjectId, "city", values.city);
+
+  if (values.problemSummary) {
+    await persistence.setIntakeField(subjectId, "problemSummary", values.problemSummary);
+  }
+};
+
 describe("ready-intake listing command", () => {
   it("fails safely when migrations are missing", () => {
     const tempDir = createTempDir();
@@ -98,46 +119,57 @@ describe("ready-intake listing command", () => {
       await persistence.setIntakeState(readyPhoneSubjectId, "intake_complete", {
         updatedAt: "2026-06-06T08:00:00.000Z"
       });
-      await persistence.setIntakeField(readyPhoneSubjectId, "name", "Mario Rossi");
-      await persistence.setIntakeField(
-        readyPhoneSubjectId,
-        "problemSummary",
-        "Transcript body secret should never print"
-      );
+      await setCompleteIdentity(persistence, readyPhoneSubjectId, {
+        firstName: "Mario",
+        lastName: "Rossi",
+        birthDate: "01/01/1980",
+        city: "Roma",
+        problemSummary: "Transcript body secret should never print"
+      });
 
       await persistence.setConsentState(readyGenericSubjectId, "granted");
       await persistence.setIntakeState(readyGenericSubjectId, "intake_complete", {
         updatedAt: "2026-06-06T09:00:00.000Z"
       });
-      await persistence.setIntakeField(readyGenericSubjectId, "name", "Giulia Verdi");
-      await persistence.setIntakeField(
-        readyGenericSubjectId,
-        "problemSummary",
-        "Token abc1234567890123456789012345 should never print"
-      );
+      await setCompleteIdentity(persistence, readyGenericSubjectId, {
+        firstName: "Giulia",
+        lastName: "Verdi",
+        birthDate: "02/02/1985",
+        city: "Milano",
+        problemSummary: "Token abc1234567890123456789012345 should never print"
+      });
 
       await persistence.setConsentState(incompleteSubjectId, "granted");
       await persistence.setIntakeState(incompleteSubjectId, "asking_problem_summary", {
         updatedAt: "2026-06-06T10:00:00.000Z"
       });
-      await persistence.setIntakeField(incompleteSubjectId, "name", "Incomplete Name");
+      await setCompleteIdentity(persistence, incompleteSubjectId, {
+        firstName: "Incomplete",
+        lastName: "Name",
+        birthDate: "03/03/1990",
+        city: "Napoli"
+      });
 
       await persistence.setConsentState(missingFieldSubjectId, "granted");
       await persistence.setIntakeState(missingFieldSubjectId, "intake_complete", {
         updatedAt: "2026-06-06T11:00:00.000Z"
       });
-      await persistence.setIntakeField(missingFieldSubjectId, "name", "Missing Problem Summary");
+      await persistence.setIntakeField(missingFieldSubjectId, "firstName", "Missing");
+      await persistence.setIntakeField(missingFieldSubjectId, "lastName", "Summary");
+      await persistence.setIntakeField(missingFieldSubjectId, "birthDate", "04/04/1991");
+      await persistence.setIntakeField(missingFieldSubjectId, "city", "Torino");
 
       await persistence.setConsentState(consentRequestedSubjectId, "requested");
       await persistence.setIntakeState(consentRequestedSubjectId, "intake_complete", {
         updatedAt: "2026-06-06T12:00:00.000Z"
       });
-      await persistence.setIntakeField(consentRequestedSubjectId, "name", "No Consent");
-      await persistence.setIntakeField(
-        consentRequestedSubjectId,
-        "problemSummary",
-        "Should stay out of ready list"
-      );
+      await setCompleteIdentity(persistence, consentRequestedSubjectId, {
+        firstName: "No",
+        lastName: "Consent",
+        birthDate: "05/05/1992",
+        city: "Genova",
+        problemSummary: "Should stay out of ready list"
+      });
     } finally {
       persistence.close();
     }
@@ -158,13 +190,13 @@ describe("ready-intake listing command", () => {
         subjectId: toOperatorSubjectId(readyPhoneSubjectId),
         intakeState: "intake_complete",
         updatedAt: "2026-06-06T08:00:00.000Z",
-        fieldNamesPresent: ["name", "problemSummary"]
+        fieldNamesPresent: ["firstName", "lastName", "birthDate", "city", "problemSummary"]
       },
       {
         subjectId: toOperatorSubjectId(readyGenericSubjectId),
         intakeState: "intake_complete",
         updatedAt: "2026-06-06T09:00:00.000Z",
-        fieldNamesPresent: ["name", "problemSummary"]
+        fieldNamesPresent: ["firstName", "lastName", "birthDate", "city", "problemSummary"]
       }
     ]);
     expect(stdout.output).toBe(`${JSON.stringify(summary.candidates)}\n`);

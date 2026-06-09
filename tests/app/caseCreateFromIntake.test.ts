@@ -49,16 +49,31 @@ const seedCompletedIntake = async (
   subjectId: string,
   options: {
     consentState?: "unknown" | "requested" | "granted" | "denied";
-    intakeState?: "not_started" | "asking_name" | "asking_problem_summary" | "intake_complete";
-    name?: string;
+    intakeState?: "not_started" | "asking_identity" | "asking_problem_summary" | "intake_complete";
+    firstName?: string;
+    lastName?: string;
+    birthDate?: string;
+    city?: string;
     problemSummary?: string;
   } = {}
 ): Promise<void> => {
   await persistence.setConsentState(subjectId, options.consentState ?? "granted");
   await persistence.setIntakeState(subjectId, options.intakeState ?? "intake_complete");
 
-  if (options.name !== undefined) {
-    await persistence.setIntakeField(subjectId, "name", options.name);
+  if (options.firstName !== undefined) {
+    await persistence.setIntakeField(subjectId, "firstName", options.firstName);
+  }
+
+  if (options.lastName !== undefined) {
+    await persistence.setIntakeField(subjectId, "lastName", options.lastName);
+  }
+
+  if (options.birthDate !== undefined) {
+    await persistence.setIntakeField(subjectId, "birthDate", options.birthDate);
+  }
+
+  if (options.city !== undefined) {
+    await persistence.setIntakeField(subjectId, "city", options.city);
   }
 
   if (options.problemSummary !== undefined) {
@@ -142,7 +157,10 @@ describe("manual case creation command", () => {
     try {
       await seedCompletedIntake(persistence, subjectId, {
         consentState: "requested",
-        name: "Mario Rossi",
+        firstName: "Mario",
+        lastName: "Rossi",
+        birthDate: "01/01/1980",
+        city: "Roma",
         problemSummary: "Sintesi breve del problema"
       });
     } finally {
@@ -188,7 +206,10 @@ describe("manual case creation command", () => {
     try {
       await seedCompletedIntake(persistence, subjectId, {
         intakeState: "asking_problem_summary",
-        name: "Mario Rossi",
+        firstName: "Mario",
+        lastName: "Rossi",
+        birthDate: "01/01/1980",
+        city: "Roma",
         problemSummary: "Sintesi breve del problema"
       });
     } finally {
@@ -233,7 +254,10 @@ describe("manual case creation command", () => {
 
     try {
       await seedCompletedIntake(persistence, subjectId, {
-        name: "Mario Rossi",
+        firstName: "Mario",
+        lastName: "Rossi",
+        birthDate: "01/01/1980",
+        city: "Roma",
         problemSummary: "Client transcript secret should never print"
       });
     } finally {
@@ -327,7 +351,9 @@ describe("manual case creation command", () => {
         source: "completed_intake",
         consentState: "granted",
         intakeState: "intake_complete",
-        acceptedFieldNames: ["name", "problemSummary"]
+        acceptedFieldNames: ["firstName", "lastName", "birthDate", "city", "problemSummary"],
+        birthDate: "01/01/1980",
+        city: "Roma"
       });
     } finally {
       database.close();
@@ -354,7 +380,10 @@ describe("manual case creation command", () => {
 
     try {
       await seedCompletedIntake(persistence, rawSubjectId, {
-        name: "Mario Rossi",
+        firstName: "Mario",
+        lastName: "Rossi",
+        birthDate: "01/01/1980",
+        city: "Roma",
         problemSummary: "Completed intake stays sanitized"
       });
     } finally {
@@ -407,7 +436,10 @@ describe("manual case creation command", () => {
 
     try {
       await seedCompletedIntake(persistence, subjectId, {
-        name: "Mario Rossi",
+        firstName: "Mario",
+        lastName: "Rossi",
+        birthDate: "01/01/1980",
+        city: "Roma",
         problemSummary: "Sintesi breve del problema"
       });
     } finally {
@@ -500,7 +532,7 @@ describe("manual case creation command", () => {
       expect(JSON.parse(idempotentHitRow?.metadata_json ?? "{}")).toEqual({
         source: "completed_intake",
         existingStatus: "draft",
-        acceptedFieldNames: ["name", "problemSummary"]
+        acceptedFieldNames: ["firstName", "lastName", "birthDate", "city", "problemSummary"]
       });
       expect(idempotentHitRow?.metadata_json ?? "").not.toContain("body");
       expect(idempotentHitRow?.metadata_json ?? "").not.toContain("transcript");
@@ -541,7 +573,10 @@ describe("manual case creation command", () => {
         state: "intake_complete",
         updatedAt: "2026-06-05T08:00:00.000Z",
         fields: {
-          name: "Mario Rossi",
+          firstName: "Mario",
+          lastName: "Rossi",
+          birthDate: "01/01/1980",
+          city: "Roma",
           problemSummary: "Structured summary"
         }
       }),
@@ -593,7 +628,9 @@ describe("manual case creation command", () => {
           source: "completed_intake",
           consentState: "granted",
           intakeState: "intake_complete",
-          acceptedFieldNames: ["name", "problemSummary"]
+          acceptedFieldNames: ["firstName", "lastName", "birthDate", "city", "problemSummary"],
+          birthDate: "01/01/1980",
+          city: "Roma"
         }
       }
     });

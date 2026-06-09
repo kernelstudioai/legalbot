@@ -1,13 +1,19 @@
 export const intakeStates = [
   "not_started",
-  "asking_name",
+  "asking_identity",
   "asking_problem_summary",
   "intake_complete"
 ] as const;
 
 export type IntakeState = (typeof intakeStates)[number];
 
-export const intakeFieldNames = ["name", "problemSummary"] as const;
+export const intakeFieldNames = [
+  "firstName",
+  "lastName",
+  "birthDate",
+  "city",
+  "problemSummary"
+] as const;
 
 export type IntakeFieldName = (typeof intakeFieldNames)[number];
 

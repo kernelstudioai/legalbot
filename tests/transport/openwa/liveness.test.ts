@@ -30,6 +30,22 @@ describe("openwa liveness check", () => {
     await expect(checkLiveness()).rejects.toThrow("openwa_connection_state_timeout");
   });
 
+  it("treats malformed OpenWA liveness responses as sanitized warnings", async () => {
+    const checkLiveness = createOpenWaLivenessCheck({
+      getConnectionState: vi
+        .fn()
+        .mockRejectedValue(new Error("Cannot read properties of undefined (reading 'default')")),
+      isConnected: vi.fn().mockResolvedValue(true)
+    });
+
+    await expect(checkLiveness()).resolves.toEqual({
+      mode: "read_only",
+      connected: true,
+      warningCode: "openwa_liveness_malformed_response",
+      warningMessage: "OpenWA returned an unexpected liveness response shape"
+    });
+  });
+
   it("falls back to a noop heartbeat when no safe read-only calls are available", async () => {
     const checkLiveness = createNoopOpenWaLivenessCheck();
 

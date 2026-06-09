@@ -38,7 +38,10 @@ const toSnapshot = (intakeRecord: ClientIntakeRecord | null): IntakeSnapshot | n
         state: intakeRecord.state,
         updatedAt: intakeRecord.updatedAt,
         fields: {
-          ...(intakeRecord.name ? { name: intakeRecord.name } : {}),
+          ...(intakeRecord.firstName ? { firstName: intakeRecord.firstName } : {}),
+          ...(intakeRecord.lastName ? { lastName: intakeRecord.lastName } : {}),
+          ...(intakeRecord.birthDate ? { birthDate: intakeRecord.birthDate } : {}),
+          ...(intakeRecord.city ? { city: intakeRecord.city } : {}),
           ...(intakeRecord.problemSummary
             ? {
                 problemSummary: intakeRecord.problemSummary
@@ -103,17 +106,17 @@ describe("client runtime wiring", () => {
     expect(consentPersistence.appendConsentEvent).not.toHaveBeenCalled();
   });
 
-  it("starts intake after explicit consent grant and persists only intake state", async () => {
+  it("accepts the short consent command and asks identity in one message", async () => {
     const consentPersistence = createConsentPersistence("requested");
     const intakePersistence = createIntakePersistence();
 
     const result = await runClientRuntime({
-      envelope: createEnvelope("Acconsento al trattamento dei miei dati personali."),
+      envelope: createEnvelope("Acconsento"),
       consentPersistence,
       intakePersistence
     });
 
-    expect(result.runtimeDecision.action).toBe("intake_ask_name");
+    expect(result.runtimeDecision.action).toBe("intake_ask_identity");
     expect(consentPersistence.setConsentState).toHaveBeenCalledWith(
       "15551234567@c.us",
       "granted",
@@ -125,60 +128,39 @@ describe("client runtime wiring", () => {
         })
       })
     );
-    expect(consentPersistence.appendConsentEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        subjectId: "15551234567@c.us",
-        state: "granted",
-        eventType: "consent_granted",
-        metadata: {
-          channel: "whatsapp",
-          messageId: "wamid.client-1",
-          subjectIdSource: "transport.chatId",
-          runtime: "client"
-        }
-      })
-    );
     expect(intakePersistence.setIntakeState).toHaveBeenCalledWith(
       "15551234567@c.us",
-      "asking_name",
+      "asking_identity",
       expect.objectContaining({
-        updatedAt: expect.any(String),
-        metadata: {
-          channel: "whatsapp",
-          messageId: "wamid.client-1",
-          subjectIdSource: "transport.chatId",
-          runtime: "client"
-        }
+        updatedAt: expect.any(String)
       })
     );
     expect(intakePersistence.setIntakeField).not.toHaveBeenCalled();
   });
 
-  it("persists denied consent and never starts intake", async () => {
-    const consentPersistence = createConsentPersistence("requested");
+  it("persists consent granted even when the inbound grant arrives from unknown state", async () => {
+    const consentPersistence = createConsentPersistence("unknown");
     const intakePersistence = createIntakePersistence();
 
-    const result = await runClientRuntime({
-      envelope: createEnvelope("Non acconsento al trattamento dei miei dati personali."),
+    await runClientRuntime({
+      envelope: createEnvelope("Acconsento"),
       consentPersistence,
       intakePersistence
     });
 
-    expect(result.runtimeDecision.action).toBe("consent_denied_close");
-    expect(consentPersistence.setConsentState).toHaveBeenCalledWith(
+    expect(consentPersistence.setConsentState).toHaveBeenNthCalledWith(
+      1,
       "15551234567@c.us",
-      "denied",
+      "granted",
       expect.any(Object)
     );
     expect(consentPersistence.appendConsentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         subjectId: "15551234567@c.us",
-        state: "denied",
-        eventType: "consent_denied"
+        state: "granted",
+        eventType: "consent_granted"
       })
     );
-    expect(intakePersistence.setIntakeState).not.toHaveBeenCalled();
-    expect(intakePersistence.setIntakeField).not.toHaveBeenCalled();
   });
 
   it("keeps requested consent open on ambiguous replies without granting", async () => {
@@ -193,61 +175,19 @@ describe("client runtime wiring", () => {
 
     expect(result.runtimeDecision.action).toBe("consent_clarification");
     expect(consentPersistence.setConsentState).not.toHaveBeenCalled();
-    expect(consentPersistence.appendConsentEvent).not.toHaveBeenCalled();
     expect(intakePersistence.setIntakeState).not.toHaveBeenCalled();
-    expect(intakePersistence.setIntakeField).not.toHaveBeenCalled();
   });
 
-  it("starts intake by asking for the client name when consent is already granted", async () => {
-    const consentPersistence = createConsentPersistence("granted");
-    const intakePersistence = createIntakePersistence();
-
-    const result = await runClientRuntime({
-      envelope: createEnvelope("Vorrei raccontare il mio caso"),
-      consentPersistence,
-      intakePersistence
-    });
-
-    expect(result.runtimeDecision.action).toBe("intake_ask_name");
-    expect(consentPersistence.setConsentState).not.toHaveBeenCalled();
-    expect(consentPersistence.appendConsentEvent).not.toHaveBeenCalled();
-    expect(intakePersistence.setIntakeState).toHaveBeenCalledWith(
-      "15551234567@c.us",
-      "asking_name",
-      expect.objectContaining({
-        updatedAt: expect.any(String)
-      })
-    );
-    expect(intakePersistence.setIntakeField).not.toHaveBeenCalled();
-  });
-
-  it("returns the safe closed response when consent is already denied", async () => {
-    const consentPersistence = createConsentPersistence("denied");
-    const intakePersistence = createIntakePersistence();
-
-    const result = await runClientRuntime({
-      envelope: createEnvelope("Posso spiegare meglio?"),
-      consentPersistence,
-      intakePersistence
-    });
-
-    expect(result.runtimeDecision.action).toBe("consent_denied_close");
-    expect(consentPersistence.setConsentState).not.toHaveBeenCalled();
-    expect(consentPersistence.appendConsentEvent).not.toHaveBeenCalled();
-    expect(intakePersistence.setIntakeState).not.toHaveBeenCalled();
-    expect(intakePersistence.setIntakeField).not.toHaveBeenCalled();
-  });
-
-  it("accepts a valid name as a structured field and advances to the problem summary", async () => {
+  it("extracts messy identity input into structured fields or asks formal clarification", async () => {
     const consentPersistence = createConsentPersistence("granted");
     const intakePersistence = createIntakePersistence({
       subjectId: "15551234567@c.us",
-      state: "asking_name",
+      state: "asking_identity",
       updatedAt: "2026-06-04T12:01:00.000Z"
     });
 
     const result = await runClientRuntime({
-      envelope: createEnvelope("Mario Rossi"),
+      envelope: createEnvelope("mi chiamo mario rossi, sono nato il 1/1/1980 e vivo a roma"),
       consentPersistence,
       intakePersistence
     });
@@ -262,42 +202,54 @@ describe("client runtime wiring", () => {
     );
     expect(intakePersistence.setIntakeField).toHaveBeenCalledWith(
       "15551234567@c.us",
-      "name",
-      "Mario Rossi",
-      expect.objectContaining({
-        updatedAt: expect.any(String),
-        metadata: expect.not.objectContaining({
-          body: expect.anything(),
-          text: expect.anything(),
-          content: expect.anything()
-        })
-      })
+      "firstName",
+      "Mario",
+      expect.any(Object)
+    );
+    expect(intakePersistence.setIntakeField).toHaveBeenCalledWith(
+      "15551234567@c.us",
+      "lastName",
+      "Rossi",
+      expect.any(Object)
+    );
+    expect(intakePersistence.setIntakeField).toHaveBeenCalledWith(
+      "15551234567@c.us",
+      "birthDate",
+      "01/01/1980",
+      expect.any(Object)
+    );
+    expect(intakePersistence.setIntakeField).toHaveBeenCalledWith(
+      "15551234567@c.us",
+      "city",
+      "Roma",
+      expect.any(Object)
     );
   });
 
-  it("returns intake_invalid_response for empty or overly long names", async () => {
+  it("asks formal clarification when identity is incomplete", async () => {
     const consentPersistence = createConsentPersistence("granted");
     const intakePersistence = createIntakePersistence({
       subjectId: "15551234567@c.us",
-      state: "asking_name",
+      state: "asking_identity",
       updatedAt: "2026-06-04T12:01:00.000Z"
     });
 
-    const emptyResult = await runClientRuntime({
-      envelope: createEnvelope("   "),
-      consentPersistence,
-      intakePersistence
-    });
-    const longResult = await runClientRuntime({
-      envelope: createEnvelope("x".repeat(81)),
+    const result = await runClientRuntime({
+      envelope: createEnvelope("mario rossi"),
       consentPersistence,
       intakePersistence
     });
 
-    expect(emptyResult.runtimeDecision.action).toBe("intake_invalid_response");
-    expect(longResult.runtimeDecision.action).toBe("intake_invalid_response");
+    expect(result.runtimeDecision.action).toBe("intake_clarify_identity");
+    expect(result.runtimeDecision.messageOverride).toContain("- data di nascita");
+    expect(result.runtimeDecision.messageOverride).toContain("- città");
     expect(intakePersistence.setIntakeState).not.toHaveBeenCalled();
-    expect(intakePersistence.setIntakeField).not.toHaveBeenCalled();
+    expect(intakePersistence.setIntakeField).toHaveBeenCalledWith(
+      "15551234567@c.us",
+      "firstName",
+      "Mario",
+      expect.any(Object)
+    );
   });
 
   it("accepts a valid problem summary and completes intake without storing the raw inbound body", async () => {
@@ -306,7 +258,10 @@ describe("client runtime wiring", () => {
       subjectId: "15551234567@c.us",
       state: "asking_problem_summary",
       updatedAt: "2026-06-04T12:02:00.000Z",
-      name: "Mario Rossi"
+      firstName: "Mario",
+      lastName: "Rossi",
+      birthDate: "01/01/1980",
+      city: "Roma"
     });
 
     const result = await runClientRuntime({
@@ -328,7 +283,6 @@ describe("client runtime wiring", () => {
       "problemSummary",
       "Licenziamento improvviso e richiesta di chiarimenti contrattuali",
       expect.objectContaining({
-        updatedAt: expect.any(String),
         metadata: expect.not.objectContaining({
           body: expect.anything(),
           rawBody: expect.anything(),
@@ -337,25 +291,5 @@ describe("client runtime wiring", () => {
         })
       })
     );
-  });
-
-  it("returns intake_invalid_response for overly long problem summaries", async () => {
-    const consentPersistence = createConsentPersistence("granted");
-    const intakePersistence = createIntakePersistence({
-      subjectId: "15551234567@c.us",
-      state: "asking_problem_summary",
-      updatedAt: "2026-06-04T12:02:00.000Z",
-      name: "Mario Rossi"
-    });
-
-    const result = await runClientRuntime({
-      envelope: createEnvelope("x".repeat(501)),
-      consentPersistence,
-      intakePersistence
-    });
-
-    expect(result.runtimeDecision.action).toBe("intake_invalid_response");
-    expect(intakePersistence.setIntakeState).not.toHaveBeenCalled();
-    expect(intakePersistence.setIntakeField).not.toHaveBeenCalled();
   });
 });

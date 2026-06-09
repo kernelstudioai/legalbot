@@ -92,7 +92,7 @@ class CapturingIntakeStore implements IntakeStore {
   stateBySubject = new Map<
     string,
     {
-      state: "not_started" | "asking_name" | "asking_problem_summary" | "intake_complete";
+      state: "not_started" | "asking_identity" | "asking_problem_summary" | "intake_complete";
       updatedAt: string;
       metadata?: Record<string, unknown>;
     }
@@ -141,7 +141,7 @@ class CapturingIntakeStore implements IntakeStore {
     value: string,
     options: SetIntakeFieldOptions = {}
   ) {
-    if (!["name", "problemSummary"].includes(fieldName)) {
+    if (!["firstName", "lastName", "birthDate", "city", "problemSummary"].includes(fieldName)) {
       throw new Error(`Unsupported intake field: ${fieldName}`);
     }
 
@@ -593,7 +593,7 @@ describe("persistence service boundary", () => {
         }
       });
       await expect(
-        service.setIntakeField("subject-sqlite-1", "name", "Mario Rossi", {
+        service.setIntakeField("subject-sqlite-1", "firstName", "Mario", {
           updatedAt: "2026-06-04T12:09:00.000Z",
           metadata: {
             source: "sqlite-test",
@@ -603,8 +603,8 @@ describe("persistence service boundary", () => {
       ).resolves.toEqual({
         record: {
           subjectId: "subject-sqlite-1",
-          fieldName: "name",
-          value: "Mario Rossi",
+          fieldName: "firstName",
+          value: "Mario",
           updatedAt: "2026-06-04T12:09:00.000Z",
           metadata: {
             source: "sqlite-test"
@@ -621,7 +621,7 @@ describe("persistence service boundary", () => {
         state: "asking_problem_summary",
         updatedAt: "2026-06-04T12:08:30.000Z",
         fields: {
-          name: "Mario Rossi"
+          firstName: "Mario"
         }
       });
       await expect(
@@ -630,7 +630,7 @@ describe("persistence service boundary", () => {
           subjectId: "subject-sqlite-1",
           eventType: "intake_field_accepted",
           state: "asking_problem_summary",
-          fieldName: "name",
+          fieldName: "firstName",
           occurredAt: "2026-06-04T12:09:30.000Z",
           metadata: {
             source: "sqlite-test",
@@ -643,7 +643,7 @@ describe("persistence service boundary", () => {
           subjectId: "subject-sqlite-1",
           eventType: "intake_field_accepted",
           state: "asking_problem_summary",
-          fieldName: "name",
+          fieldName: "firstName",
           occurredAt: "2026-06-04T12:09:30.000Z",
           metadata: {
             source: "sqlite-test"
@@ -793,7 +793,7 @@ describe("persistence service boundary", () => {
             WHERE subject_id = ? AND field_name = ?
           `
         )
-        .get("subject-sqlite-1", "name") as
+        .get("subject-sqlite-1", "firstName") as
         | {
             subject_id: string;
             field_name: string;
@@ -839,8 +839,8 @@ describe("persistence service boundary", () => {
       });
       expect(intakeFieldRow).toEqual({
         subject_id: "subject-sqlite-1",
-        field_name: "name",
-        field_value: "Mario Rossi",
+        field_name: "firstName",
+        field_value: "Mario",
         updated_at: "2026-06-04T12:09:00.000Z",
         metadata_json: JSON.stringify({
           source: "sqlite-test"
@@ -851,7 +851,7 @@ describe("persistence service boundary", () => {
         subject_id: "subject-sqlite-1",
         event_type: "intake_field_accepted",
         intake_state: "asking_problem_summary",
-        field_name: "name",
+        field_name: "firstName",
         occurred_at: "2026-06-04T12:09:30.000Z",
         metadata_json: JSON.stringify({
           source: "sqlite-test"
@@ -1076,7 +1076,7 @@ describe("persistence service boundary", () => {
 
     await expect(service.getIntakeState("subject-intake-1")).resolves.toBe("not_started");
 
-    const stateResult = await service.setIntakeState("subject-intake-1", "asking_name", {
+    const stateResult = await service.setIntakeState("subject-intake-1", "asking_identity", {
       metadata: {
         source: "test",
         messageBody: "remove me",
@@ -1084,7 +1084,7 @@ describe("persistence service boundary", () => {
         browserPath: "C:\\openwa-session\\profile"
       }
     });
-    const fieldResult = await service.setIntakeField("subject-intake-1", "name", "Mario Rossi", {
+    const fieldResult = await service.setIntakeField("subject-intake-1", "firstName", "Mario", {
       metadata: {
         source: "test",
         content: "remove me",
@@ -1099,8 +1099,8 @@ describe("persistence service boundary", () => {
       eventId: "intake-event-1",
       subjectId: "subject-intake-1",
       eventType: "intake_field_accepted",
-      state: "asking_name",
-      fieldName: "name",
+      state: "asking_identity",
+      fieldName: "firstName",
       metadata: {
         body: "remove me",
         sessionPath: "/tmp/openwa-session/profile",
@@ -1111,7 +1111,7 @@ describe("persistence service boundary", () => {
     expect(stateResult).toEqual({
       record: {
         subjectId: "subject-intake-1",
-        state: "asking_name",
+        state: "asking_identity",
         updatedAt: "2026-06-04T12:11:00.000Z",
         metadata: {
           source: "test",
@@ -1128,8 +1128,8 @@ describe("persistence service boundary", () => {
     expect(fieldResult).toEqual({
       record: {
         subjectId: "subject-intake-1",
-        fieldName: "name",
-        value: "Mario Rossi",
+        fieldName: "firstName",
+        value: "Mario",
         updatedAt: "2026-06-04T12:11:00.000Z",
         metadata: {
           source: "test",
@@ -1152,8 +1152,8 @@ describe("persistence service boundary", () => {
         eventId: "intake-event-1",
         subjectId: "subject-intake-1",
         eventType: "intake_field_accepted",
-        state: "asking_name",
-        fieldName: "name",
+        state: "asking_identity",
+        fieldName: "firstName",
         occurredAt: "2026-06-04T12:11:00.000Z",
         metadata: {
           sessionPath: "[redacted-path]",
@@ -1165,13 +1165,13 @@ describe("persistence service boundary", () => {
         safe: true
       }
     });
-    await expect(service.getIntakeState("subject-intake-1")).resolves.toBe("asking_name");
+    await expect(service.getIntakeState("subject-intake-1")).resolves.toBe("asking_identity");
     await expect(service.getIntakeSnapshot("subject-intake-1")).resolves.toEqual({
       subjectId: "subject-intake-1",
-      state: "asking_name",
+      state: "asking_identity",
       updatedAt: "2026-06-04T12:11:00.000Z",
       fields: {
-        name: "Mario Rossi"
+        firstName: "Mario"
       }
     });
     await expect(
@@ -1201,13 +1201,13 @@ describe("persistence service boundary", () => {
       }
     });
     await expect(
-      store.setIntakeField("subject-3", "name", "Mario Rossi", {
+      store.setIntakeField("subject-3", "firstName", "Mario", {
         updatedAt: "2026-06-04T12:12:00.000Z"
       })
     ).resolves.toEqual({
       subjectId: "subject-3",
-      fieldName: "name",
-      value: "Mario Rossi",
+      fieldName: "firstName",
+      value: "Mario",
       updatedAt: "2026-06-04T12:12:00.000Z"
     });
     await expect(
@@ -1233,7 +1233,7 @@ describe("persistence service boundary", () => {
       state: "asking_problem_summary",
       updatedAt: "2026-06-04T12:12:00.000Z",
       fields: {
-        name: "Mario Rossi",
+        firstName: "Mario",
         problemSummary: "Sintesi breve"
       }
     });
@@ -1253,8 +1253,8 @@ describe("persistence service boundary", () => {
     expect(store.snapshotFields()).toEqual([
       {
         subjectId: "subject-3",
-        fieldName: "name",
-        value: "Mario Rossi",
+        fieldName: "firstName",
+        value: "Mario",
         updatedAt: "2026-06-04T12:12:00.000Z"
       },
       {

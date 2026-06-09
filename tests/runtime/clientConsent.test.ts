@@ -30,6 +30,13 @@ describe("client consent runtime", () => {
     expect(result.runtimeDecision.action).toBe("consent_granted_ack");
   });
 
+  it("accepts the short formal consent command case-insensitively", () => {
+    expect(parseConsentDecision("Acconsento")).toBe("granted");
+    expect(parseConsentDecision("ACCONSENTO")).toBe("granted");
+    expect(parseConsentDecision("Non acconsento")).toBe("denied");
+    expect(parseConsentDecision("NON ACCONSENTO")).toBe("denied");
+  });
+
   it("denies and closes only for strict explicit denial text", () => {
     const result = resolveConsentRuntimeDecision({
       consentState: "requested",
@@ -86,6 +93,15 @@ describe("client consent runtime", () => {
     for (const template of Object.values(consentMessageTemplates)) {
       expect(template.toLowerCase()).not.toContain("consiglio legale");
       expect(template.toLowerCase()).not.toContain("legal advice");
+    }
+  });
+
+  it("keeps consent templates in formal Italian register", () => {
+    for (const template of Object.values(consentMessageTemplates)) {
+      expect(template).not.toContain(" tua ");
+      expect(template).not.toContain(" tu ");
+      expect(template).not.toContain("Rispondi");
+      expect(template).not.toContain("scrivi");
     }
   });
 });

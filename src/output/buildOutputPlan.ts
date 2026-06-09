@@ -29,11 +29,15 @@ export const buildOutputPlan = ({
     });
   }
 
-  const body = isConsentRuntimeAction(runtimeDecision.action)
-    ? consentMessageTemplates[runtimeDecision.action]
-    : isIntakeRuntimeAction(runtimeDecision.action)
-      ? intakeMessageTemplates[runtimeDecision.action]
-    : `Placeholder response prepared for ${routingDecision.targetRuntime} runtime.`;
+  const body =
+    runtimeDecision.messageOverride ??
+    (isConsentRuntimeAction(runtimeDecision.action)
+      ? consentMessageTemplates[runtimeDecision.action]
+      : isIntakeRuntimeAction(runtimeDecision.action)
+        ? runtimeDecision.action === "intake_clarify_identity"
+          ? runtimeDecision.messageOverride ?? "Per proseguire mi servono ancora alcuni dati."
+          : intakeMessageTemplates[runtimeDecision.action]
+        : `Placeholder response prepared for ${routingDecision.targetRuntime} runtime.`);
 
   return OutputPlan.parse({
     messages: [

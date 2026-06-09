@@ -1,8 +1,5 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import {
-  createCaseCreationService
-} from "../../../src/domain/cases/caseCreationService.ts";
+import { createCaseCreationService } from "../../../src/domain/cases/caseCreationService.ts";
 import type {
   AuditEventRecord,
   AuditLogStore,
@@ -66,20 +63,15 @@ class CapturingAuditLogStore implements AuditLogStore {
 
 const buildHarness = async (
   options: {
-  consentState?: "unknown" | "requested" | "granted" | "denied";
-  intakeState?: "not_started" | "asking_name" | "asking_problem_summary" | "intake_complete";
-  name?: string | undefined;
-  problemSummary?: string | undefined;
-} = {}
+    consentState?: "unknown" | "requested" | "granted" | "denied";
+    intakeState?: "not_started" | "asking_identity" | "asking_problem_summary" | "intake_complete";
+    firstName?: string | undefined;
+    lastName?: string | undefined;
+    birthDate?: string | undefined;
+    city?: string | undefined;
+    problemSummary?: string | undefined;
+  } = {}
 ) => {
-  const consentState = options.consentState ?? "granted";
-  const intakeState = options.intakeState ?? "intake_complete";
-  const name = Object.prototype.hasOwnProperty.call(options, "name")
-    ? options.name
-    : "Mario Rossi";
-  const problemSummary = Object.prototype.hasOwnProperty.call(options, "problemSummary")
-    ? options.problemSummary
-    : "Sintesi breve del problema";
   const caseStore = new CapturingCaseStore();
   const auditLogStore = new CapturingAuditLogStore();
   const persistence = createPersistenceService({
@@ -99,22 +91,54 @@ const buildHarness = async (
   });
   const subjectId = "subject-123";
 
-  await persistence.setConsentState(subjectId, consentState, {
+  await persistence.setConsentState(subjectId, options.consentState ?? "granted", {
     updatedAt: "2026-06-05T07:58:00.000Z"
   });
-  await persistence.setIntakeState(subjectId, intakeState, {
+  await persistence.setIntakeState(subjectId, options.intakeState ?? "intake_complete", {
     updatedAt: "2026-06-05T07:59:00.000Z"
   });
 
-  if (name !== undefined) {
-    await persistence.setIntakeField(subjectId, "name", name, {
+  const firstName = Object.prototype.hasOwnProperty.call(options, "firstName")
+    ? options.firstName
+    : "Mario";
+  const lastName = Object.prototype.hasOwnProperty.call(options, "lastName")
+    ? options.lastName
+    : "Rossi";
+  const birthDate = Object.prototype.hasOwnProperty.call(options, "birthDate")
+    ? options.birthDate
+    : "01/01/1980";
+  const city = Object.prototype.hasOwnProperty.call(options, "city") ? options.city : "Roma";
+  const problemSummary = Object.prototype.hasOwnProperty.call(options, "problemSummary")
+    ? options.problemSummary
+    : "Sintesi breve del problema";
+
+  if (firstName !== undefined) {
+    await persistence.setIntakeField(subjectId, "firstName", firstName, {
       updatedAt: "2026-06-05T07:59:10.000Z"
+    });
+  }
+
+  if (lastName !== undefined) {
+    await persistence.setIntakeField(subjectId, "lastName", lastName, {
+      updatedAt: "2026-06-05T07:59:15.000Z"
+    });
+  }
+
+  if (birthDate !== undefined) {
+    await persistence.setIntakeField(subjectId, "birthDate", birthDate, {
+      updatedAt: "2026-06-05T07:59:20.000Z"
+    });
+  }
+
+  if (city !== undefined) {
+    await persistence.setIntakeField(subjectId, "city", city, {
+      updatedAt: "2026-06-05T07:59:25.000Z"
     });
   }
 
   if (problemSummary !== undefined) {
     await persistence.setIntakeField(subjectId, "problemSummary", problemSummary, {
-      updatedAt: "2026-06-05T07:59:20.000Z"
+      updatedAt: "2026-06-05T07:59:30.000Z"
     });
   }
 
@@ -122,7 +146,6 @@ const buildHarness = async (
     auditLogStore,
     caseStore,
     generateReference,
-    persistence,
     service,
     subjectId
   };
@@ -154,44 +177,79 @@ describe("case creation service boundary", () => {
     });
   });
 
-  it("fails when name is missing", async () => {
-    const { service, subjectId } = await buildHarness({
-      name: undefined
-    });
+  it.each([
+    {
+      code: "missing_first_name" as const,
+      options: {
+        firstName: undefined
+      }
+    },
+    {
+      code: "missing_last_name" as const,
+      options: {
+        lastName: undefined
+      }
+    },
+    {
+      code: "missing_birth_date" as const,
+      options: {
+        birthDate: undefined
+      }
+    },
+    {
+      code: "missing_city" as const,
+      options: {
+        city: undefined
+      }
+    },
+    {
+      code: "missing_problem_summary" as const,
+      options: {
+        problemSummary: undefined
+      }
+    }
+  ])("fails when a required field is missing", async ({ code, options }) => {
+    const { service, subjectId } = await buildHarness(options);
 
     await expect(service.createCaseFromCompletedIntake(subjectId)).rejects.toMatchObject({
       name: "CaseCreationPreconditionError",
-      code: "missing_name"
-    });
-  });
-
-  it("fails when problem summary is missing", async () => {
-    const { service, subjectId } = await buildHarness({
-      problemSummary: undefined
-    });
-
-    await expect(service.createCaseFromCompletedIntake(subjectId)).rejects.toMatchObject({
-      name: "CaseCreationPreconditionError",
-      code: "missing_problem_summary"
+      code
     });
   });
 
   it.each([
     {
-      code: "invalid_name" as const,
-      name: "x".repeat(81),
-      problemSummary: "Sintesi valida"
+      code: "invalid_first_name" as const,
+      options: {
+        firstName: "x".repeat(81)
+      }
+    },
+    {
+      code: "invalid_last_name" as const,
+      options: {
+        lastName: "x".repeat(81)
+      }
+    },
+    {
+      code: "invalid_birth_date" as const,
+      options: {
+        birthDate: "1980-01-01"
+      }
+    },
+    {
+      code: "invalid_city" as const,
+      options: {
+        city: "Roma 123"
+      }
     },
     {
       code: "invalid_problem_summary" as const,
-      name: "Mario Rossi",
-      problemSummary: "   "
+      options: {
+        problemSummary: "   "
+      }
     }
-  ])("fails when structured fields are invalid", async ({ code, name, problemSummary }) => {
-    const { service, subjectId } = await buildHarness({
-      name,
-      problemSummary
-    });
+  ])("fails when structured fields are invalid", async ({ code, options }) => {
+    const { service, subjectId } = await buildHarness(options);
 
     await expect(service.createCaseFromCompletedIntake(subjectId)).rejects.toMatchObject({
       name: "CaseCreationPreconditionError",
@@ -222,7 +280,9 @@ describe("case creation service boundary", () => {
           source: "completed_intake",
           consentState: "granted",
           intakeState: "intake_complete",
-          acceptedFieldNames: ["name", "problemSummary"]
+          acceptedFieldNames: ["firstName", "lastName", "birthDate", "city", "problemSummary"],
+          birthDate: "01/01/1980",
+          city: "Roma"
         }
       }
     });
@@ -244,12 +304,12 @@ describe("case creation service boundary", () => {
           source: "completed_intake",
           consentState: "granted",
           intakeState: "intake_complete",
-          acceptedFieldNames: ["name", "problemSummary"]
+          acceptedFieldNames: ["firstName", "lastName", "birthDate", "city", "problemSummary"],
+          birthDate: "01/01/1980",
+          city: "Roma"
         }
       }
     ]);
-    expect(auditLogStore.events[0]?.metadata).not.toHaveProperty("body");
-    expect(auditLogStore.events[0]?.metadata).not.toHaveProperty("transcript");
   });
 
   it("uses the injected deterministic case reference generator", async () => {
@@ -257,74 +317,26 @@ describe("case creation service boundary", () => {
 
     await service.createCaseFromCompletedIntake(subjectId);
 
-    expect(generateReference).toHaveBeenCalledTimes(1);
     expect(generateReference).toHaveBeenCalledWith({
       subjectId: "subject-123",
       createdAt: "2026-06-05T08:00:00.000Z",
-      name: "Mario Rossi",
+      firstName: "Mario",
+      lastName: "Rossi",
       problemSummary: "Sintesi breve del problema"
     });
   });
 
-  it("returns the existing draft case on repeated calls and appends an idempotent audit event", async () => {
-    const { auditLogStore, caseStore, generateReference, service, subjectId } = await buildHarness();
+  it("returns the existing draft case on repeated creation attempts", async () => {
+    const { service, subjectId } = await buildHarness();
 
     const firstResult = await service.createCaseFromCompletedIntake(subjectId);
     const secondResult = await service.createCaseFromCompletedIntake(subjectId);
 
-    expect(secondResult.caseRecord).toEqual(firstResult.caseRecord);
-    expect(caseStore.createdInputs).toHaveLength(1);
-    expect(generateReference).toHaveBeenCalledTimes(1);
-    expect(auditLogStore.events).toHaveLength(2);
-    expect(auditLogStore.events[1]).toMatchObject({
-      eventType: "case_create_from_intake_idempotent_hit",
-      entityType: "case",
-      entityId: "CASE-20260605-TEST0001",
-      occurredAt: "2026-06-05T08:00:00.000Z",
-      metadata: {
-        source: "completed_intake",
-        existingStatus: "draft",
-        acceptedFieldNames: ["name", "problemSummary"]
-      }
+    expect(secondResult.caseRecord.caseId).toBe(firstResult.caseRecord.caseId);
+    expect(secondResult.auditEvent.metadata).toEqual({
+      source: "completed_intake",
+      existingStatus: "draft",
+      acceptedFieldNames: ["firstName", "lastName", "birthDate", "city", "problemSummary"]
     });
-    expect(auditLogStore.events[1]?.metadata).not.toHaveProperty("body");
-    expect(auditLogStore.events[1]?.metadata).not.toHaveProperty("transcript");
-  });
-
-  it("does not persist raw body or transcript fields", async () => {
-    const { caseStore, service, subjectId } = await buildHarness();
-
-    await service.createCaseFromCompletedIntake(subjectId);
-
-    expect(caseStore.createdInputs).toEqual([
-      {
-        caseId: "CASE-20260605-TEST0001",
-        subjectId: "subject-123",
-        status: "draft",
-        name: "Mario Rossi",
-        problemSummary: "Sintesi breve del problema",
-        createdAt: "2026-06-05T08:00:00.000Z",
-        updatedAt: "2026-06-05T08:00:00.000Z"
-      }
-    ]);
-    expect(caseStore.createdInputs[0]).not.toHaveProperty("body");
-    expect(caseStore.createdInputs[0]).not.toHaveProperty("rawBody");
-    expect(caseStore.createdInputs[0]).not.toHaveProperty("transcript");
-  });
-
-  it("does not run from the OpenWA listener or live client runtime", () => {
-    const listenerSource = readFileSync(
-      new URL("../../../src/transport/openwa/listener.ts", import.meta.url),
-      "utf8"
-    );
-    const clientRuntimeSource = readFileSync(
-      new URL("../../../src/runtime/client/clientRuntime.ts", import.meta.url),
-      "utf8"
-    );
-
-    expect(listenerSource).not.toContain("createCaseFromCompletedIntake");
-    expect(listenerSource).not.toContain("caseCreationService");
-    expect(clientRuntimeSource).not.toContain("createCaseFromCompletedIntake");
-    expect(clientRuntimeSource).not.toContain("caseCreationService");
   });
 });

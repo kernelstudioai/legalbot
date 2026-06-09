@@ -33,6 +33,8 @@ export interface OpenWaLivenessCheckMeta {
   mode: "read_only" | "noop";
   connected?: boolean;
   connectionState?: string;
+  warningCode?: string;
+  warningMessage?: string;
 }
 
 export type OpenWaLivenessCheck = () => Promise<OpenWaLivenessCheckMeta>;

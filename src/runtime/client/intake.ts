@@ -1,38 +1,41 @@
-import { z } from "zod";
 import { RuntimeDecision } from "../../contracts/index.ts";
 import type { RuntimeDecisionType } from "../../contracts/index.ts";
 import {
-  CLIENT_NAME_MAX_LENGTH,
+  buildAcceptedDisplayName,
   CLIENT_PROBLEM_SUMMARY_MAX_LENGTH,
-  validateAcceptedClientName,
   validateAcceptedProblemSummary
 } from "../../domain/intake/acceptedFields.ts";
+import {
+  createDeterministicIdentityExtractionProvider,
+  identityFieldNames,
+  type AcceptedIdentityFields,
+  type IdentityExtractionProvider,
+  type IdentityFieldName
+} from "../../domain/intake/extraction.ts";
 import { InMemoryIntakeStore, type IntakeFieldName } from "../../persistence/index.ts";
 
-export { CLIENT_NAME_MAX_LENGTH, CLIENT_PROBLEM_SUMMARY_MAX_LENGTH };
+export { CLIENT_PROBLEM_SUMMARY_MAX_LENGTH, identityFieldNames };
 
 export const intakeStates = [
   "not_started",
-  "asking_name",
+  "asking_identity",
   "asking_problem_summary",
   "intake_complete"
 ] as const;
 
 export type IntakeState = (typeof intakeStates)[number];
 
-export interface ClientIntakeRecord {
+export interface ClientIntakeRecord extends Partial<AcceptedIdentityFields> {
   subjectId: string;
   state: IntakeState;
   updatedAt: string;
-  name?: string;
   problemSummary?: string;
 }
 
-export interface SetClientIntakeRecordInput {
+export interface SetClientIntakeRecordInput extends Partial<AcceptedIdentityFields> {
   subjectId: string;
   state: IntakeState;
   updatedAt?: string;
-  name?: string;
   problemSummary?: string;
 }
 
@@ -40,6 +43,48 @@ export interface ClientIntakeStore {
   getIntakeRecord(subjectId: string): Promise<ClientIntakeRecord | null>;
   setIntakeRecord(input: SetClientIntakeRecordInput): Promise<ClientIntakeRecord>;
 }
+
+const persistedIntakeFields = [...identityFieldNames, "problemSummary"] as const satisfies IntakeFieldName[];
+const identityFieldLabels: Record<IdentityFieldName, string> = {
+  firstName: "nome",
+  lastName: "cognome",
+  birthDate: "data di nascita",
+  city: "città"
+};
+
+const buildIdentityClarificationMessage = (missingFields: IdentityFieldName[]): string =>
+  `Per proseguire mi servono ancora, in un unico messaggio:\n${missingFields
+    .map((fieldName) => `- ${identityFieldLabels[fieldName]}`)
+    .join("\n")}`;
+
+const buildIdentityQuestionMessage = (): string =>
+  "Grazie. Per iniziare, mi scriva in un unico messaggio:\n- nome\n- cognome\n- data di nascita\n- città\n\nEsempio: Mario Rossi, 01/01/1980, Roma";
+
+const hasCompleteIdentity = (
+  record: Partial<AcceptedIdentityFields> | null | undefined
+): record is AcceptedIdentityFields =>
+  identityFieldNames.every((fieldName) => Boolean(record?.[fieldName]));
+
+const getIdentityFields = (
+  record: Partial<AcceptedIdentityFields> | null | undefined
+): Partial<AcceptedIdentityFields> => ({
+  ...(record?.firstName ? { firstName: record.firstName } : {}),
+  ...(record?.lastName ? { lastName: record.lastName } : {}),
+  ...(record?.birthDate ? { birthDate: record.birthDate } : {}),
+  ...(record?.city ? { city: record.city } : {})
+});
+
+const toDynamicRuntimeDecision = (
+  action: IntakeRuntimeAction,
+  rationale: string,
+  messageOverride?: string
+): RuntimeDecisionType =>
+  RuntimeDecision.parse({
+    actor: "client",
+    action,
+    rationale,
+    ...(messageOverride ? { messageOverride } : {})
+  });
 
 export class InMemoryClientIntakeStore implements ClientIntakeStore {
   private readonly store = new InMemoryIntakeStore();
@@ -55,7 +100,10 @@ export class InMemoryClientIntakeStore implements ClientIntakeStore {
       subjectId: snapshot.subjectId,
       state: snapshot.state,
       updatedAt: snapshot.updatedAt,
-      ...(snapshot.fields.name ? { name: snapshot.fields.name } : {}),
+      ...(snapshot.fields.firstName ? { firstName: snapshot.fields.firstName } : {}),
+      ...(snapshot.fields.lastName ? { lastName: snapshot.fields.lastName } : {}),
+      ...(snapshot.fields.birthDate ? { birthDate: snapshot.fields.birthDate } : {}),
+      ...(snapshot.fields.city ? { city: snapshot.fields.city } : {}),
       ...(snapshot.fields.problemSummary
         ? {
             problemSummary: snapshot.fields.problemSummary
@@ -70,7 +118,7 @@ export class InMemoryClientIntakeStore implements ClientIntakeStore {
       updatedAt
     });
 
-    for (const fieldName of ["name", "problemSummary"] as const satisfies IntakeFieldName[]) {
+    for (const fieldName of persistedIntakeFields) {
       const value = input[fieldName];
 
       if (!value) {
@@ -86,7 +134,7 @@ export class InMemoryClientIntakeStore implements ClientIntakeStore {
       subjectId: input.subjectId,
       state: input.state,
       updatedAt,
-      ...(input.name ? { name: input.name } : {}),
+      ...getIdentityFields(input),
       ...(input.problemSummary ? { problemSummary: input.problemSummary } : {})
     };
   }
@@ -97,16 +145,22 @@ export class InMemoryClientIntakeStore implements ClientIntakeStore {
 
     return states.map((stateRecord) => {
       const subjectFields = fields.filter((field) => field.subjectId === stateRecord.subjectId);
-      const name = subjectFields.find((field) => field.fieldName === "name")?.value;
-      const problemSummary = subjectFields.find(
-        (field) => field.fieldName === "problemSummary"
-      )?.value;
+      const findField = (fieldName: IntakeFieldName): string | undefined =>
+        subjectFields.find((field) => field.fieldName === fieldName)?.value;
+      const firstName = findField("firstName");
+      const lastName = findField("lastName");
+      const birthDate = findField("birthDate");
+      const city = findField("city");
+      const problemSummary = findField("problemSummary");
 
       return {
         subjectId: stateRecord.subjectId,
         state: stateRecord.state,
         updatedAt: stateRecord.updatedAt,
-        ...(name ? { name } : {}),
+        ...(firstName ? { firstName } : {}),
+        ...(lastName ? { lastName } : {}),
+        ...(birthDate ? { birthDate } : {}),
+        ...(city ? { city } : {}),
         ...(problemSummary ? { problemSummary } : {})
       };
     });
@@ -114,17 +168,16 @@ export class InMemoryClientIntakeStore implements ClientIntakeStore {
 }
 
 export const intakeMessageTemplates = {
-  intake_ask_name:
-    "Consenso registrato. Per iniziare l'intake, rispondi solo con il tuo nome e cognome, senza altri dettagli.",
+  intake_ask_identity: buildIdentityQuestionMessage(),
   intake_ask_problem_summary:
-    "Grazie. Ora invia solo una breve sintesi del problema in un unico messaggio, senza allegati e senza chiedere consulenza legale.",
+    "La ringrazio. Descriva brevemente il problema per cui desidera assistenza.",
   intake_complete_ack:
-    "Grazie. Ho registrato solo i campi strutturati minimi per l'intake iniziale. Non e stata aperta alcuna pratica e non sto fornendo consulenza legale.",
+    "La ringrazio. Ho registrato solo i campi strutturati minimi per la revisione dell'operatore. Non e stata aperta alcuna pratica e non Le sto fornendo consulenza legale.",
   intake_invalid_response:
-    "Risposta non valida. Invia solo il dato richiesto, non vuoto e in forma breve, senza allegati o dettagli aggiuntivi."
+    "La risposta non e valida. Mi invii solo una breve descrizione del problema, senza allegati."
 } as const;
 
-export type IntakeRuntimeAction = keyof typeof intakeMessageTemplates;
+export type IntakeRuntimeAction = keyof typeof intakeMessageTemplates | "intake_clarify_identity";
 
 export interface ResolveClientIntakeRuntimeDecisionInput {
   subjectId: string;
@@ -132,6 +185,7 @@ export interface ResolveClientIntakeRuntimeDecisionInput {
   inboundText?: string;
   consentJustGranted?: boolean;
   now?: () => string;
+  extractionProvider?: IdentityExtractionProvider;
 }
 
 export interface ClientIntakeRuntimeDecisionResult {
@@ -141,27 +195,12 @@ export interface ClientIntakeRuntimeDecisionResult {
   nextRecord?: SetClientIntakeRecordInput;
 }
 
-const createIntakeRuntimeDecision = (
-  action: IntakeRuntimeAction,
-  rationale: string
-): RuntimeDecisionType =>
-  RuntimeDecision.parse({
-    actor: "client",
-    action,
-    rationale
-  });
-
-export const isIntakeRuntimeAction = (
-  action: RuntimeDecisionType["action"]
-): action is IntakeRuntimeAction => action in intakeMessageTemplates;
-
 const buildNextRecord = (
   subjectId: string,
   state: IntakeState,
   existingRecord: ClientIntakeRecord | null,
   now: () => string,
-  fields: {
-    name?: string;
+  fields: Partial<AcceptedIdentityFields> & {
     problemSummary?: string;
   } = {}
 ): SetClientIntakeRecordInput => {
@@ -170,12 +209,20 @@ const buildNextRecord = (
     state,
     updatedAt: now()
   };
-  const nextName = fields.name ?? existingRecord?.name;
-  const nextProblemSummary = fields.problemSummary ?? existingRecord?.problemSummary;
+  const nextIdentityFields = {
+    ...getIdentityFields(existingRecord),
+    ...getIdentityFields(fields)
+  };
 
-  if (nextName) {
-    nextRecord.name = nextName;
+  for (const fieldName of identityFieldNames) {
+    const value = nextIdentityFields[fieldName];
+
+    if (value) {
+      nextRecord[fieldName] = value;
+    }
   }
+
+  const nextProblemSummary = fields.problemSummary ?? existingRecord?.problemSummary;
 
   if (nextProblemSummary) {
     nextRecord.problemSummary = nextProblemSummary;
@@ -184,20 +231,26 @@ const buildNextRecord = (
   return nextRecord;
 };
 
+export const isIntakeRuntimeAction = (
+  action: RuntimeDecisionType["action"]
+): action is IntakeRuntimeAction =>
+  action === "intake_clarify_identity" || action in intakeMessageTemplates;
+
 export const resolveClientIntakeRuntimeDecision = ({
   subjectId,
   intakeRecord,
   inboundText,
   consentJustGranted = false,
-  now = () => new Date().toISOString()
+  now = () => new Date().toISOString(),
+  extractionProvider = createDeterministicIdentityExtractionProvider()
 }: ResolveClientIntakeRuntimeDecisionInput): ClientIntakeRuntimeDecisionResult => {
   const currentRecord = intakeRecord ?? null;
   const currentState = currentRecord?.state ?? "not_started";
 
-  if (currentState === "intake_complete") {
+  if (currentState === "intake_complete" && hasCompleteIdentity(currentRecord) && currentRecord.problemSummary) {
     return {
       intakeState: "intake_complete",
-      runtimeDecision: createIntakeRuntimeDecision(
+      runtimeDecision: toDynamicRuntimeDecision(
         "intake_complete_ack",
         "Client intake is already complete"
       ),
@@ -207,40 +260,72 @@ export const resolveClientIntakeRuntimeDecision = ({
 
   if (consentJustGranted || currentState === "not_started") {
     return {
-      intakeState: "asking_name",
-      runtimeDecision: createIntakeRuntimeDecision(
-        "intake_ask_name",
-        "Consent is granted and intake starts by collecting the client name"
+      intakeState: "asking_identity",
+      runtimeDecision: toDynamicRuntimeDecision(
+        "intake_ask_identity",
+        "Consent is granted and intake starts by collecting structured identity data"
       ),
-      messageTemplate: intakeMessageTemplates.intake_ask_name,
-      nextRecord: buildNextRecord(subjectId, "asking_name", currentRecord, now)
+      messageTemplate: intakeMessageTemplates.intake_ask_identity,
+      nextRecord: buildNextRecord(subjectId, "asking_identity", currentRecord, now)
     };
   }
 
-  if (currentState === "asking_name") {
-    const parsedName = validateAcceptedClientName(inboundText);
+  if (currentState === "asking_identity") {
+    const extraction = extractionProvider.extractIdentity({
+      text: inboundText ?? "",
+      existingFields: getIdentityFields(currentRecord)
+    });
+    const nextIdentityFields = extraction.acceptedFields;
 
-    if (!parsedName.valid) {
+    if (extraction.missingFields.length > 0) {
+      const messageTemplate = buildIdentityClarificationMessage(extraction.missingFields);
+
       return {
-        intakeState: "asking_name",
-        runtimeDecision: createIntakeRuntimeDecision(
-          "intake_invalid_response",
-          "Rejected empty or overly long intake name"
+        intakeState: "asking_identity",
+        runtimeDecision: toDynamicRuntimeDecision(
+          "intake_clarify_identity",
+          "Identity extraction is incomplete or ambiguous and requires clarification",
+          messageTemplate
         ),
-        messageTemplate: intakeMessageTemplates.intake_invalid_response
+        messageTemplate,
+        ...(Object.keys(nextIdentityFields).length > 0
+          ? {
+              nextRecord: buildNextRecord(
+                subjectId,
+                "asking_identity",
+                currentRecord,
+                now,
+                nextIdentityFields
+              )
+            }
+          : {})
+      };
+    }
+
+    const nextRecord = buildNextRecord(subjectId, "asking_problem_summary", currentRecord, now, nextIdentityFields);
+
+    if (nextRecord.problemSummary) {
+      nextRecord.state = "intake_complete";
+
+      return {
+        intakeState: "intake_complete",
+        runtimeDecision: toDynamicRuntimeDecision(
+          "intake_complete_ack",
+          "Completed missing identity fields for a previously summarized intake"
+        ),
+        messageTemplate: intakeMessageTemplates.intake_complete_ack,
+        nextRecord
       };
     }
 
     return {
       intakeState: "asking_problem_summary",
-      runtimeDecision: createIntakeRuntimeDecision(
+      runtimeDecision: toDynamicRuntimeDecision(
         "intake_ask_problem_summary",
-        "Accepted structured client name and advanced intake to problem summary"
+        "Accepted structured identity fields and advanced intake to problem summary"
       ),
       messageTemplate: intakeMessageTemplates.intake_ask_problem_summary,
-      nextRecord: buildNextRecord(subjectId, "asking_problem_summary", currentRecord, now, {
-        name: parsedName.value
-      })
+      nextRecord
     };
   }
 
@@ -249,7 +334,7 @@ export const resolveClientIntakeRuntimeDecision = ({
   if (!parsedSummary.valid) {
     return {
       intakeState: "asking_problem_summary",
-      runtimeDecision: createIntakeRuntimeDecision(
+      runtimeDecision: toDynamicRuntimeDecision(
         "intake_invalid_response",
         "Rejected empty or overly long intake problem summary"
       ),
@@ -257,11 +342,29 @@ export const resolveClientIntakeRuntimeDecision = ({
     };
   }
 
+  const identityFields = getIdentityFields(currentRecord);
+
+  if (!hasCompleteIdentity(identityFields)) {
+    const missingFields = identityFieldNames.filter((fieldName) => !identityFields[fieldName]);
+    const messageTemplate = buildIdentityClarificationMessage(missingFields);
+
+    return {
+      intakeState: "asking_identity",
+      runtimeDecision: toDynamicRuntimeDecision(
+        "intake_clarify_identity",
+        "Problem summary was received before structured identity fields were complete",
+        messageTemplate
+      ),
+      messageTemplate,
+      nextRecord: buildNextRecord(subjectId, "asking_identity", currentRecord, now)
+    };
+  }
+
   return {
     intakeState: "intake_complete",
-    runtimeDecision: createIntakeRuntimeDecision(
+    runtimeDecision: toDynamicRuntimeDecision(
       "intake_complete_ack",
-      "Accepted structured problem summary and completed the intake skeleton"
+      `Accepted structured intake for ${buildAcceptedDisplayName(identityFields)}`
     ),
     messageTemplate: intakeMessageTemplates.intake_complete_ack,
     nextRecord: buildNextRecord(subjectId, "intake_complete", currentRecord, now, {
@@ -269,5 +372,3 @@ export const resolveClientIntakeRuntimeDecision = ({
     })
   };
 };
-
-export const intakeStateSchema = z.enum(intakeStates);

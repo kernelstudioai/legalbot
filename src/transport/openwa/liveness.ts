@@ -16,6 +16,11 @@ const hasIsConnected = (
 const toFailureReason = (connectionState: string): string =>
   `openwa_connection_state_${connectionState.toLowerCase()}`;
 
+const isMalformedOpenWaResponseError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return /Cannot read properties of undefined \(reading 'default'\)/.test(message);
+};
+
 export const createNoopOpenWaLivenessCheck = (): OpenWaLivenessCheck => async () => ({
   mode: "noop"
 });
@@ -33,11 +38,20 @@ export const createOpenWaLivenessCheck = (
     };
 
     if (hasGetConnectionState(client)) {
-      const connectionState = await client.getConnectionState();
-      meta.connectionState = connectionState;
+      try {
+        const connectionState = await client.getConnectionState();
+        meta.connectionState = connectionState;
 
-      if (connectionState !== STATE.CONNECTED) {
-        throw new Error(toFailureReason(String(connectionState)));
+        if (connectionState !== STATE.CONNECTED) {
+          throw new Error(toFailureReason(String(connectionState)));
+        }
+      } catch (error) {
+        if (isMalformedOpenWaResponseError(error)) {
+          meta.warningCode = "openwa_liveness_malformed_response";
+          meta.warningMessage = "OpenWA returned an unexpected liveness response shape";
+        } else {
+          throw error;
+        }
       }
     }
 

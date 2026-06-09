@@ -51,7 +51,7 @@ describe("db bootstrap commands", () => {
       migrations_enabled: true
     });
     expect(logger.info).toHaveBeenCalledWith("db_migration_complete", {
-      applied_migration_count: 10,
+      applied_migration_count: 11,
       applied_migration_ids: [
         "0001_create_cases",
         "0002_create_processed_messages",
@@ -62,7 +62,8 @@ describe("db bootstrap commands", () => {
         "0007_create_intake_fields",
         "0008_create_intake_events",
         "0009_harden_cases_schema",
-        "0010_enforce_draft_case_uniqueness"
+        "0010_enforce_draft_case_uniqueness",
+        "0011_normalize_intake_schema_for_identity_fields"
       ],
       database_path: databasePath,
       migrations_enabled: true,
@@ -92,7 +93,7 @@ describe("db bootstrap commands", () => {
       applied_migration_ids: [],
       database_path: databasePath,
       migrations_enabled: false,
-      pending_migration_count: 10,
+      pending_migration_count: 11,
       pending_migration_ids: [
         "0001_create_cases",
         "0002_create_processed_messages",
@@ -103,7 +104,8 @@ describe("db bootstrap commands", () => {
         "0007_create_intake_fields",
         "0008_create_intake_events",
         "0009_harden_cases_schema",
-        "0010_enforce_draft_case_uniqueness"
+        "0010_enforce_draft_case_uniqueness",
+        "0011_normalize_intake_schema_for_identity_fields"
       ]
     });
   });
@@ -128,7 +130,7 @@ describe("db bootstrap commands", () => {
       applied_migration_ids: [],
       database_path: databasePath,
       migrations_enabled: true,
-      pending_migration_count: 10,
+      pending_migration_count: 11,
       pending_migration_ids: [
         "0001_create_cases",
         "0002_create_processed_messages",
@@ -139,7 +141,8 @@ describe("db bootstrap commands", () => {
         "0007_create_intake_fields",
         "0008_create_intake_events",
         "0009_harden_cases_schema",
-        "0010_enforce_draft_case_uniqueness"
+        "0010_enforce_draft_case_uniqueness",
+        "0011_normalize_intake_schema_for_identity_fields"
       ]
     });
 
@@ -169,7 +172,7 @@ describe("db bootstrap commands", () => {
 
     expect(appliedSummary.exitCode).toBe(0);
     expect(statusLogger.info).toHaveBeenCalledWith("db_status_checked", {
-      applied_migration_count: 10,
+      applied_migration_count: 11,
       applied_migration_ids: [
         "0001_create_cases",
         "0002_create_processed_messages",
@@ -180,7 +183,8 @@ describe("db bootstrap commands", () => {
         "0007_create_intake_fields",
         "0008_create_intake_events",
         "0009_harden_cases_schema",
-        "0010_enforce_draft_case_uniqueness"
+        "0010_enforce_draft_case_uniqueness",
+        "0011_normalize_intake_schema_for_identity_fields"
       ],
       database_path: databasePath,
       migrations_enabled: true,

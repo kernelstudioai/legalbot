@@ -11,7 +11,13 @@ import type {
   SetIntakeStateOptions
 } from "../intakeStore.ts";
 
-const acceptedIntakeFields = new Set<IntakeFieldName>(["name", "problemSummary"]);
+const acceptedIntakeFields = new Set<IntakeFieldName>([
+  "firstName",
+  "lastName",
+  "birthDate",
+  "city",
+  "problemSummary"
+]);
 
 const mapStateRow = (row: {
   subject_id: string;

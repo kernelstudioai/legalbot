@@ -24,7 +24,9 @@ M20 hardens SQLite historical databases. Migration `0010_enforce_draft_case_uniq
 
 M21 adds safe error mapping for that SQLite uniqueness rule and an operator-only `npm run case:doctor` remediation report. Duplicate draft writes now fail with a sanitized application error instead of a raw SQLite constraint message, and operators can inspect migration readiness plus case consistency counts without dumping database contents.
 
-M22 adds an operator-only `npm run intake:list-ready` helper plus a durable live E2E runbook. The helper lists only consent-granted completed intakes that already contain both accepted fields, prints only sanitized operator-safe `subjectId` tokens plus state metadata, and still does not create cases automatically.
+M22 adds an operator-only `npm run intake:list-ready` helper plus a durable live E2E runbook. The helper lists only consent-granted completed intakes that already contain all accepted structured fields, prints only sanitized operator-safe `subjectId` tokens plus state metadata, and still does not create cases automatically.
+
+M26 adds a durable identity-extraction boundary. The live runtime still uses a deterministic local provider only, but the extraction interface is now isolated so a future behind-the-scenes AI provider can be inserted without changing OpenWA transport wiring or broad persistence contracts. AI remains internal only, does not provide legal advice, does not decide whether to accept a case, and does not create cases automatically.
 
 M23 makes the single-bot runtime default to SQLite-backed technical persistence plus the local status surface, while keeping the same no-transcript and no-auto-case boundaries and adding a Docker runtime baseline.
 
@@ -70,7 +72,7 @@ M23 makes the single-bot runtime default to SQLite-backed technical persistence 
 - M16 does not wire that service into the live OpenWA listener or intake-completion runtime path yet.
 - `src/app/caseCreateFromIntake.ts` is the operator entrypoint for manual case creation. It loads env through the shared loader, requires an already migrated SQLite database, accepts `--subject <subjectId>`, and prints only `{ caseId, status, createdAt }`. Repeated runs for the same completed-intake subject return the existing draft case instead of creating another one.
 - `src/app/caseDoctor.ts` is the operator entrypoint for persistence consistency checks. It loads env through the shared loader, requires an already migrated SQLite database, checks only migration and case-count aggregates, and never prints raw rows, SQL text, database paths, message bodies, transcripts, secrets, or full phone numbers.
-- `src/app/intakeListReady.ts` is the operator entrypoint for completed-intake discovery. It loads env through the shared loader, requires an already migrated SQLite database, lists only consent-granted `intake_complete` subjects that already have both accepted intake fields, and prints only `{ subjectId, intakeState, updatedAt, fieldNamesPresent }`.
+- `src/app/intakeListReady.ts` is the operator entrypoint for completed-intake discovery. It loads env through the shared loader, requires an already migrated SQLite database, lists only consent-granted `intake_complete` subjects that already have all accepted intake fields, and prints only `{ subjectId, intakeState, updatedAt, fieldNamesPresent }`.
 - The `subjectId` printed by `npm run intake:list-ready` is an operator-safe token accepted by `npm run case:create-from-intake -- --subject <subjectId>`. It does not print the raw phone-derived subject identifier.
 
 ## SQLite Foundation
@@ -88,6 +90,7 @@ M23 makes the single-bot runtime default to SQLite-backed technical persistence 
 - The Docker baseline overrides only container-specific values: `OPENWA_STATUS_SERVER_HOST=0.0.0.0`, `OPENWA_HEADLESS=true`, and `OPENWA_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium`.
 - `0009_harden_cases_schema` safely rebuilds legacy `cases` tables when older SQLite files still use `reference`, camelCase columns, or extra transcript/body columns, and it copies forward only the minimal supported case fields.
 - `0010_enforce_draft_case_uniqueness` scans historical `draft` cases by `subjectId`, keeps the earliest `created_at` row as `draft`, marks later duplicates as `duplicate_archived`, and adds the partial unique index `cases_one_draft_per_subject_id` on `cases(subject_id) WHERE status = 'draft'`.
+- `0011_normalize_intake_schema_for_identity_fields` upgrades intake state and field storage to the formal single-message identity flow and preserves only supported structured values in the new schema.
 - `npm run case:doctor` reports only aggregate counts: applied and pending migration counts, current `draft` case count, unique `draft` subject count, `duplicate_archived` count, duplicate-draft anomaly counts, and whether the committed draft-uniqueness index is present.
 - Technical runtime startup never runs migrations. When `TECHNICAL_PERSISTENCE_ENABLED=true`, startup requires `npm run db:migrate` to have been completed already or it fails safely with a clear error.
 - Current tables:
@@ -118,7 +121,10 @@ M23 makes the single-bot runtime default to SQLite-backed technical persistence 
 - Consent-state persistence does not store transcripts, message bodies, legal facts, or case records.
 - Intake persistence is consent-gated. Before consent is `granted`, runtime intake persistence must not write state, fields, or intake events.
 - Intake persistence stores only:
-  - `name`
+  - `firstName`
+  - `lastName`
+  - `birthDate`
+  - `city`
   - `problemSummary`
 - Intake persistence stores state transitions separately from accepted structured fields and may append intake events without duplicating raw message content.
 - Intake persistence must not store raw inbound bodies, invalid replies, rejected values, full transcripts, attachments, or live case records.
@@ -132,15 +138,15 @@ M23 makes the single-bot runtime default to SQLite-backed technical persistence 
   - `updatedAt`
 - The M17 schema-hardening migration copies forward only those case fields and removes legacy `rawBody`, `body`, `transcript`, or other extra columns from the SQLite `cases` table.
 - Case creation does not store full phone-number metadata, raw message bodies, transcripts, rejected values, attachments, or legal advice content.
-- The M18 manual command still stores only the accepted structured `name` and `problemSummary` fields already present in intake persistence. It does not persist raw bodies, transcripts, rejected values, or secret-bearing metadata.
+- The M18 manual command still stores only the accepted structured intake fields already present in intake persistence. It does not persist raw bodies, transcripts, rejected values, or secret-bearing metadata.
 - M19 keeps manual case creation idempotent by `subjectId` plus existing `draft` case. The idempotent-hit audit event stores only sanitized structured metadata and does not persist transcripts, raw bodies, rejected values, or full phone numbers.
 - M20 remediation never stores transcripts, message bodies, or rejected values. It changes only case status metadata inside the existing `cases` table and preserves duplicate rows as `duplicate_archived` instead of deleting them.
 - M21 uniqueness-error mapping and `case:doctor` output are sanitized by policy. They must not expose SQL statements, database paths, raw rows, message bodies, transcripts, rejected values, or secrets.
 - M22 `intake:list-ready` output is sanitized by policy. It must not expose raw subject ids, full phone numbers, SQL text, database paths, raw rows, message bodies, transcripts, rejected values, or secrets.
 - Live WhatsApp runtime writes never create or update cases automatically.
 - M13 live consent wiring never stores inbound message body text in consent state metadata or consent events.
-- M15 live intake wiring persists only accepted structured `name` and `problemSummary` values plus sanitized metadata after explicit `granted` consent.
-- M16 case creation requires `granted` consent, `intake_complete`, and valid accepted `name` plus `problemSummary` fields. It remains a separate application boundary with its own tests and review.
+- M15 live intake wiring persists only accepted structured `firstName`, `lastName`, `birthDate`, `city`, and `problemSummary` values plus sanitized metadata after explicit `granted` consent.
+- M16 case creation requires `granted` consent, `intake_complete`, and valid accepted identity fields plus `problemSummary`. It remains a separate application boundary with its own tests and review.
 
 ## File Location And Backups
 
@@ -179,11 +185,12 @@ M23 makes the single-bot runtime default to SQLite-backed technical persistence 
 - Client consent runtime behavior is separate:
   - optional application-layer consent persistence injection can read current consent state before the client runtime decides the response
   - `unknown` -> output `request_consent`, optionally persist `requested`
-  - `requested` + explicit grant -> persist `granted`, append `consent_granted`, start intake with `intake_ask_name`
+  - `requested` + explicit grant -> persist `granted`, append `consent_granted`, start intake with `intake_ask_identity`
   - `requested` + explicit denial -> persist `denied`, append `consent_denied`, output `consent_denied_close`
   - `requested` + ambiguous reply -> output `consent_clarification` without granting consent
-  - `granted` + `not_started` -> persist `asking_name` and output `intake_ask_name`
-  - `granted` + valid `asking_name` reply -> persist `asking_problem_summary`, store only the accepted `name` field, and output `intake_ask_problem_summary`
+  - `granted` + `not_started` -> persist `asking_identity` and output `intake_ask_identity`
+  - `granted` + extractable `asking_identity` reply -> persist `asking_problem_summary`, store only accepted `firstName`, `lastName`, `birthDate`, and `city`, and output `intake_ask_problem_summary`
+  - `granted` + incomplete or ambiguous `asking_identity` reply -> persist only safe partial accepted identity fields, output `intake_clarify_identity`, and do not persist the raw rejected text
   - `granted` + valid `asking_problem_summary` reply -> persist `intake_complete`, store only the accepted `problemSummary` field, and output `intake_complete_ack`
   - invalid intake values -> output `intake_invalid_response` without storing the raw reply
   - `denied` -> output the safe no-processing close response
@@ -191,7 +198,7 @@ M23 makes the single-bot runtime default to SQLite-backed technical persistence 
   - read consent state
   - read intake snapshot
   - require `granted` consent and `intake_complete`
-  - revalidate accepted `name` and `problemSummary`
+  - revalidate accepted identity fields plus `problemSummary`
   - create a minimal `draft` case
   - append sanitized `case_created_from_intake`
   - commit both writes inside one persistence transaction when the bundled SQLite or in-memory persistence implementation is used
