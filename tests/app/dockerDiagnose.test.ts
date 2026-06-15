@@ -67,7 +67,7 @@ describe("docker diagnose command", () => {
       string,
       { exitCode: number; stdout: string; stderr: string }
     > = {
-      "ps --format json": {
+      "ps --all --format json": {
         exitCode: 0,
         stdout: JSON.stringify([
           {
@@ -153,10 +153,11 @@ describe("docker diagnose command", () => {
     const stdout = createStdout();
 
     const summary = await runDockerDiagnoseCommand({
+      envSource: {},
       logger,
       stdout,
       composeRunner: createComposeRunner({
-        "ps --format json": {
+        "ps --all --format json": {
           exitCode: 0,
           stdout: JSON.stringify([
             {
@@ -290,10 +291,11 @@ describe("docker diagnose command", () => {
 
   it("detects host port unreachable while the app is healthy inside the container", async () => {
     const summary = await runDockerDiagnoseCommand({
+      envSource: {},
       logger: createLogger(),
       stdout: createStdout(),
       composeRunner: createComposeRunner({
-        "ps --format json": {
+        "ps --all --format json": {
           exitCode: 0,
           stdout: JSON.stringify([
             {
@@ -384,10 +386,11 @@ describe("docker diagnose command", () => {
 
   it("detects pending WhatsApp auth when ready stays false inside the container", async () => {
     const summary = await runDockerDiagnoseCommand({
+      envSource: {},
       logger: createLogger(),
       stdout: createStdout(),
       composeRunner: createComposeRunner({
-        "ps --format json": {
+        "ps --all --format json": {
           exitCode: 0,
           stdout: JSON.stringify([
             {
@@ -486,5 +489,184 @@ describe("docker diagnose command", () => {
       summary:
         "The app is alive inside the container, but the selected transport is not ready yet."
     });
+  });
+
+  it("accepts Linux Compose status output for a running Cloud service with health starting", async () => {
+    const composeResponses: Record<
+      string,
+      { exitCode: number; stdout: string; stderr: string }
+    > = {
+      "ps --all --format json": {
+        exitCode: 0,
+        stdout: `${JSON.stringify({
+          Service: "legalbot-whatsapp-cloud",
+          Status: "Up 8 seconds (health: starting)",
+          Health: "starting"
+        })}\n`,
+        stderr: ""
+      },
+      "port legalbot-whatsapp-cloud 3002": {
+        exitCode: 0,
+        stdout: "127.0.0.1:3002\n",
+        stderr: ""
+      }
+    };
+    const probePrefix =
+      "exec -T legalbot-whatsapp-cloud node -e const path = process.argv[1];fetch(`http://127.0.0.1:3002${path}`)";
+
+    for (const path of ["/health", "/ready", "/status"]) {
+      const key = Object.keys(composeResponses).find((candidate) => candidate.endsWith(path));
+      expect(key).toBeUndefined();
+      composeResponses[
+        `${probePrefix}  .then(async (response) => {    let body;    try { body = await response.json(); } catch { body = undefined; }    process.stdout.write(JSON.stringify({ statusCode: response.status, ok: response.ok, body }));  })  .catch((error) => {    process.stdout.write(JSON.stringify({ statusCode: null, ok: false, error: error.message }));  }); ${path}`
+      ] = {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          ok: path !== "/ready",
+          statusCode: path === "/ready" ? 503 : 200,
+          body: path === "/health"
+            ? { alive: true, transport: { state: "starting", ready: false } }
+            : { state: "starting", ready: false }
+        }),
+        stderr: ""
+      };
+    }
+
+    const summary = await runDockerDiagnoseCommand({
+      envSource: {
+        WHATSAPP_TRANSPORT: "cloud"
+      },
+      logger: createLogger(),
+      stdout: createStdout(),
+      composeRunner: createComposeRunner(composeResponses),
+      httpProbeRunner: createHttpProbeRunner({
+        "http://127.0.0.1:3002/health": {
+          ok: true,
+          statusCode: 200,
+          body: { alive: true, transport: { state: "starting", ready: false } }
+        },
+        "http://127.0.0.1:3002/ready": {
+          ok: false,
+          statusCode: 503,
+          body: { state: "starting", ready: false }
+        },
+        "http://127.0.0.1:3002/status": {
+          ok: true,
+          statusCode: 200,
+          body: { state: "starting", ready: false }
+        }
+      })
+    });
+
+    expect(summary.report).toMatchObject({
+      diagnosis: { code: "app_not_ready_auth_missing" },
+      compose: {
+        servicePresent: true,
+        running: true,
+        state: "running",
+        health: "starting"
+      }
+    });
+  });
+
+  it("distinguishes an exited service from a missing service", async () => {
+    const createUnavailableProbes = () =>
+      createHttpProbeRunner({
+        "http://127.0.0.1:3002/health": {
+          ok: false,
+          statusCode: null,
+          error: "connect ECONNREFUSED"
+        },
+        "http://127.0.0.1:3002/ready": {
+          ok: false,
+          statusCode: null,
+          error: "connect ECONNREFUSED"
+        },
+        "http://127.0.0.1:3002/status": {
+          ok: false,
+          statusCode: null,
+          error: "connect ECONNREFUSED"
+        }
+      });
+    const baseOptions = {
+      envSource: { WHATSAPP_TRANSPORT: "cloud" },
+      logger: createLogger(),
+      stdout: createStdout(),
+      httpProbeRunner: createUnavailableProbes()
+    };
+    const exited = await runDockerDiagnoseCommand({
+      ...baseOptions,
+      composeRunner: createComposeRunner({
+        "ps --all --format json": {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              Service: "legalbot-whatsapp-cloud",
+              State: "exited",
+              Health: ""
+            }
+          ]),
+          stderr: ""
+        },
+        "port legalbot-whatsapp-cloud 3002": {
+          exitCode: 1,
+          stdout: "",
+          stderr: "service is not running"
+        }
+      })
+    });
+    const missing = await runDockerDiagnoseCommand({
+      ...baseOptions,
+      composeRunner: createComposeRunner({
+        "ps --all --format json": {
+          exitCode: 0,
+          stdout: "[]",
+          stderr: ""
+        },
+        "port legalbot-whatsapp-cloud 3002": {
+          exitCode: 1,
+          stdout: "",
+          stderr: "no container"
+        }
+      })
+    });
+
+    expect(exited.report?.diagnosis.code).toBe("container_not_running");
+    expect(exited.report?.compose).toMatchObject({
+      servicePresent: true,
+      running: false,
+      state: "exited"
+    });
+    expect(missing.report?.diagnosis.code).toBe("compose_service_missing");
+    expect(missing.report?.compose.servicePresent).toBe(false);
+  });
+
+  it("redacts sensitive probe errors and keeps the selected Cloud port in failure output", async () => {
+    const stdout = createStdout();
+    const summary = await runDockerDiagnoseCommand({
+      envSource: {
+        WHATSAPP_TRANSPORT: "cloud"
+      },
+      logger: createLogger(),
+      stdout,
+      composeRunner: createComposeRunner({
+        "ps --all --format json": {
+          exitCode: 1,
+          stdout: "",
+          stderr: "token in /home/legalbot/.env"
+        }
+      }),
+      httpProbeRunner: createHttpProbeRunner({})
+    });
+
+    expect(summary.report).toMatchObject({
+      diagnosis: {
+        code: "docker_compose_unavailable",
+        summary: "redacted_sensitive_value"
+      },
+      hostPort: "127.0.0.1:3002"
+    });
+    expect(stdout.output).not.toContain("/home/legalbot/.env");
+    expect(stdout.output).not.toContain("token in");
   });
 });

@@ -24,6 +24,7 @@ import {
 type OpsPostStartCode =
   | "app_not_ready_auth_missing"
   | "app_ready"
+  | "compose_service_missing"
   | "container_not_running"
   | "container_unhealthy"
   | "host_port_mapping_issue";

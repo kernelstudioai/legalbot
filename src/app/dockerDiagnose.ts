@@ -16,6 +16,7 @@ import {
 type DockerDiagnoseCode =
   | "app_not_ready_auth_missing"
   | "app_ready"
+  | "compose_service_missing"
   | "container_not_running"
   | "container_unhealthy"
   | "docker_compose_unavailable"
@@ -240,7 +241,9 @@ const toEndpointSummary = (probe: HttpProbeResult): EndpointSummary => ({
   reachable: probe.statusCode !== null,
   statusCode: probe.statusCode,
   ...(probe.body ? { body: probe.body } : {}),
-  ...(probe.error ? { error: probe.error } : {})
+  ...(probe.error
+    ? { error: sanitizeUnknownString(probe.error) ?? "redacted_sensitive_value" }
+    : {})
 });
 
 const parseJsonOutput = <T>(stdout: string): T | null => {
@@ -265,7 +268,7 @@ const getComposePsEntry = (
   composeRunner: DockerComposeRunner,
   serviceName: string
 ): DockerPsEntry | null => {
-  const result = composeRunner.run(["ps", "--format", "json"]);
+  const result = composeRunner.run(["ps", "--all", "--format", "json"]);
 
   if (result.exitCode !== 0) {
     throw new Error(result.stderr.trim() || result.stdout.trim() || "docker_compose_ps_failed");
@@ -293,7 +296,10 @@ const getComposeHostPortBinding = (
   const portResult = composeRunner.run(["port", serviceName, port]);
 
   if (portResult.exitCode === 0) {
-    return portResult.stdout.trim() || null;
+    return portResult.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean) ?? null;
   }
 
   const publishers = Array.isArray(psEntry?.Publishers) ? psEntry.Publishers : [];
@@ -306,6 +312,28 @@ const getComposeHostPortBinding = (
   }
 
   return `${publisher.URL ?? "127.0.0.1"}:${publisher.PublishedPort ?? port}`;
+};
+
+const getComposeState = (entry: DockerPsEntry | null): string | null => {
+  if (typeof entry?.State === "string" && entry.State.trim()) {
+    return entry.State.trim().toLowerCase();
+  }
+
+  if (typeof entry?.Status !== "string" || !entry.Status.trim()) {
+    return null;
+  }
+
+  const status = entry.Status.trim().toLowerCase();
+
+  if (status.startsWith("up ") || status === "up" || status.startsWith("running")) {
+    return "running";
+  }
+
+  if (status.startsWith("exited") || status.startsWith("exit ")) {
+    return "exited";
+  }
+
+  return status.split(/\s+/)[0] ?? null;
 };
 
 const probeEndpoints = async (
@@ -372,7 +400,9 @@ const probeContainerEndpoints = async (
       return {
         reachable: false,
         statusCode: null,
-        error: result.stderr.trim() || result.stdout.trim() || "container_probe_failed"
+        error:
+          sanitizeUnknownString(result.stderr.trim() || result.stdout.trim()) ??
+          "container_probe_failed"
       };
     }
 
@@ -429,7 +459,15 @@ const inferDiagnosis = ({
   status: DockerDiagnoseStatus;
   summary: string;
 } => {
-  if (!compose.servicePresent || !compose.running) {
+  if (!compose.servicePresent) {
+    return {
+      code: "compose_service_missing",
+      status: "error",
+      summary: "The selected LegalBot Compose service is missing from the project state."
+    };
+  }
+
+  if (!compose.running) {
     return {
       code: "container_not_running",
       status: "error",
@@ -446,7 +484,7 @@ const inferDiagnosis = ({
   }
 
   if (inContainer.health.statusCode === 200 && host.health.statusCode === null) {
-    if (!compose.hostPortBinding || !compose.hostPortBinding.startsWith(expectedHostPort)) {
+    if (compose.hostPortBinding !== expectedHostPort) {
       return {
         code: "host_port_mapping_issue",
         status: "error",
@@ -539,11 +577,13 @@ export const runDockerDiagnoseCommand = async (
     );
     const hostPort = `127.0.0.1:${runtime.port}`;
     const host = await probeEndpoints(httpProbeRunner, `http://${hostPort}`);
+    const composeState = getComposeState(psEntry);
     const composeSummary: DockerComposeSummary = {
       servicePresent: psEntry !== null,
-      running: psEntry?.State === "running",
-      state: psEntry?.State ?? null,
-      health: psEntry?.Health ?? null,
+      running: composeState === "running",
+      state: composeState,
+      health:
+        typeof psEntry?.Health === "string" ? psEntry.Health.trim().toLowerCase() : null,
       hostPortBinding
     };
     const inContainer =
@@ -604,11 +644,11 @@ export const runDockerDiagnoseCommand = async (
         code: "docker_compose_unavailable",
         summary:
           error instanceof Error
-            ? error.message
+            ? sanitizeUnknownString(error.message) ?? "Docker Compose diagnostics could not run."
             : "Docker Compose diagnostics could not run."
       },
       checkedAt: new Date().toISOString(),
-      hostPort: "127.0.0.1:3001",
+      hostPort: `127.0.0.1:${runtime.port}`,
       compose: {
         servicePresent: false,
         running: false,
