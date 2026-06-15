@@ -1,6 +1,94 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
+import os from "node:os";
+import { join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { afterEach, describe, expect, it } from "vitest";
+
+const tempDirectories: string[] = [];
+
+const createTempDir = (): string => {
+  const tempDir = mkdtempSync(join(os.tmpdir(), "legalbot-systemd-test-"));
+  tempDirectories.push(tempDir);
+  return tempDir;
+};
+
+const writeExecutable = (directory: string, name: string, body: string): string => {
+  const targetPath = join(directory, name);
+  writeFileSync(targetPath, body, "utf8");
+  chmodSync(targetPath, 0o755);
+  return targetPath;
+};
+
+const createFakeBin = () => {
+  const fakeBin = createTempDir();
+  const npmPath = writeExecutable(fakeBin, "npm", "#!/usr/bin/env bash\nexit 0\n");
+
+  writeExecutable(fakeBin, "uname", "#!/usr/bin/env bash\necho Linux\n");
+  writeExecutable(fakeBin, "systemctl", "#!/usr/bin/env bash\nexit 0\n");
+
+  return {
+    fakeBin,
+    npmPath
+  };
+};
+
+const runDryRun = (args: string[], envFileContents?: string) => {
+  const projectRoot = createTempDir();
+  const envFilePath = join(projectRoot, "legalbot.env");
+  const { fakeBin, npmPath } = createFakeBin();
+  const scriptPath = resolve(process.cwd(), "scripts/provision-systemd.sh");
+
+  if (envFileContents !== undefined) {
+    writeFileSync(envFilePath, envFileContents, "utf8");
+  }
+
+  const result = spawnSync(
+    "bash",
+    [
+      scriptPath,
+      "--dry-run",
+      "--project-root",
+      projectRoot,
+      "--env-file",
+      envFilePath,
+      "--npm-path",
+      npmPath,
+      "--user",
+      "deploy",
+      ...args
+    ],
+    {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH ?? ""}`
+      }
+    }
+  );
+
+  return {
+    envFilePath,
+    npmPath,
+    result
+  };
+};
+
+afterEach(() => {
+  while (tempDirectories.length > 0) {
+    const tempDir = tempDirectories.pop();
+
+    if (tempDir) {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  }
+});
 
 describe("scripts/provision-systemd.sh", () => {
   const script = readFileSync(
@@ -8,16 +96,20 @@ describe("scripts/provision-systemd.sh", () => {
     "utf8"
   );
 
-  it("uses safe shell defaults and required modes", () => {
+  it("uses safe shell defaults and documents both runtime transports", () => {
     expect(script).toContain("set -euo pipefail");
     expect(script).toContain("--dry-run");
     expect(script).toContain("--install");
     expect(script).toContain("--uninstall");
     expect(script).toContain("--status");
+    expect(script).toContain("--transport MODE");
+    expect(script).toContain("--service-name NAME");
+    expect(script).toContain("--exec-script NAME");
+    expect(script).toContain("legalbot-openwa.service");
+    expect(script).toContain("legalbot-whatsapp-cloud.service");
   });
 
-  it("keeps systemd provisioning conservative by default", () => {
-    expect(script).toContain("legalbot-openwa.service");
+  it("keeps provisioning conservative and avoids obvious secret-leaking patterns", () => {
     expect(script).toContain("EnvironmentFile=");
     expect(script).toContain("WorkingDirectory=");
     expect(script).toContain("ExecStart=");
@@ -26,26 +118,50 @@ describe("scripts/provision-systemd.sh", () => {
     expect(script).toContain("current_operator_user");
     expect(script).toContain("su - \"$SUDO_USER\" -c 'command -v npm'");
     expect(script).toContain("PROJECT_ROOT/.env");
-    expect(script).toContain("npm run ops:preflight");
-    expect(script).toContain("npm run ops:post-start");
     expect(script).toContain("Service was not enabled automatically.");
     expect(script).toContain("Service was not started automatically.");
-  });
-
-  it("avoids obvious unsafe or secret-leaking patterns", () => {
     expect(script).not.toContain("rm -rf");
     expect(script).not.toContain("cat \"$ENV_FILE_PATH\"");
     expect(script).not.toContain("source \"$ENV_FILE_PATH\"");
     expect(script).not.toContain("/usr/bin/npm run smoke:openwa");
+    expect(script).not.toContain("/usr/bin/npm run start:whatsapp-cloud");
     expect(script).not.toMatch(/\+[1-9]\d{7,14}/);
   });
 
-  it("supports explicit npm path and user selection without auto-start defaults", () => {
-    expect(script).toContain("--npm-path PATH");
-    expect(script).toContain("--user USER");
-    expect(script).toContain("Selected npm path does not exist");
-    expect(script).toContain("Selected npm path is not executable");
-    expect(script).toContain("Install will still write the unit, but manual start will fail until the env file exists.");
-    expect(script).toContain("--start and --enable are supported only with --install.");
+  it("generates an OpenWA legacy unit without auto-start defaults", () => {
+    const { result, npmPath } = runDryRun([]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Transport: openwa");
+    expect(result.stdout).toContain("Service name: legalbot-openwa.service");
+    expect(result.stdout).toContain("Description=LegalBot OpenWA Smoke Runtime (legacy/dev-only)");
+    expect(result.stdout).toContain(`ExecStart=${npmPath} run smoke:openwa`);
+    expect(result.stdout).toContain("Recommended before service start: npm run ops:preflight");
+    expect(result.stdout).toContain("service would remain disabled by default");
+    expect(result.stdout).toContain("service would remain stopped by default");
+  });
+
+  it("generates a Cloud unit with explicit script selection and never prints env contents", () => {
+    const { envFilePath, result, npmPath } = runDryRun(
+      [
+        "--transport",
+        "cloud",
+        "--service-name",
+        "legalbot-whatsapp-cloud.service",
+        "--exec-script",
+        "start:whatsapp-cloud"
+      ],
+      "WHATSAPP_CLOUD_ACCESS_TOKEN=super-secret-token\n"
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Transport: cloud");
+    expect(result.stdout).toContain("Service name: legalbot-whatsapp-cloud.service");
+    expect(result.stdout).toContain("Description=LegalBot WhatsApp Cloud Runtime");
+    expect(result.stdout).toContain(`EnvironmentFile=${envFilePath}`);
+    expect(result.stdout).toContain(`ExecStart=${npmPath} run start:whatsapp-cloud`);
+    expect(result.stdout).toContain("Recommended before service start: npm run ops:preflight:cloud");
+    expect(result.stdout).not.toContain("super-secret-token");
+    expect(result.stdout).not.toContain("WHATSAPP_CLOUD_ACCESS_TOKEN=");
   });
 });

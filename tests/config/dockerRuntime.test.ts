@@ -43,8 +43,20 @@ describe("docker runtime files", () => {
     expect(packageJson.scripts["ops:preflight"]).toBe(
       "node --experimental-strip-types src/app/opsPreflight.ts"
     );
+    expect(packageJson.scripts["ops:preflight:cloud"]).toBe(
+      "node --experimental-strip-types src/app/opsPreflight.ts --transport cloud"
+    );
     expect(packageJson.scripts["ops:post-start"]).toBe(
       "node --experimental-strip-types src/app/opsPostStart.ts"
+    );
+    expect(packageJson.scripts["ops:post-start:cloud"]).toBe(
+      "node --experimental-strip-types src/app/opsPostStart.ts --transport cloud"
+    );
+    expect(packageJson.scripts["start:whatsapp-cloud"]).toBe(
+      "node --experimental-strip-types src/app/whatsappCloudRuntime.ts"
+    );
+    expect(packageJson.scripts["runtime:cloud"]).toBe(
+      "node --experimental-strip-types src/app/whatsappCloudRuntime.ts"
     );
     expect(packageJson.scripts["docker:up"]).toBe("docker compose up -d");
     expect(packageJson.scripts["docker:down"]).toBe("docker compose down");
@@ -128,11 +140,15 @@ describe("docker runtime files", () => {
     expect(vpsRunbook).toContain("Chrome or Chromium");
     expect(vpsRunbook).toContain("npm run ops:preflight");
     expect(vpsRunbook).toContain("npm run ops:post-start");
+    expect(vpsRunbook).toContain("npm run ops:preflight:cloud");
+    expect(vpsRunbook).toContain("npm run ops:post-start:cloud");
     expect(vpsRunbook).toContain("ExecStart=/home/sayan/.nvm/versions/node/v22.22.3/bin/npm run smoke:openwa");
+    expect(vpsRunbook).toContain("ExecStart=/home/deploy/.nvm/versions/node/v22.22.3/bin/npm run start:whatsapp-cloud");
     expect(vpsRunbook).toContain("npm ci --include=dev");
     expect(vpsRunbook).toContain("command -v npm");
     expect(vpsRunbook).toContain("./scripts/provision-systemd.sh --install");
     expect(vpsRunbook).toContain("legalbot-openwa.service");
+    expect(vpsRunbook).toContain("legalbot-whatsapp-cloud.service");
     expect(vpsRunbook).toContain("No multi-bot runtime yet.");
     expect(securityDoc).toContain("Systemd unit files must not contain secrets.");
     expect(securityDoc).toContain("must never print env-file contents or copy `.env` into `/etc` automatically");

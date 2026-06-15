@@ -5,8 +5,16 @@
 OpenWA is no longer acceptable as the production transport.
 It depends on Chromium, QR/session persistence, WhatsApp Web behavior, and manual recovery.
 
-The production direction is now the official WhatsApp Business Cloud API through Meta Graph API.
+The production target is now the official WhatsApp Business Cloud API through Meta Graph API.
 OpenWA remains in the repo temporarily only as a legacy and development-only transport.
+
+## Runtime Commands
+
+- Cloud runtime entrypoint: `npm run start:whatsapp-cloud`
+- Preserved compatibility alias: `npm run runtime:cloud`
+- Cloud preflight: `npm run ops:preflight:cloud`
+- Cloud post-start: `npm run ops:post-start:cloud`
+- Legacy/dev-only OpenWA smoke runtime: `npm run smoke:openwa`
 
 ## Current Foundation
 
@@ -28,7 +36,7 @@ Required only when `WHATSAPP_TRANSPORT=cloud`:
 - `WHATSAPP_CLOUD_VERIFY_TOKEN`
 - `WHATSAPP_CLOUD_ACCESS_TOKEN`
 
-Optional but recommended:
+Required in production:
 
 - `WHATSAPP_CLOUD_APP_SECRET`
 
@@ -40,6 +48,20 @@ Additional runtime server settings:
 `WHATSAPP_TRANSPORT=openwa|cloud` is the runtime selector.
 Cloud variables are not required unless the Cloud runtime is selected.
 
+## Health Surface
+
+The Cloud runtime exposes local-only operational endpoints on the same HTTP server:
+
+- `GET /health`
+- `GET /ready`
+- `GET /status`
+- `GET /webhooks/whatsapp/cloud`
+- `POST /webhooks/whatsapp/cloud`
+
+`/health`, `/ready`, and `/status` are for local operator checks only.
+They do not call live Meta APIs.
+They return sanitized state and never print access tokens, verify tokens, app secrets, phone-number IDs, or payload bodies.
+
 ## Webhook Architecture
 
 - No Chromium.
@@ -50,25 +72,37 @@ Cloud variables are not required unless the Cloud runtime is selected.
 Inbound flow:
 
 1. Meta calls the webhook.
-2. `GET` performs the verification challenge.
-3. `POST` accepts the Cloud webhook payload.
+2. `GET /webhooks/whatsapp/cloud` performs the verification challenge.
+3. `POST /webhooks/whatsapp/cloud` accepts the Cloud webhook payload.
 4. Only inbound text messages are normalized into the shared pipeline input shape.
 5. Unsupported message types are ignored safely.
 6. The shared consent, intake, routing, and output-plan pipeline handles business logic.
 7. Outbound text replies are sent through the Cloud sender abstraction.
 
 When configured, `WHATSAPP_CLOUD_APP_SECRET` is used to validate `X-Hub-Signature-256` before payload processing.
+In production, that app-secret signature verification is mandatory.
+
+## Deployment Shape
+
+The production shape is:
+
+1. A public HTTPS endpoint receives Meta webhook requests.
+2. A reverse proxy forwards traffic to `WHATSAPP_CLOUD_WEBHOOK_HOST:WHATSAPP_CLOUD_WEBHOOK_PORT`.
+3. The app validates the verify token and the app-secret signature.
+4. The shared business pipeline processes consent and intake.
+5. Outbound text replies are sent through the Graph API sender abstraction.
+
+The detailed VPS and systemd procedure lives in `docs/VPS_SYSTEMD_RUNBOOK.md`.
 
 ## Business Assumptions
 
 - The client starts the WhatsApp conversation.
-- Client-side intake messages should stay inside the customer service window when possible.
-- WhatsApp service messages are the intended category for user-initiated support and intake flows.
+- Client-initiated service flow should stay inside the customer service window when possible.
+- That operating model keeps the WhatsApp API cost near zero for the intended intake flow.
 - No automatic WhatsApp notification is sent to the lawyer when a new case is opened.
-- Lawyer and operator review remain command-driven now and dashboard-driven later.
+- Lawyer review remains operator-command-driven now and dashboard-driven later.
+- No automatic case creation is enabled.
 - LLM is not the main conversation engine.
-- LLM is limited to behind-the-scenes parsing, extraction, and normalization of free-text input.
-- Recaps and case summaries should be generated from structured fields and templates when possible.
 
 ## Pricing Model Notes
 
@@ -76,27 +110,20 @@ Official WhatsApp pricing must be treated as a launch-time verification item.
 
 - Meta charges on delivered messages.
 - Pricing is charged by recipient and category.
-- Categories include marketing, utility, authentication, and service.
 - Service messages are free during the 24-hour customer service window opened by user messages.
 
 For this project's current low-volume intake assumptions:
 
-- WhatsApp API: approximately `0 EUR/month` for the main service flow
-- LLM: approximately `1-5 EUR/month` realistic
-- LLM: approximately `5-10 EUR/month` prudential
+- WhatsApp API: approximately `0 EUR/month` for the main client-initiated service flow
 - VPS: approximately `5-10 EUR/month` realistic
-- Total realistic: approximately `6-17 EUR/month`
-- Total prudential: approximately `17-35 EUR/month`
-
-Exact Meta pricing must be verified before launch against the current market and category rate card.
+- Exact Meta pricing must be verified before launch against the current market and category rate card
 
 ## Current Limits
 
 - No live Meta API calls in tests.
-- No production go-live automation yet.
 - No dashboard.
 - No multi-bot runtime.
 - No n8n integration.
 - No attachments.
 - No PDF generation.
-- No automatic case creation.
+- No automatic lawyer WhatsApp notifications.

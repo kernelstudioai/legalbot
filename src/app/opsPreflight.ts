@@ -1,5 +1,11 @@
 import { ZodError } from "zod";
-import { loadEnv, loadSmokeRuntimeEnv } from "../config/env.ts";
+import {
+  isProductionNodeEnv,
+  loadEnv,
+  loadSmokeRuntimeEnv,
+  loadWhatsAppCloudRuntimeEnv,
+  type AppEnv
+} from "../config/env.ts";
 import { getSqliteMigrationStatus } from "../persistence/sqlite/index.ts";
 import { runBusinessCheckCommand, type BusinessCheckReport } from "./businessCheck.ts";
 import { runCaseDoctorCommand, type CaseDoctorReport } from "./caseDoctor.ts";
@@ -11,6 +17,11 @@ import {
   silentLogger,
   toJsonStdout
 } from "./opsCommandCommon.ts";
+import {
+  applyTransportOverride,
+  parseTransportOverride,
+  type RuntimeTransport
+} from "./runtimeCommandCommon.ts";
 
 type PreflightStatus = "ready" | "blocking_failure";
 
@@ -29,13 +40,22 @@ interface OpsPreflightReport {
     ok: boolean;
   };
   runtimeEnv: {
-    minimalRequiredEnv: ["LAWYER_PHONE_E164"];
+    transport: RuntimeTransport;
+    minimalRequiredEnv: string[];
     lawyerPhoneConfigured: boolean;
     databaseUrlConfigured: boolean;
     databaseMigrationsExplicit: boolean;
     databaseMigrationsEnabled: boolean;
     businessPersistenceEnabled: boolean;
     statusServerEnabled: boolean;
+    cloudApiVersionConfigured: boolean;
+    cloudPhoneNumberIdConfigured: boolean;
+    cloudVerifyTokenConfigured: boolean;
+    cloudAccessTokenConfigured: boolean;
+    cloudAppSecretConfigured: boolean;
+    cloudSignatureVerificationEnforced: boolean;
+    webhookHostConfigured: boolean;
+    webhookPort: number | null;
   };
   migrations: {
     appliedMigrationCount: number;
@@ -76,6 +96,7 @@ export interface OpsPreflightCommandOptions {
   stdout?: {
     write(chunk: string): void;
   };
+  transportOverride?: RuntimeTransport;
 }
 
 export interface OpsPreflightSummary extends DbCommandSummary {
@@ -89,6 +110,15 @@ const REQUIRED_IGNORED_DIRECTORIES = [
   "tmp",
   "logs"
 ] as const;
+
+const OPENWA_REQUIRED_ENV = ["LAWYER_PHONE_E164"];
+const CLOUD_REQUIRED_ENV = [
+  "WHATSAPP_TRANSPORT",
+  "WHATSAPP_CLOUD_API_VERSION",
+  "WHATSAPP_CLOUD_PHONE_NUMBER_ID",
+  "WHATSAPP_CLOUD_VERIFY_TOKEN",
+  "WHATSAPP_CLOUD_ACCESS_TOKEN"
+];
 
 const toZodMessage = (error: ZodError): string =>
   error.issues.map((issue) => issue.message).join("; ");
@@ -120,83 +150,197 @@ const toCaseDoctorReport = (
       }
     : null;
 
-export const runOpsPreflightCommand = ({
-  cwd = process.cwd(),
-  envSource = process.env,
-  nodeVersion = process.version,
-  repoRoot = cwd,
-  stdout = process.stdout
-}: OpsPreflightCommandOptions = {}): OpsPreflightSummary => {
-  const blockers: string[] = [];
-  const nodeMajorVersion = parseNodeMajorVersion(nodeVersion);
-  const nodeOk = nodeMajorVersion === 22;
+const hasConfiguredValue = (value: string | undefined): boolean =>
+  typeof value === "string" && value.trim().length > 0;
 
-  if (!nodeOk) {
-    blockers.push("node_22_required");
+const inferTransport = (
+  envSource: NodeJS.ProcessEnv,
+  transportOverride?: RuntimeTransport
+): RuntimeTransport => {
+  if (transportOverride) {
+    return transportOverride;
   }
 
-  let lawyerPhoneConfigured = false;
-  let statusServerEnabled = false;
-  let env = loadEnv(envSource);
+  return envSource.WHATSAPP_TRANSPORT === "cloud" ? "cloud" : "openwa";
+};
 
+const loadBaseEnv = (
+  envSource: NodeJS.ProcessEnv,
+  blockers: string[]
+): AppEnv | undefined => {
   try {
-    const runtimeEnv = loadSmokeRuntimeEnv(envSource);
-    lawyerPhoneConfigured = runtimeEnv.LAWYER_PHONE_E164.length > 0;
-    statusServerEnabled = runtimeEnv.OPENWA_STATUS_SERVER_ENABLED;
+    return loadEnv(envSource);
   } catch (error) {
     if (error instanceof ZodError) {
       blockers.push(`runtime_env_invalid:${toZodMessage(error)}`);
     } else {
       blockers.push("runtime_env_invalid");
     }
+
+    return undefined;
+  }
+};
+
+export const runOpsPreflightCommand = ({
+  cwd = process.cwd(),
+  envSource = process.env,
+  nodeVersion = process.version,
+  repoRoot = cwd,
+  stdout = process.stdout,
+  transportOverride
+}: OpsPreflightCommandOptions = {}): OpsPreflightSummary => {
+  const blockers: string[] = [];
+  const nodeMajorVersion = parseNodeMajorVersion(nodeVersion);
+  const nodeOk = nodeMajorVersion === 22;
+  const effectiveEnvSource = applyTransportOverride(envSource, transportOverride);
+  const transport = inferTransport(effectiveEnvSource, transportOverride);
+
+  if (!nodeOk) {
+    blockers.push("node_22_required");
   }
 
-  if (!lawyerPhoneConfigured) {
-    blockers.push("lawyer_phone_missing");
-  }
+  const baseEnv = loadBaseEnv(effectiveEnvSource, blockers);
+  const databaseUrlConfigured = typeof baseEnv?.DATABASE_URL === "string";
+  const databaseMigrationsExplicit =
+    effectiveEnvSource.DATABASE_MIGRATIONS_ENABLED !== undefined;
+  const databaseMigrationsEnabled = baseEnv?.DATABASE_MIGRATIONS_ENABLED ?? false;
+  const businessPersistenceEnabled = baseEnv?.BUSINESS_PERSISTENCE_ENABLED === true;
 
-  const databaseUrlConfigured = env.DATABASE_URL.trim().length > 0;
   if (!databaseUrlConfigured) {
     blockers.push("database_url_missing");
   }
 
-  const databaseMigrationsExplicit = envSource.DATABASE_MIGRATIONS_ENABLED !== undefined;
   if (!databaseMigrationsExplicit) {
     blockers.push("database_migrations_policy_not_explicit");
   }
 
-  if (env.BUSINESS_PERSISTENCE_ENABLED !== true) {
+  if (!businessPersistenceEnabled) {
     blockers.push("business_persistence_disabled");
   }
 
-  const migrationStatus = getSqliteMigrationStatus({
-    cwd,
-    databaseUrl: env.DATABASE_URL
-  });
+  let lawyerPhoneConfigured = false;
+  let statusServerEnabled = false;
+  let cloudApiVersionConfigured = false;
+  let cloudPhoneNumberIdConfigured = false;
+  let cloudVerifyTokenConfigured = false;
+  let cloudAccessTokenConfigured = false;
+  let cloudAppSecretConfigured = false;
+  let cloudSignatureVerificationEnforced = false;
+  let webhookHostConfigured = false;
+  let webhookPort: number | null = null;
+
+  if (transport === "openwa") {
+    try {
+      const runtimeEnv = loadSmokeRuntimeEnv(effectiveEnvSource);
+      lawyerPhoneConfigured = runtimeEnv.LAWYER_PHONE_E164.length > 0;
+      statusServerEnabled = runtimeEnv.OPENWA_STATUS_SERVER_ENABLED;
+    } catch (error) {
+      if (error instanceof ZodError) {
+        blockers.push(`runtime_env_invalid:${toZodMessage(error)}`);
+      } else {
+        blockers.push("runtime_env_invalid");
+      }
+    }
+
+    if (!lawyerPhoneConfigured) {
+      blockers.push("lawyer_phone_missing");
+    }
+  } else {
+    cloudApiVersionConfigured = hasConfiguredValue(
+      effectiveEnvSource.WHATSAPP_CLOUD_API_VERSION
+    );
+    cloudPhoneNumberIdConfigured = hasConfiguredValue(
+      effectiveEnvSource.WHATSAPP_CLOUD_PHONE_NUMBER_ID
+    );
+    cloudVerifyTokenConfigured = hasConfiguredValue(
+      effectiveEnvSource.WHATSAPP_CLOUD_VERIFY_TOKEN
+    );
+    cloudAccessTokenConfigured = hasConfiguredValue(
+      effectiveEnvSource.WHATSAPP_CLOUD_ACCESS_TOKEN
+    );
+    cloudAppSecretConfigured = hasConfiguredValue(
+      effectiveEnvSource.WHATSAPP_CLOUD_APP_SECRET
+    );
+    cloudSignatureVerificationEnforced = isProductionNodeEnv(effectiveEnvSource);
+
+    if (effectiveEnvSource.WHATSAPP_TRANSPORT !== "cloud") {
+      blockers.push("cloud_transport_not_selected");
+    }
+    if (!cloudApiVersionConfigured) {
+      blockers.push("cloud_api_version_missing");
+    }
+    if (!cloudPhoneNumberIdConfigured) {
+      blockers.push("cloud_phone_number_id_missing");
+    }
+    if (!cloudVerifyTokenConfigured) {
+      blockers.push("cloud_verify_token_missing");
+    }
+    if (!cloudAccessTokenConfigured) {
+      blockers.push("cloud_access_token_missing");
+    }
+    if (cloudSignatureVerificationEnforced && !cloudAppSecretConfigured) {
+      blockers.push("cloud_app_secret_required_in_production");
+    }
+
+    try {
+      const runtimeEnv = loadWhatsAppCloudRuntimeEnv(effectiveEnvSource);
+      webhookHostConfigured = runtimeEnv.WHATSAPP_CLOUD_WEBHOOK_HOST.trim().length > 0;
+      webhookPort = runtimeEnv.WHATSAPP_CLOUD_WEBHOOK_PORT;
+    } catch (error) {
+      if (error instanceof ZodError) {
+        blockers.push(`runtime_env_invalid:${toZodMessage(error)}`);
+      } else {
+        blockers.push("runtime_env_invalid");
+      }
+    }
+  }
+
+  const migrationStatus =
+    baseEnv && databaseUrlConfigured
+      ? getSqliteMigrationStatus({
+          cwd,
+          databaseUrl: baseEnv.DATABASE_URL
+        })
+      : {
+          appliedMigrationIds: [],
+          pendingMigrationIds: []
+        };
 
   if (migrationStatus.pendingMigrationIds.length > 0) {
     blockers.push("pending_migrations");
   }
 
   const businessStdout = createBufferedStdout();
-  const businessSummary = runBusinessCheckCommand({
-    cwd,
-    envSource,
-    logger: silentLogger,
-    stdout: businessStdout.stdout
-  });
+  const businessSummary =
+    baseEnv && businessPersistenceEnabled
+      ? runBusinessCheckCommand({
+          cwd,
+          envSource: effectiveEnvSource,
+          logger: silentLogger,
+          stdout: businessStdout.stdout
+        })
+      : {
+          exitCode: 1,
+          report: undefined
+        };
 
   if (businessSummary.exitCode !== 0) {
     blockers.push("business_check_failed");
   }
 
   const caseDoctorStdout = createBufferedStdout();
-  const caseDoctorSummary = runCaseDoctorCommand({
-    cwd,
-    envSource,
-    logger: silentLogger,
-    stdout: caseDoctorStdout.stdout
-  });
+  const caseDoctorSummary =
+    baseEnv && businessPersistenceEnabled
+      ? runCaseDoctorCommand({
+          cwd,
+          envSource: effectiveEnvSource,
+          logger: silentLogger,
+          stdout: caseDoctorStdout.stdout
+        })
+      : {
+          exitCode: 1,
+          report: undefined
+        };
 
   if (caseDoctorSummary.exitCode !== 0) {
     blockers.push("case_doctor_failed");
@@ -204,7 +348,7 @@ export const runOpsPreflightCommand = ({
 
   const requiredIgnoredDirectories = REQUIRED_IGNORED_DIRECTORIES.map((directory) => ({
     path: `${directory}/`,
-      ignored: hasGitIgnoreDirectoryEntry({
+    ignored: hasGitIgnoreDirectoryEntry({
       cwd: repoRoot,
       directory
     })
@@ -224,13 +368,22 @@ export const runOpsPreflightCommand = ({
       ok: nodeOk
     },
     runtimeEnv: {
-      minimalRequiredEnv: ["LAWYER_PHONE_E164"],
+      transport,
+      minimalRequiredEnv: transport === "cloud" ? [...CLOUD_REQUIRED_ENV] : [...OPENWA_REQUIRED_ENV],
       lawyerPhoneConfigured,
       databaseUrlConfigured,
       databaseMigrationsExplicit,
-      databaseMigrationsEnabled: env.DATABASE_MIGRATIONS_ENABLED,
-      businessPersistenceEnabled: env.BUSINESS_PERSISTENCE_ENABLED,
-      statusServerEnabled
+      databaseMigrationsEnabled,
+      businessPersistenceEnabled,
+      statusServerEnabled,
+      cloudApiVersionConfigured,
+      cloudPhoneNumberIdConfigured,
+      cloudVerifyTokenConfigured,
+      cloudAccessTokenConfigured,
+      cloudAppSecretConfigured,
+      cloudSignatureVerificationEnforced,
+      webhookHostConfigured,
+      webhookPort
     },
     migrations: {
       appliedMigrationCount: migrationStatus.appliedMigrationIds.length,
@@ -260,5 +413,15 @@ export const runOpsPreflightCommand = ({
 };
 
 if (isDirectExecution(import.meta.url)) {
-  exitWithCode(runOpsPreflightCommand());
+  const transportOverride = parseTransportOverride();
+
+  exitWithCode(
+    runOpsPreflightCommand(
+      transportOverride
+        ? {
+            transportOverride
+          }
+        : {}
+    )
+  );
 }

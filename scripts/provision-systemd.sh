@@ -4,20 +4,22 @@ set -euo pipefail
 
 readonly SCRIPT_NAME="$(basename "$0")"
 readonly DEFAULT_PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-readonly SERVICE_NAME="legalbot-openwa.service"
-readonly DEFAULT_UNIT_PATH="/etc/systemd/system/$SERVICE_NAME"
 readonly DEFAULT_ENV_FILE_FALLBACK="/etc/legalbot/legalbot.env"
 
 MODE=""
 DRY_RUN=0
 START_SERVICE=0
 ENABLE_SERVICE=0
+TRANSPORT="openwa"
 PROJECT_ROOT="$DEFAULT_PROJECT_ROOT"
-UNIT_PATH="$DEFAULT_UNIT_PATH"
+UNIT_PATH=""
 ENV_FILE_PATH=""
 SERVICE_USER=""
+SERVICE_NAME=""
 NPM_PATH="${LEGALBOT_NPM_PATH:-}"
+EXEC_SCRIPT=""
 EXEC_START=""
+UNIT_DESCRIPTION=""
 
 usage() {
   cat <<'EOF'
@@ -34,10 +36,13 @@ Required mode:
   --status     Show whether the unit file exists and whether systemd knows the service.
 
 Options:
+  --transport MODE      Runtime transport. Supported: openwa, cloud. Default: openwa
   --project-root PATH   WorkingDirectory for the unit. Default: repo root.
   --env-file PATH       Environment file path. Default: project .env when present, else /etc/legalbot/legalbot.env
   --user USER           User for the unit. Default: current non-root operator user
   --service-user USER   Alias for --user.
+  --service-name NAME   systemd unit filename. Defaults: legalbot-openwa.service or legalbot-whatsapp-cloud.service
+  --exec-script NAME    npm script for ExecStart. Defaults: smoke:openwa or start:whatsapp-cloud
   --npm-path PATH       Absolute npm path for ExecStart. Default: LEGALBOT_NPM_PATH or command -v npm
   --start               With --install only, start the service after install.
   --enable              With --install only, enable the service after install.
@@ -89,6 +94,11 @@ parse_args() {
         fi
         shift
         ;;
+      --transport)
+        [[ $# -ge 2 ]] || fail "--transport requires a value."
+        TRANSPORT="$2"
+        shift 2
+        ;;
       --project-root)
         [[ $# -ge 2 ]] || fail "--project-root requires a value."
         PROJECT_ROOT="$2"
@@ -102,6 +112,16 @@ parse_args() {
       --user|--service-user)
         [[ $# -ge 2 ]] || fail "$1 requires a value."
         SERVICE_USER="$2"
+        shift 2
+        ;;
+      --service-name)
+        [[ $# -ge 2 ]] || fail "--service-name requires a value."
+        SERVICE_NAME="$2"
+        shift 2
+        ;;
+      --exec-script)
+        [[ $# -ge 2 ]] || fail "--exec-script requires a value."
+        EXEC_SCRIPT="$2"
         shift 2
         ;;
       --npm-path)
@@ -154,6 +174,34 @@ require_root_for_mutation() {
       fail "Root privileges are required for $MODE because $UNIT_PATH lives under /etc/systemd/system."
     fi
   fi
+}
+
+resolve_transport_defaults() {
+  case "$TRANSPORT" in
+    openwa)
+      UNIT_DESCRIPTION="LegalBot OpenWA Smoke Runtime (legacy/dev-only)"
+      if [[ -z "$SERVICE_NAME" ]]; then
+        SERVICE_NAME="legalbot-openwa.service"
+      fi
+      if [[ -z "$EXEC_SCRIPT" ]]; then
+        EXEC_SCRIPT="smoke:openwa"
+      fi
+      ;;
+    cloud)
+      UNIT_DESCRIPTION="LegalBot WhatsApp Cloud Runtime"
+      if [[ -z "$SERVICE_NAME" ]]; then
+        SERVICE_NAME="legalbot-whatsapp-cloud.service"
+      fi
+      if [[ -z "$EXEC_SCRIPT" ]]; then
+        EXEC_SCRIPT="start:whatsapp-cloud"
+      fi
+      ;;
+    *)
+      fail "--transport must be either 'openwa' or 'cloud'."
+      ;;
+  esac
+
+  UNIT_PATH="/etc/systemd/system/$SERVICE_NAME"
 }
 
 resolve_env_file_path() {
@@ -213,7 +261,7 @@ resolve_npm_path() {
     fail "Selected npm path is not executable: $NPM_PATH"
   fi
 
-  EXEC_START="$NPM_PATH run smoke:openwa"
+  EXEC_START="$NPM_PATH run $EXEC_SCRIPT"
 }
 
 validate_inputs() {
@@ -225,16 +273,20 @@ validate_inputs() {
     fail "Project root does not exist: $PROJECT_ROOT"
   fi
 
-  if [[ "$UNIT_PATH" != /* ]]; then
-    fail "Unit path must be absolute."
-  fi
-
   if [[ "$ENV_FILE_PATH" != /* ]]; then
     fail "--env-file must be an absolute path."
   fi
 
   if [[ -z "$SERVICE_USER" ]]; then
     fail "--user must not be empty."
+  fi
+
+  if [[ -z "$SERVICE_NAME" ]]; then
+    fail "--service-name must not be empty."
+  fi
+
+  if [[ -z "$EXEC_SCRIPT" ]]; then
+    fail "--exec-script must not be empty."
   fi
 
   if [[ -z "$NPM_PATH" ]]; then
@@ -249,7 +301,7 @@ validate_inputs() {
 print_unit_preview() {
   cat <<EOF
 [Unit]
-Description=LegalBot OpenWA Smoke Runtime
+Description=$UNIT_DESCRIPTION
 After=network.target
 
 [Service]
@@ -267,25 +319,50 @@ EOF
 }
 
 print_mode_summary() {
+  log "Transport: $TRANSPORT"
   log "Service name: $SERVICE_NAME"
   log "Project root: $PROJECT_ROOT"
   log "Environment file: $ENV_FILE_PATH"
   log "Service user: $SERVICE_USER"
+  log "ExecScript: $EXEC_SCRIPT"
   log "ExecStart: $EXEC_START"
   log "Unit path: $UNIT_PATH"
 }
 
+recommended_preflight_command() {
+  if [[ "$TRANSPORT" == "cloud" ]]; then
+    printf '%s\n' "npm run ops:preflight:cloud"
+    return 0
+  fi
+
+  printf '%s\n' "npm run ops:preflight"
+}
+
+recommended_post_start_command() {
+  if [[ "$TRANSPORT" == "cloud" ]]; then
+    printf '%s\n' "npm run ops:post-start:cloud"
+    return 0
+  fi
+
+  printf '%s\n' "npm run ops:post-start"
+}
+
 install_unit() {
   local tmp_unit
+  local preflight_command
+  local post_start_command
+
+  preflight_command="$(recommended_preflight_command)"
+  post_start_command="$(recommended_post_start_command)"
 
   if [[ ! -f "$ENV_FILE_PATH" ]]; then
     warn "Environment file not found yet: $ENV_FILE_PATH"
     warn "Install will still write the unit, but manual start will fail until the env file exists."
   fi
 
-  log "Recommended before service start: npm run ops:preflight"
+  log "Recommended before service start: $preflight_command"
   if [[ "$START_SERVICE" -eq 1 ]]; then
-    log "Recommended after service start: npm run ops:post-start"
+    log "Recommended after service start: $post_start_command"
   fi
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -303,7 +380,7 @@ install_unit() {
   tmp_unit="$(mktemp)"
   cat >"$tmp_unit" <<EOF
 [Unit]
-Description=LegalBot OpenWA Smoke Runtime
+Description=$UNIT_DESCRIPTION
 After=network.target
 
 [Service]
@@ -325,7 +402,7 @@ EOF
 
   run_cmd systemctl daemon-reload
   log "Installed unit file at $UNIT_PATH"
-  log "Run 'npm run ops:preflight' before any manual start or restart."
+  log "Run '$preflight_command' before any manual start or restart."
 
   if [[ "$ENABLE_SERVICE" -eq 1 ]]; then
     run_cmd systemctl enable "$SERVICE_NAME"
@@ -335,7 +412,7 @@ EOF
 
   if [[ "$START_SERVICE" -eq 1 ]]; then
     run_cmd systemctl start "$SERVICE_NAME"
-    log "Run 'npm run ops:post-start' after confirming the service is active."
+    log "Run '$post_start_command' after confirming the service is active."
   else
     log "Service was not started automatically."
   fi
@@ -381,6 +458,7 @@ main() {
   parse_args "$@"
   require_linux
   require_systemctl
+  resolve_transport_defaults
   resolve_env_file_path
   resolve_service_user
   resolve_npm_path

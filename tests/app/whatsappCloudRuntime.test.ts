@@ -1,9 +1,13 @@
 import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
+import type { AddressInfo } from "node:net";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Logger } from "../../src/logging/logger";
 import { runInboundPipeline } from "../../src/app";
-import { createWhatsAppCloudWebhookRequestHandler } from "../../src/app/whatsappCloudRuntime";
+import {
+  createWhatsAppCloudWebhookRequestHandler,
+  startWhatsAppCloudRuntime
+} from "../../src/app/whatsappCloudRuntime";
 import {
   createBusinessPersistenceService,
   createInMemoryPersistenceService
@@ -19,6 +23,150 @@ const createLogger = (): Logger => ({
   info: vi.fn(),
   warn: vi.fn(),
   error: vi.fn()
+});
+
+describe("whatsapp cloud runtime server", () => {
+  it("exposes local health endpoints without leaking Cloud secrets", async () => {
+    const logger = createLogger();
+    const persistenceService = createInMemoryPersistenceService();
+    const businessPersistenceService =
+      createBusinessPersistenceService(persistenceService);
+    let requestHandler:
+      | ((request: IncomingMessage, response: ServerResponse) => void)
+      | undefined;
+    const serverAddress: AddressInfo = {
+      address: "127.0.0.1",
+      family: "IPv4",
+      port: 3002
+    };
+
+    const runtime = await startWhatsAppCloudRuntime({
+      envSource: {
+        WHATSAPP_TRANSPORT: "cloud",
+        BUSINESS_PERSISTENCE_ENABLED: "true",
+        DATABASE_MIGRATIONS_ENABLED: "true",
+        WHATSAPP_CLOUD_API_VERSION: "v22.0",
+        WHATSAPP_CLOUD_PHONE_NUMBER_ID: "1234567890",
+        WHATSAPP_CLOUD_VERIFY_TOKEN: "verify-token-1234567890",
+        WHATSAPP_CLOUD_ACCESS_TOKEN: "access-token-1234567890",
+        WHATSAPP_CLOUD_APP_SECRET: "app-secret-1234567890",
+        WHATSAPP_CLOUD_WEBHOOK_HOST: "127.0.0.1",
+        WHATSAPP_CLOUD_WEBHOOK_PORT: "0"
+      },
+      logger,
+      persistenceService,
+      businessPersistenceService,
+      createHttpServer: (handler) => {
+        requestHandler = handler;
+
+        return {
+          once() {
+            return this;
+          },
+          off() {
+            return this;
+          },
+          listen(_port, _host, callback) {
+            callback();
+            return this;
+          },
+          address() {
+            return serverAddress;
+          },
+          close(callback) {
+            callback();
+            return this;
+          }
+        };
+      }
+    });
+
+    try {
+      const address = runtime.getServerAddress();
+      expect(address).toBeDefined();
+      expect(address).toEqual(serverAddress);
+      expect(requestHandler).toBeDefined();
+
+      const healthResponse = createResponse();
+      await requestHandler!(
+        createRequest({
+          method: "GET",
+          url: "/health"
+        }),
+        healthResponse.response
+      );
+
+      expect(healthResponse.result.statusCode).toBe(200);
+      expect(JSON.parse(healthResponse.result.body)).toMatchObject({
+        alive: true,
+        transport: {
+          kind: "cloud",
+          state: "ready",
+          ready: true,
+          signatureVerification: "enforced",
+          webhookPath: "/webhooks/whatsapp/cloud"
+        }
+      });
+
+      const readyResponse = createResponse();
+      await requestHandler!(
+        createRequest({
+          method: "GET",
+          url: "/ready"
+        }),
+        readyResponse.response
+      );
+
+      expect(readyResponse.result.statusCode).toBe(200);
+      expect(JSON.parse(readyResponse.result.body)).toMatchObject({
+        ready: true,
+        state: "ready",
+        signatureVerification: "enforced"
+      });
+
+      const statusResponse = createResponse();
+      await requestHandler!(
+        createRequest({
+          method: "GET",
+          url: "/status"
+        }),
+        statusResponse.response
+      );
+
+      expect(statusResponse.result.statusCode).toBe(200);
+      const statusBody = statusResponse.result.body;
+      expect(statusBody).toContain("\"transport\":\"cloud\"");
+      expect(statusBody).not.toContain("access-token-1234567890");
+      expect(statusBody).not.toContain("verify-token-1234567890");
+      expect(statusBody).not.toContain("app-secret-1234567890");
+      expect(statusBody).not.toContain("1234567890");
+    } finally {
+      await runtime.stop("test_shutdown");
+    }
+  });
+
+  it("requires the Cloud app secret in production", async () => {
+    await expect(() =>
+      startWhatsAppCloudRuntime({
+        envSource: {
+          NODE_ENV: "production",
+          WHATSAPP_TRANSPORT: "cloud",
+          BUSINESS_PERSISTENCE_ENABLED: "true",
+          DATABASE_MIGRATIONS_ENABLED: "true",
+          WHATSAPP_CLOUD_API_VERSION: "v22.0",
+          WHATSAPP_CLOUD_PHONE_NUMBER_ID: "1234567890",
+          WHATSAPP_CLOUD_VERIFY_TOKEN: "verify-token-1234567890",
+          WHATSAPP_CLOUD_ACCESS_TOKEN: "access-token-1234567890",
+          WHATSAPP_CLOUD_WEBHOOK_HOST: "127.0.0.1",
+          WHATSAPP_CLOUD_WEBHOOK_PORT: "0"
+        },
+        persistenceService: createInMemoryPersistenceService(),
+        businessPersistenceService: createBusinessPersistenceService(
+          createInMemoryPersistenceService()
+        )
+      })
+    ).rejects.toThrow("WHATSAPP_CLOUD_APP_SECRET is required");
+  });
 });
 
 const createRequest = ({

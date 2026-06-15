@@ -77,6 +77,7 @@ describe("ops post-start command", () => {
     expect(summary.report).toMatchObject({
       status: "healthy",
       mode: "direct",
+      transport: "openwa",
       diagnosis: {
         code: "app_ready"
       },
@@ -250,6 +251,7 @@ describe("ops post-start command", () => {
 
     expect(summary.exitCode).toBe(1);
     expect(summary.report).toMatchObject({
+      transport: "openwa",
       mode: "docker",
       diagnosis: {
         code: "app_not_ready_auth_missing"
@@ -264,5 +266,83 @@ describe("ops post-start command", () => {
         }
       }
     });
+  });
+
+  it("checks the Cloud runtime locally without external API calls", async () => {
+    const stdout = createStdout();
+
+    const summary = await runOpsPostStartCommand({
+      envSource: {
+        WHATSAPP_TRANSPORT: "cloud",
+        WHATSAPP_CLOUD_API_VERSION: "v22.0",
+        WHATSAPP_CLOUD_PHONE_NUMBER_ID: "1234567890",
+        WHATSAPP_CLOUD_VERIFY_TOKEN: "verify-token-123",
+        WHATSAPP_CLOUD_ACCESS_TOKEN: "access-token-123",
+        WHATSAPP_CLOUD_APP_SECRET: "app-secret-123",
+        WHATSAPP_CLOUD_WEBHOOK_HOST: "0.0.0.0",
+        WHATSAPP_CLOUD_WEBHOOK_PORT: "3002"
+      },
+      httpProbeRunner: {
+        async probe(url: string) {
+          if (url.endsWith("/health")) {
+            return {
+              ok: true,
+              statusCode: 200,
+              body: {
+                alive: true,
+                transport: {
+                  kind: "cloud",
+                  state: "ready",
+                  ready: true,
+                  signatureVerification: "enforced",
+                  webhookPath: "/webhooks/whatsapp/cloud"
+                }
+              }
+            };
+          }
+
+          if (url.endsWith("/ready")) {
+            return {
+              ok: true,
+              statusCode: 200,
+              body: {
+                ready: true,
+                state: "ready",
+                signatureVerification: "enforced"
+              }
+            };
+          }
+
+          return {
+            ok: true,
+            statusCode: 200,
+            body: {
+              transport: "cloud",
+              state: "ready",
+              ready: true,
+              signatureVerification: "enforced",
+              webhookPath: "/webhooks/whatsapp/cloud",
+              lastError: "token access-token-123 for +15551234567"
+            }
+          };
+        }
+      },
+      stdout
+    });
+
+    expect(summary.exitCode).toBe(0);
+    expect(summary.report).toMatchObject({
+      status: "healthy",
+      mode: "direct",
+      transport: "cloud",
+      diagnosis: {
+        code: "app_ready"
+      },
+      hostBaseUrl: "http://127.0.0.1:3002"
+    });
+    expect(stdout.output).not.toContain("access-token-123");
+    expect(stdout.output).not.toContain("app-secret-123");
+    expect(stdout.output).not.toContain("1234567890");
+    expect(stdout.output).not.toContain("+15551234567");
   });
 });

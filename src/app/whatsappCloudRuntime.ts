@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { pathToFileURL } from "node:url";
 import type { AddressInfo } from "node:net";
 import {
+  isProductionNodeEnv,
   loadWhatsAppCloudRuntimeEnv,
   type WhatsAppCloudRuntimeEnv
 } from "../config/env.ts";
@@ -35,6 +36,9 @@ import {
 import type { TransportInboundMessage } from "../transport/inboundMessage.ts";
 
 const REDACTED_PHONE = "[redacted-phone]";
+const HEALTH_PATH = "/health";
+const READY_PATH = "/ready";
+const STATUS_PATH = "/status";
 
 export interface WhatsAppCloudRuntime {
   env: WhatsAppCloudRuntimeEnv;
@@ -44,6 +48,9 @@ export interface WhatsAppCloudRuntime {
 
 export interface StartWhatsAppCloudRuntimeOptions {
   cwd?: string;
+  createHttpServer?: (
+    handler: (request: IncomingMessage, response: ServerResponse) => void
+  ) => WhatsAppCloudHttpServer;
   envSource?: NodeJS.ProcessEnv;
   logger?: Logger;
   persistenceService?: PersistenceService;
@@ -58,6 +65,14 @@ export interface StartWhatsAppCloudRuntimeOptions {
     persistenceService: PersistenceService
   ) => BusinessPersistenceService;
   httpClient?: WhatsAppCloudHttpClient;
+}
+
+export interface WhatsAppCloudHttpServer {
+  once(event: "error", listener: (error: Error) => void): this;
+  off(event: "error", listener: (error: Error) => void): this;
+  listen(port: number, host: string, callback: () => void): this;
+  address(): ReturnType<ReturnType<typeof createServer>["address"]>;
+  close(callback: (error?: Error | undefined) => void): this;
 }
 
 export interface CreateWhatsAppCloudWebhookRequestHandlerOptions {
@@ -85,6 +100,16 @@ const writeResponse = (
   response.end(body);
 };
 
+const writeJsonResponse = (
+  response: ServerResponse,
+  statusCode: number,
+  body: Record<string, unknown>
+): void => {
+  writeResponse(response, statusCode, JSON.stringify(body), {
+    "Content-Type": "application/json; charset=utf-8"
+  });
+};
+
 const readRequestBody = async (request: IncomingMessage): Promise<string> => {
   const chunks: Buffer[] = [];
 
@@ -101,6 +126,19 @@ const isSqlitePersistenceService = (
   "databasePath" in persistenceService &&
   "close" in persistenceService &&
   typeof persistenceService.close === "function";
+
+const getCloudSignatureVerificationMode = (
+  env: WhatsAppCloudRuntimeEnv
+): "enforced" | "optional" => (env.WHATSAPP_CLOUD_APP_SECRET ? "enforced" : "optional");
+
+const createCloudRuntimeStatus = (env: WhatsAppCloudRuntimeEnv): Record<string, unknown> => ({
+  transport: env.WHATSAPP_TRANSPORT,
+  kind: env.WHATSAPP_TRANSPORT,
+  state: "ready",
+  ready: true,
+  signatureVerification: getCloudSignatureVerificationMode(env),
+  webhookPath: DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH
+});
 
 export const createWhatsAppCloudWebhookRequestHandler = ({
   appSecret,
@@ -238,9 +276,16 @@ export const startWhatsAppCloudRuntime = async ({
   clientIntakePersistence,
   createSqlitePersistence = createSqlitePersistenceService,
   createBusinessPersistence = createBusinessPersistenceService,
+  createHttpServer = createServer,
   httpClient
 }: StartWhatsAppCloudRuntimeOptions = {}): Promise<WhatsAppCloudRuntime> => {
   const env = loadWhatsAppCloudRuntimeEnv(envSource);
+
+  if (isProductionNodeEnv(envSource) && !env.WHATSAPP_CLOUD_APP_SECRET) {
+    throw new Error(
+      "WHATSAPP_CLOUD_APP_SECRET is required when NODE_ENV=production for the WhatsApp Cloud runtime."
+    );
+  }
 
   if (env.BUSINESS_PERSISTENCE_ENABLED !== true) {
     throw new Error(
@@ -333,7 +378,32 @@ export const startWhatsAppCloudRuntime = async ({
         }
       : {})
   });
-  const server = createServer((request, response) => {
+  const server = createHttpServer((request, response) => {
+    const method = request.method ?? "GET";
+    const url = new URL(request.url ?? "/", "http://localhost");
+
+    if (method === "GET" && url.pathname === HEALTH_PATH) {
+      writeJsonResponse(response, 200, {
+        alive: true,
+        transport: createCloudRuntimeStatus(env)
+      });
+      return;
+    }
+
+    if (method === "GET" && url.pathname === READY_PATH) {
+      writeJsonResponse(response, 200, {
+        ready: true,
+        state: "ready",
+        signatureVerification: getCloudSignatureVerificationMode(env)
+      });
+      return;
+    }
+
+    if (method === "GET" && url.pathname === STATUS_PATH) {
+      writeJsonResponse(response, 200, createCloudRuntimeStatus(env));
+      return;
+    }
+
     void requestHandler(request, response).catch((error: unknown) => {
       logger.error("whatsapp_cloud_request_failed", {
         error: error instanceof Error ? error.message : "unknown_error"
@@ -353,7 +423,7 @@ export const startWhatsAppCloudRuntime = async ({
     webhook_host: env.WHATSAPP_CLOUD_WEBHOOK_HOST,
     webhook_port: env.WHATSAPP_CLOUD_WEBHOOK_PORT,
     webhook_path: DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH,
-    app_secret_configured: Boolean(env.WHATSAPP_CLOUD_APP_SECRET),
+    signature_verification: getCloudSignatureVerificationMode(env),
     business_persistence_enabled: env.BUSINESS_PERSISTENCE_ENABLED
   });
 

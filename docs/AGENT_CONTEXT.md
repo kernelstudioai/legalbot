@@ -3,7 +3,7 @@
 ## Purpose
 
 This repository is a Node.js 22 + TypeScript foundation for a WhatsApp legal-intake bot.
-The production transport direction is now the official WhatsApp Business Cloud API.
+The production transport target is the official WhatsApp Business Cloud API.
 OpenWA remains in the repo only as a legacy and development-only transport during the migration.
 This is the only default startup context.
 
@@ -16,7 +16,7 @@ This is the only default startup context.
 - Preserve the shared pipeline order:
   `transport event -> transport normalization -> normalizeInbound -> resolveRouting -> decideNextAction -> buildOutputPlan -> transport dispatch`.
 - Keep `src/transport/openwa` transport-only and treat it as legacy/dev-only.
-- Keep the new Cloud API transport boundary under `src/transport/whatsapp-cloud`.
+- Keep the Cloud API transport boundary under `src/transport/whatsapp-cloud`.
 - Keep domain and business logic outside transport listener or webhook files.
 - Keep runtime-specific orchestration under `src/app/*` and `src/runtime/*`.
 - Preserve the existing reusable core:
@@ -26,14 +26,20 @@ This is the only default startup context.
   - `BusinessPersistenceService`
   - SQLite migrations
   - manual case creation boundary
-  - operator commands such as `business:check`, `business:backup`, `case:doctor`, and `ops:preflight`
+  - operator commands such as `business:check`, `business:backup`, `case:doctor`, `ops:preflight`, `ops:preflight:cloud`, `ops:post-start`, and `ops:post-start:cloud`
 - Keep case creation manual and operator-triggered only.
 - Do not add automatic lawyer WhatsApp notifications, dashboard flows, attachments, PDFs, or external SaaS automation in this phase.
 
 ## Runtime Entry Points
 
 - `src/app/openwaSmoke.ts`: OpenWA smoke runtime for legacy/dev-only usage.
-- `src/app/whatsappCloudRuntime.ts`: Cloud API webhook runtime skeleton for the production migration path.
+- `src/app/whatsappCloudRuntime.ts`: Cloud API runtime for the production deployment path.
+
+## Operational Posture
+
+- Cloud runtime health is checked locally through `/health`, `/ready`, and `/status` on the webhook server.
+- Production Cloud startup requires `WHATSAPP_CLOUD_APP_SECRET`.
+- Reverse proxy, TLS, and firewall configuration remain operator-managed infrastructure concerns documented in `docs/VPS_SYSTEMD_RUNBOOK.md`.
 
 ## Safety Rules
 

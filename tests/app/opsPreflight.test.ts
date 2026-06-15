@@ -71,13 +71,21 @@ describe("ops preflight command", () => {
         majorVersion: 22
       },
       runtimeEnv: {
+        transport: "openwa",
         minimalRequiredEnv: ["LAWYER_PHONE_E164"],
         lawyerPhoneConfigured: true,
         databaseUrlConfigured: true,
         databaseMigrationsExplicit: true,
         databaseMigrationsEnabled: true,
         businessPersistenceEnabled: true,
-        statusServerEnabled: true
+        statusServerEnabled: true,
+        cloudApiVersionConfigured: false,
+        cloudPhoneNumberIdConfigured: false,
+        cloudVerifyTokenConfigured: false,
+        cloudAccessTokenConfigured: false,
+        cloudAppSecretConfigured: false,
+        cloudSignatureVerificationEnforced: false,
+        webhookPort: null
       },
       migrations: {
         appliedMigrationCount: 11,
@@ -132,6 +140,110 @@ describe("ops preflight command", () => {
     expect(summary.report.blockers).toContain("business_check_failed");
     expect(summary.report.blockers).toContain("case_doctor_failed");
     expect(summary.report.migrations.pendingMigrationCount).toBe(11);
+  });
+
+  it("validates a Cloud runtime preflight without leaking secrets", () => {
+    const tempDir = createTempDir();
+    const stdout = createStdout();
+    const databaseUrl = "file:./tmp/legalbot-cloud.sqlite";
+
+    runSqliteMigrations({
+      cwd: tempDir,
+      databaseUrl,
+      enabled: true
+    });
+
+    const summary = runOpsPreflightCommand({
+      cwd: tempDir,
+      envSource: {
+        NODE_ENV: "production",
+        WHATSAPP_TRANSPORT: "cloud",
+        DATABASE_URL: databaseUrl,
+        DATABASE_MIGRATIONS_ENABLED: "true",
+        BUSINESS_PERSISTENCE_ENABLED: "true",
+        WHATSAPP_CLOUD_API_VERSION: "v22.0",
+        WHATSAPP_CLOUD_PHONE_NUMBER_ID: "1234567890",
+        WHATSAPP_CLOUD_VERIFY_TOKEN: "verify-token-123",
+        WHATSAPP_CLOUD_ACCESS_TOKEN: "access-token-123",
+        WHATSAPP_CLOUD_APP_SECRET: "app-secret-123",
+        WHATSAPP_CLOUD_WEBHOOK_HOST: "0.0.0.0",
+        WHATSAPP_CLOUD_WEBHOOK_PORT: "3002"
+      },
+      nodeVersion: "v22.3.0",
+      repoRoot,
+      stdout
+    });
+
+    expect(summary.exitCode).toBe(0);
+    expect(summary.report).toMatchObject({
+      status: "ready",
+      runtimeEnv: {
+        transport: "cloud",
+        minimalRequiredEnv: [
+          "WHATSAPP_TRANSPORT",
+          "WHATSAPP_CLOUD_API_VERSION",
+          "WHATSAPP_CLOUD_PHONE_NUMBER_ID",
+          "WHATSAPP_CLOUD_VERIFY_TOKEN",
+          "WHATSAPP_CLOUD_ACCESS_TOKEN"
+        ],
+        lawyerPhoneConfigured: false,
+        databaseUrlConfigured: true,
+        databaseMigrationsExplicit: true,
+        databaseMigrationsEnabled: true,
+        businessPersistenceEnabled: true,
+        statusServerEnabled: false,
+        cloudApiVersionConfigured: true,
+        cloudPhoneNumberIdConfigured: true,
+        cloudVerifyTokenConfigured: true,
+        cloudAccessTokenConfigured: true,
+        cloudAppSecretConfigured: true,
+        cloudSignatureVerificationEnforced: true,
+        webhookHostConfigured: true,
+        webhookPort: 3002
+      },
+      blockers: []
+    });
+    expect(stdout.output).not.toContain("verify-token-123");
+    expect(stdout.output).not.toContain("access-token-123");
+    expect(stdout.output).not.toContain("app-secret-123");
+    expect(stdout.output).not.toContain("1234567890");
+  });
+
+  it("fails Cloud preflight in production when the app secret is missing", () => {
+    const tempDir = createTempDir();
+    const stdout = createStdout();
+    const databaseUrl = "file:./tmp/legalbot-cloud.sqlite";
+
+    runSqliteMigrations({
+      cwd: tempDir,
+      databaseUrl,
+      enabled: true
+    });
+
+    const summary = runOpsPreflightCommand({
+      cwd: tempDir,
+      envSource: {
+        NODE_ENV: "production",
+        WHATSAPP_TRANSPORT: "cloud",
+        DATABASE_URL: databaseUrl,
+        DATABASE_MIGRATIONS_ENABLED: "true",
+        BUSINESS_PERSISTENCE_ENABLED: "true",
+        WHATSAPP_CLOUD_API_VERSION: "v22.0",
+        WHATSAPP_CLOUD_PHONE_NUMBER_ID: "1234567890",
+        WHATSAPP_CLOUD_VERIFY_TOKEN: "verify-token-123",
+        WHATSAPP_CLOUD_ACCESS_TOKEN: "access-token-123"
+      },
+      nodeVersion: "v22.3.0",
+      repoRoot,
+      stdout
+    });
+
+    expect(summary.exitCode).toBe(1);
+    expect(summary.report.blockers).toContain("cloud_app_secret_required_in_production");
+    expect(summary.report.runtimeEnv.cloudSignatureVerificationEnforced).toBe(true);
+    expect(summary.report.runtimeEnv.cloudAppSecretConfigured).toBe(false);
+    expect(stdout.output).not.toContain("verify-token-123");
+    expect(stdout.output).not.toContain("access-token-123");
   });
 
   it("fails when business persistence is disabled", () => {

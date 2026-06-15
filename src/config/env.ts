@@ -178,6 +178,12 @@ export const WhatsAppCloudRuntimeEnvSchema = EnvSchema.extend({
 
 export type WhatsAppCloudRuntimeEnv = z.infer<typeof WhatsAppCloudRuntimeEnvSchema>;
 
+export const isProductionNodeEnv = (
+  source: {
+    NODE_ENV?: string | undefined;
+  } = process.env
+): boolean => (source.NODE_ENV ?? DEFAULT_NODE_ENV) === "production";
+
 export const loadEnv = (source: NodeJS.ProcessEnv = process.env): AppEnv =>
   EnvSchema.parse(source);
 

@@ -5,9 +5,10 @@
 This repository now has two transport tracks:
 
 - OpenWA: legacy and development-only
-- WhatsApp Business Cloud API: production direction
+- WhatsApp Business Cloud API: production target
 
-This milestone adds the first Cloud runtime foundation, but it does not complete production go-live.
+This milestone makes the Cloud runtime operationally deployable on a VPS.
+It does not remove OpenWA yet.
 
 ## Current Runtime Shape
 
@@ -17,49 +18,30 @@ Legacy/dev-only runtime:
 - Transport: OpenWA through Chromium and WhatsApp Web
 - Requires QR/session handling
 
-Cloud foundation runtime:
+Cloud production-target runtime:
 
-- Entrypoint: `npm run runtime:cloud`
+- Entrypoint: `npm run start:whatsapp-cloud`
+- Compatibility alias: `npm run runtime:cloud`
 - Transport: Meta webhook + Graph API text sender
 - No Chromium
 - No QR
 - No browser profile
 
-## Current systemd Status
+## Shared Host Prerequisites
 
-- `install.sh` and `scripts/provision-systemd.sh` still reflect the existing OpenWA service flow.
-- Treat those scripts and the current `legalbot-openwa.service` shape as legacy/dev-only until a dedicated Cloud service unit milestone lands.
-- Do not treat the current committed systemd flow as the final Cloud production deployment model.
+- Node 22
+- `npm ci --include=dev`
+- explicit env file managed outside version control
+- firewall access only for the public reverse proxy port and local operator SSH access
 
-Legacy preserved references that still matter during the migration:
+Legacy OpenWA-only note that still matters during migration:
 
-- Node 22 remains the required runtime.
-- Chrome or Chromium is still relevant for the preserved OpenWA smoke path.
-- `npm ci --include=dev` remains the expected install command in the current scripts.
-- `npm run ops:preflight` and `npm run ops:post-start` remain reusable operator checks.
-- `command -v npm` remains part of the current systemd provisioning checks.
-- `./scripts/provision-systemd.sh --install` remains the current explicit install entrypoint for the preserved OpenWA unit.
-- `legalbot-openwa.service` remains the current documented service name.
+- Chrome or Chromium is still required for `npm run smoke:openwa`
 - Example preserved legacy `ExecStart=/home/sayan/.nvm/versions/node/v22.22.3/bin/npm run smoke:openwa`
-- No multi-bot runtime yet.
 
-## Cloud Deployment Shape
+Cloud target note:
 
-The expected Cloud production shape is:
-
-1. A public HTTPS endpoint receives Meta webhook requests.
-2. A reverse proxy or ingress forwards traffic to `WHATSAPP_CLOUD_WEBHOOK_HOST:WHATSAPP_CLOUD_WEBHOOK_PORT`.
-3. The app validates the verify token and, when configured, the app-secret signature.
-4. The shared business pipeline processes consent and intake.
-5. Outbound text replies are sent through the Graph API sender abstraction.
-
-This milestone does not yet provide:
-
-- automated Meta app registration
-- reverse-proxy provisioning
-- TLS certificate automation
-- firewall automation
-- a dedicated Cloud systemd unit template
+- Example Cloud `ExecStart=/home/deploy/.nvm/versions/node/v22.22.3/bin/npm run start:whatsapp-cloud`
 
 ## Minimal Cloud Runtime Env
 
@@ -73,7 +55,7 @@ WHATSAPP_CLOUD_VERIFY_TOKEN=replace-me
 WHATSAPP_CLOUD_ACCESS_TOKEN=replace-me
 ```
 
-Recommended:
+Required in production:
 
 ```dotenv
 WHATSAPP_CLOUD_APP_SECRET=replace-me
@@ -86,28 +68,140 @@ WHATSAPP_CLOUD_WEBHOOK_HOST=0.0.0.0
 WHATSAPP_CLOUD_WEBHOOK_PORT=3002
 ```
 
-Keep these values outside version control. Never print env-file contents.
+Keep these values outside version control.
+Never print env-file contents.
 
-## Operator Commands That Remain Reusable
+## Preflight And Post-Start
 
-The business and database operator boundaries remain valid across the transport pivot:
+OpenWA legacy/dev-only checks:
 
-- `npm run business:check`
-- `npm run business:backup`
-- `npm run case:doctor`
-- `npm run db:migrate`
-- `npm run db:status`
+- `npm run ops:preflight`
+- `npm run ops:post-start`
 
-`ops:preflight` remains preserved in the repo, but the current documented install/systemd flow is still OpenWA-oriented and should be treated as legacy/dev-only until the dedicated Cloud deployment milestone.
+Cloud production-target checks:
+
+- `npm run ops:preflight:cloud`
+- `npm run ops:post-start:cloud`
+
+Both command families stay local-only.
+They do not call live Meta APIs.
+
+## systemd Provisioning
+
+`scripts/provision-systemd.sh` now supports both transports.
+
+Important defaults:
+
+- `command -v npm` remains the npm discovery fallback
+- `EnvironmentFile=` is used, but the file contents are never printed
+- the service stays stopped unless `--start` is passed
+- the service stays disabled unless `--enable` is passed
+- no auto-start by default
+- no auto-enable by default
+
+Legacy/dev-only OpenWA example:
+
+```bash
+./scripts/provision-systemd.sh --install
+```
+
+Cloud production-target example:
+
+```bash
+./scripts/provision-systemd.sh \
+  --install \
+  --transport cloud \
+  --service-name legalbot-whatsapp-cloud.service \
+  --exec-script start:whatsapp-cloud
+```
+
+Dry-run the Cloud unit before installing it:
+
+```bash
+./scripts/provision-systemd.sh \
+  --dry-run \
+  --transport cloud \
+  --service-name legalbot-whatsapp-cloud.service \
+  --exec-script start:whatsapp-cloud
+```
+
+Expected service names:
+
+- `legalbot-openwa.service`
+- `legalbot-whatsapp-cloud.service`
+
+## Reverse Proxy And TLS
+
+Meta webhook delivery requires a public HTTPS endpoint.
+Terminate TLS at nginx or an equivalent reverse proxy and forward only to the local Cloud bind port.
+
+Example nginx server block:
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name webhook.example.invalid;
+
+    ssl_certificate /etc/letsencrypt/live/webhook.example.invalid/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/webhook.example.invalid/privkey.pem;
+
+    location /webhooks/whatsapp/cloud {
+        proxy_pass http://127.0.0.1:3002;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    location /health {
+        allow 127.0.0.1;
+        deny all;
+        proxy_pass http://127.0.0.1:3002/health;
+    }
+
+    location /ready {
+        allow 127.0.0.1;
+        deny all;
+        proxy_pass http://127.0.0.1:3002/ready;
+    }
+}
+```
+
+Webhook verification URL example:
+
+```text
+https://webhook.example.invalid/webhooks/whatsapp/cloud
+```
+
+Firewall notes:
+
+- Allow inbound `443/tcp` to the reverse proxy.
+- Keep `WHATSAPP_CLOUD_WEBHOOK_PORT` bound to localhost or private interfaces unless infrastructure requires otherwise.
+- Do not expose `/health`, `/ready`, or `/status` publicly.
+
+## Safe Log Review
+
+Use commands that inspect service state without printing env contents:
+
+```bash
+systemctl status legalbot-whatsapp-cloud.service --no-pager
+journalctl -u legalbot-whatsapp-cloud.service -n 100 --no-pager
+journalctl -u legalbot-whatsapp-cloud.service --since "15 minutes ago" --no-pager
+```
+
+Do not grep or echo tokens.
+Do not print QR data, session artifacts, or browser-profile paths.
 
 ## Business Constraints
 
 - No automatic WhatsApp notification is sent to the lawyer.
+- Lawyer reviews remain operator-tool-driven now and dashboard-driven later.
 - No automatic case creation is enabled.
 - No attachments or PDFs are enabled.
-- No dashboard or multi-bot orchestration is included.
+- No multi-bot runtime yet.
 
 ## Pricing Reminder
 
-The current business assumption is that client-initiated intake stays inside the customer service window when possible and primarily uses the service category.
-That supports the current low-volume cost assumption, but exact Meta pricing must be verified before launch against the current market and category rate card.
+The intended business model is still client-initiated service flow inside the customer service window whenever possible.
+That keeps WhatsApp cost near zero for the main intake flow.
+Exact Meta pricing must be verified before launch against the current market and category rate card.

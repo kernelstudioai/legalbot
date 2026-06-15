@@ -1,7 +1,12 @@
 import {
   DEFAULT_OPENWA_STATUS_SERVER_PORT,
+  isProductionNodeEnv,
+  loadEnv,
   loadSmokeRuntimeEnv,
-  type SmokeRuntimeEnv
+  loadWhatsAppCloudRuntimeEnv,
+  type AppEnv,
+  type SmokeRuntimeEnv,
+  type WhatsAppCloudRuntimeEnv
 } from "../config/env.ts";
 import {
   runDockerDiagnoseCommand,
@@ -10,6 +15,11 @@ import {
 } from "./dockerDiagnose.ts";
 import { exitWithCode, isDirectExecution, type DbCommandSummary } from "./dbCommandCommon.ts";
 import { silentLogger, toJsonStdout } from "./opsCommandCommon.ts";
+import {
+  applyTransportOverride,
+  parseTransportOverride,
+  type RuntimeTransport
+} from "./runtimeCommandCommon.ts";
 
 type OpsPostStartCode =
   | "app_not_ready_auth_missing"
@@ -42,6 +52,7 @@ interface HttpProbeRunner {
 export interface OpsPostStartReport {
   status: OpsPostStartStatus;
   mode: OpsPostStartMode;
+  transport: RuntimeTransport;
   checkedAt: string;
   diagnosis: {
     code: OpsPostStartCode;
@@ -75,6 +86,7 @@ export interface OpsPostStartCommandOptions {
   stdout?: {
     write(chunk: string): void;
   };
+  transportOverride?: RuntimeTransport;
 }
 
 export interface OpsPostStartSummary extends DbCommandSummary {
@@ -104,6 +116,41 @@ const sanitizeUnknownString = (value: unknown): string | undefined => {
   return value;
 };
 
+const sanitizeTransportBody = (
+  transport: Record<string, unknown>
+): Record<string, unknown> => ({
+  ...(typeof transport.kind === "string" ? { kind: transport.kind } : {}),
+  ...(typeof transport.state === "string" ? { state: transport.state } : {}),
+  ...(typeof transport.ready === "boolean" ? { ready: transport.ready } : {}),
+  ...(typeof transport.clientActive === "boolean"
+    ? { clientActive: transport.clientActive }
+    : {}),
+  ...(typeof transport.listenerRegistered === "boolean"
+    ? { listenerRegistered: transport.listenerRegistered }
+    : {}),
+  ...(typeof transport.livenessEnabled === "boolean"
+    ? { livenessEnabled: transport.livenessEnabled }
+    : {}),
+  ...(transport.livenessFailureCount !== undefined
+    ? { livenessFailureCount: Number(transport.livenessFailureCount ?? 0) }
+    : {}),
+  ...(typeof transport.recoveryMode === "string"
+    ? { recoveryMode: sanitizeUnknownString(transport.recoveryMode) }
+    : {}),
+  ...(typeof transport.recoveryInProgress === "boolean"
+    ? { recoveryInProgress: transport.recoveryInProgress }
+    : {}),
+  ...(typeof transport.signatureVerification === "string"
+    ? {
+        signatureVerification: sanitizeUnknownString(transport.signatureVerification) ??
+          "unknown"
+      }
+    : {}),
+  ...(typeof transport.webhookPath === "string"
+    ? { webhookPath: transport.webhookPath }
+    : {})
+});
+
 const sanitizeBody = (url: string, value: unknown): Record<string, unknown> | undefined => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
@@ -118,26 +165,7 @@ const sanitizeBody = (url: string, value: unknown): Record<string, unknown> | un
       alive: body.alive === true,
       ...(transport && typeof transport === "object"
         ? {
-            transport: {
-              state:
-                typeof (transport as Record<string, unknown>).state === "string"
-                  ? (transport as Record<string, unknown>).state
-                  : "unknown",
-              ready: (transport as Record<string, unknown>).ready === true,
-              clientActive: (transport as Record<string, unknown>).clientActive === true,
-              listenerRegistered:
-                (transport as Record<string, unknown>).listenerRegistered === true,
-              livenessEnabled:
-                (transport as Record<string, unknown>).livenessEnabled === true,
-              livenessFailureCount: Number(
-                (transport as Record<string, unknown>).livenessFailureCount ?? 0
-              ),
-              recoveryMode: sanitizeUnknownString(
-                (transport as Record<string, unknown>).recoveryMode
-              ),
-              recoveryInProgress:
-                (transport as Record<string, unknown>).recoveryInProgress === true
-            }
+            transport: sanitizeTransportBody(transport as Record<string, unknown>)
           }
         : {})
     };
@@ -146,11 +174,18 @@ const sanitizeBody = (url: string, value: unknown): Record<string, unknown> | un
   if (url.endsWith("/ready")) {
     return {
       ready: body.ready === true,
-      state: sanitizeUnknownString(body.state) ?? "unknown"
+      state: sanitizeUnknownString(body.state) ?? "unknown",
+      ...(typeof body.signatureVerification === "string"
+        ? {
+            signatureVerification:
+              sanitizeUnknownString(body.signatureVerification) ?? "unknown"
+          }
+        : {})
     };
   }
 
   return {
+    ...(typeof body.transport === "string" ? { transport: body.transport } : {}),
     state: sanitizeUnknownString(body.state) ?? "unknown",
     ready: body.ready === true,
     clientActive: body.clientActive === true,
@@ -159,6 +194,13 @@ const sanitizeBody = (url: string, value: unknown): Record<string, unknown> | un
     livenessFailureCount: Number(body.livenessFailureCount ?? 0),
     recoveryMode: sanitizeUnknownString(body.recoveryMode),
     recoveryInProgress: body.recoveryInProgress === true,
+    ...(typeof body.signatureVerification === "string"
+      ? {
+          signatureVerification:
+            sanitizeUnknownString(body.signatureVerification) ?? "unknown"
+        }
+      : {}),
+    ...(typeof body.webhookPath === "string" ? { webhookPath: body.webhookPath } : {}),
     ...(typeof body.lastError === "string"
       ? { lastError: sanitizeUnknownString(body.lastError) ?? "redacted_sensitive_value" }
       : {})
@@ -211,13 +253,16 @@ const toEndpointSummary = (probe: HttpProbeResult, url: string): EndpointSummary
     : {})
 });
 
-const getLoopbackBaseUrl = (env: SmokeRuntimeEnv): string =>
+const getOpenWaLoopbackBaseUrl = (env: SmokeRuntimeEnv): string =>
   `http://127.0.0.1:${env.OPENWA_STATUS_SERVER_PORT ?? Number(DEFAULT_OPENWA_STATUS_SERVER_PORT)}`;
+
+const getCloudLoopbackBaseUrl = (env: WhatsAppCloudRuntimeEnv): string =>
+  `http://127.0.0.1:${env.WHATSAPP_CLOUD_WEBHOOK_PORT}`;
 
 const isReady = (endpoint: EndpointSummary): boolean =>
   endpoint.statusCode === 200 && endpoint.body?.ready === true;
 
-const detectDirectDiagnosis = ({
+const detectOpenWaDiagnosis = ({
   health,
   ready,
   status
@@ -265,9 +310,37 @@ const detectDirectDiagnosis = ({
   };
 };
 
+const detectCloudDiagnosis = ({
+  ready
+}: {
+  health: EndpointSummary;
+  ready: EndpointSummary;
+  status: EndpointSummary;
+}): {
+  code: OpsPostStartCode;
+  status: OpsPostStartStatus;
+  summary: string;
+} => {
+  if (isReady(ready)) {
+    return {
+      code: "app_ready",
+      status: "healthy",
+      summary: "The Cloud webhook server is reachable and ready for local health checks."
+    };
+  }
+
+  return {
+    code: "host_port_mapping_issue",
+    status: "error",
+    summary:
+      "The local Cloud webhook surface is not reachable or did not report a ready state."
+  };
+};
+
 const mapDockerDiagnoseReport = (report: DockerDiagnoseReport): OpsPostStartReport => ({
   status: report.status === "healthy" ? "healthy" : report.status === "warning" ? "warning" : "error",
   mode: "docker",
+  transport: "openwa",
   checkedAt: report.checkedAt,
   diagnosis: {
     code:
@@ -292,29 +365,74 @@ const mapDockerDiagnoseReport = (report: DockerDiagnoseReport): OpsPostStartRepo
   }
 });
 
+const loadBaseEnv = (envSource: NodeJS.ProcessEnv): AppEnv => loadEnv(envSource);
+
 export const runOpsPostStartCommand = async ({
   dockerDiagnoseRunner = runDockerDiagnoseCommand,
   envSource = process.env,
   httpProbeRunner = createFetchHttpProbeRunner(),
-  stdout = process.stdout
+  stdout = process.stdout,
+  transportOverride
 }: OpsPostStartCommandOptions = {}): Promise<OpsPostStartSummary> => {
-  const env = loadSmokeRuntimeEnv(envSource);
-  const requestedMode =
-    envSource.OPS_POST_START_MODE === "docker" || envSource.OPS_POST_START_MODE === "direct"
-      ? envSource.OPS_POST_START_MODE
-      : env.OPENWA_STATUS_SERVER_HOST === "0.0.0.0"
-        ? "docker"
-        : "direct";
+  const effectiveEnvSource = applyTransportOverride(envSource, transportOverride);
+  const baseEnv = loadBaseEnv(effectiveEnvSource);
 
-  if (requestedMode === "docker") {
-    const dockerSummary = await dockerDiagnoseRunner({
-      envSource,
-      logger: silentLogger,
-      stdout: {
-        write() {}
+  if (baseEnv.WHATSAPP_TRANSPORT === "openwa") {
+    const env = loadSmokeRuntimeEnv(effectiveEnvSource);
+    const requestedMode =
+      envSource.OPS_POST_START_MODE === "docker" || envSource.OPS_POST_START_MODE === "direct"
+        ? envSource.OPS_POST_START_MODE
+        : env.OPENWA_STATUS_SERVER_HOST === "0.0.0.0"
+          ? "docker"
+          : "direct";
+
+    if (requestedMode === "docker") {
+      const dockerSummary = await dockerDiagnoseRunner({
+        envSource: effectiveEnvSource,
+        logger: silentLogger,
+        stdout: {
+          write() {}
+        }
+      });
+      const report = mapDockerDiagnoseReport(dockerSummary.report as DockerDiagnoseReport);
+      toJsonStdout(report, stdout);
+
+      return {
+        exitCode: report.diagnosis.code === "app_ready" ? 0 : 1,
+        report
+      };
+    }
+
+    const hostBaseUrl = getOpenWaLoopbackBaseUrl(env);
+    const [healthProbe, readyProbe, statusProbe] = await Promise.all([
+      httpProbeRunner.probe(`${hostBaseUrl}/health`),
+      httpProbeRunner.probe(`${hostBaseUrl}/ready`),
+      httpProbeRunner.probe(`${hostBaseUrl}/status`)
+    ]);
+    const host = {
+      health: toEndpointSummary(healthProbe, `${hostBaseUrl}/health`),
+      ready: toEndpointSummary(readyProbe, `${hostBaseUrl}/ready`),
+      status: toEndpointSummary(statusProbe, `${hostBaseUrl}/status`)
+    };
+    const diagnosis = detectOpenWaDiagnosis(host);
+    const report: OpsPostStartReport = {
+      status: diagnosis.status,
+      mode: "direct",
+      transport: "openwa",
+      checkedAt: new Date().toISOString(),
+      diagnosis: {
+        code: diagnosis.code,
+        summary: diagnosis.summary
+      },
+      statusServerEnabled: env.OPENWA_STATUS_SERVER_ENABLED,
+      hostBaseUrl,
+      host,
+      docker: {
+        reusedDockerDiagnose: false,
+        compose: null
       }
-    });
-  const report = mapDockerDiagnoseReport(dockerSummary.report as DockerDiagnoseReport);
+    };
+
     toJsonStdout(report, stdout);
 
     return {
@@ -323,7 +441,8 @@ export const runOpsPostStartCommand = async ({
     };
   }
 
-  const hostBaseUrl = getLoopbackBaseUrl(env);
+  const env = loadWhatsAppCloudRuntimeEnv(effectiveEnvSource);
+  const hostBaseUrl = getCloudLoopbackBaseUrl(env);
   const [healthProbe, readyProbe, statusProbe] = await Promise.all([
     httpProbeRunner.probe(`${hostBaseUrl}/health`),
     httpProbeRunner.probe(`${hostBaseUrl}/ready`),
@@ -334,16 +453,17 @@ export const runOpsPostStartCommand = async ({
     ready: toEndpointSummary(readyProbe, `${hostBaseUrl}/ready`),
     status: toEndpointSummary(statusProbe, `${hostBaseUrl}/status`)
   };
-  const diagnosis = detectDirectDiagnosis(host);
+  const diagnosis = detectCloudDiagnosis(host);
   const report: OpsPostStartReport = {
     status: diagnosis.status,
     mode: "direct",
+    transport: "cloud",
     checkedAt: new Date().toISOString(),
     diagnosis: {
       code: diagnosis.code,
       summary: diagnosis.summary
     },
-    statusServerEnabled: env.OPENWA_STATUS_SERVER_ENABLED,
+    statusServerEnabled: true,
     hostBaseUrl,
     host,
     docker: {
@@ -351,6 +471,15 @@ export const runOpsPostStartCommand = async ({
       compose: null
     }
   };
+
+  if (isProductionNodeEnv(effectiveEnvSource) && !env.WHATSAPP_CLOUD_APP_SECRET) {
+    report.status = "error";
+    report.diagnosis = {
+      code: "host_port_mapping_issue",
+      summary:
+        "The Cloud runtime requires WHATSAPP_CLOUD_APP_SECRET in production before local readiness can be trusted."
+    };
+  }
 
   toJsonStdout(report, stdout);
 
@@ -361,5 +490,15 @@ export const runOpsPostStartCommand = async ({
 };
 
 if (isDirectExecution(import.meta.url)) {
-  exitWithCode(await runOpsPostStartCommand());
+  const transportOverride = parseTransportOverride();
+
+  exitWithCode(
+    await runOpsPostStartCommand(
+      transportOverride
+        ? {
+            transportOverride
+          }
+        : {}
+    )
+  );
 }
