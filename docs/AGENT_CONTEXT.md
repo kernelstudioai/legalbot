@@ -33,12 +33,15 @@ This is the only default startup context.
 ## Runtime Entry Points
 
 - `src/app/openwaSmoke.ts`: OpenWA smoke runtime for legacy/dev-only usage.
-- `src/app/whatsappCloudRuntime.ts`: Cloud API runtime for the production deployment path.
+- `src/app/whatsappCloudRuntime.ts`: Cloud API process entrypoint used by the production
+  Docker Compose service; direct invocation is local debug only.
 
 ## Operational Posture
 
 - Cloud runtime health is checked locally through `/health`, `/ready`, and `/status` on the webhook server.
 - The Cloud webhook server defaults to `127.0.0.1:3002`; public exposure is never a default.
+- Production Cloud deployment uses the `legalbot-whatsapp-cloud` Compose service.
+- systemd may manage Docker Compose, but must not run the Cloud Node/npm process directly.
 - Production Cloud startup requires `WHATSAPP_CLOUD_APP_SECRET`.
 - `webhook:replay:cloud` validates fake local fixtures and signatures without running the
   business pipeline, dispatching outbound messages, or calling Meta.

@@ -1,11 +1,17 @@
 import { spawnSync } from "node:child_process";
 import {
   DEFAULT_OPENWA_STATUS_SERVER_PORT,
+  DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PORT,
   loadEnv,
   type AppEnv
 } from "../config/env.ts";
 import { consoleLogger, type Logger } from "../logging/logger.ts";
 import { exitWithCode, isDirectExecution, type DbCommandSummary } from "./dbCommandCommon.ts";
+import {
+  applyTransportOverride,
+  parseTransportOverride,
+  type RuntimeTransport
+} from "./runtimeCommandCommon.ts";
 
 type DockerDiagnoseCode =
   | "app_not_ready_auth_missing"
@@ -60,6 +66,7 @@ export interface DockerDiagnoseOptions {
   stdout?: {
     write(chunk: string): void;
   };
+  transportOverride?: RuntimeTransport;
 }
 
 interface EndpointSummary {
@@ -102,7 +109,6 @@ export interface DockerDiagnoseSummary extends DbCommandSummary {
   report?: DockerDiagnoseReport;
 }
 
-const dockerComposeServiceName = "legalbot";
 const WINDOWS_PATH_PATTERN = /[A-Za-z]:\\[^\s"]+/;
 const POSIX_PATH_PATTERN = /\/(?:Users|home|tmp|var|opt|etc|appdata|openwa-session)[^\s"]*/i;
 const PHONE_PATTERN = /\+[1-9]\d{7,14}/;
@@ -255,7 +261,10 @@ const parseJsonOutput = <T>(stdout: string): T | null => {
   }
 };
 
-const getComposePsEntry = (composeRunner: DockerComposeRunner): DockerPsEntry | null => {
+const getComposePsEntry = (
+  composeRunner: DockerComposeRunner,
+  serviceName: string
+): DockerPsEntry | null => {
   const result = composeRunner.run(["ps", "--format", "json"]);
 
   if (result.exitCode !== 0) {
@@ -269,21 +278,19 @@ const getComposePsEntry = (composeRunner: DockerComposeRunner): DockerPsEntry | 
   }
 
   if (Array.isArray(parsed)) {
-    return (
-      parsed.find((entry) => entry.Service === dockerComposeServiceName) ??
-      parsed[0] ??
-      null
-    );
+    return parsed.find((entry) => entry.Service === serviceName) ?? null;
   }
 
-  return parsed.Service === dockerComposeServiceName ? parsed : parsed;
+  return parsed.Service === serviceName ? parsed : null;
 };
 
 const getComposeHostPortBinding = (
   composeRunner: DockerComposeRunner,
-  psEntry: DockerPsEntry | null
+  psEntry: DockerPsEntry | null,
+  serviceName: string,
+  port: string
 ): string | null => {
-  const portResult = composeRunner.run(["port", dockerComposeServiceName, DEFAULT_OPENWA_STATUS_SERVER_PORT]);
+  const portResult = composeRunner.run(["port", serviceName, port]);
 
   if (portResult.exitCode === 0) {
     return portResult.stdout.trim() || null;
@@ -291,14 +298,14 @@ const getComposeHostPortBinding = (
 
   const publishers = Array.isArray(psEntry?.Publishers) ? psEntry.Publishers : [];
   const publisher = publishers.find(
-    (candidate) => Number(candidate.TargetPort) === Number(DEFAULT_OPENWA_STATUS_SERVER_PORT)
+    (candidate) => Number(candidate.TargetPort) === Number(port)
   );
 
   if (!publisher) {
     return null;
   }
 
-  return `${publisher.URL ?? "127.0.0.1"}:${publisher.PublishedPort ?? DEFAULT_OPENWA_STATUS_SERVER_PORT}`;
+  return `${publisher.URL ?? "127.0.0.1"}:${publisher.PublishedPort ?? port}`;
 };
 
 const probeEndpoints = async (
@@ -330,7 +337,9 @@ const probeEndpoints = async (
 };
 
 const probeContainerEndpoints = async (
-  composeRunner: DockerComposeRunner
+  composeRunner: DockerComposeRunner,
+  serviceName: string,
+  port: string
 ): Promise<{
   health: EndpointSummary;
   ready: EndpointSummary;
@@ -339,7 +348,7 @@ const probeContainerEndpoints = async (
   const runProbe = (path: "/health" | "/ready" | "/status"): EndpointSummary => {
     const script = [
       "const path = process.argv[1];",
-      "fetch(`http://127.0.0.1:3001${path}`)",
+      `fetch(\`http://127.0.0.1:${port}\${path}\`)`,
       "  .then(async (response) => {",
       "    let body;",
       "    try { body = await response.json(); } catch { body = undefined; }",
@@ -352,7 +361,7 @@ const probeContainerEndpoints = async (
     const result = composeRunner.run([
       "exec",
       "-T",
-      dockerComposeServiceName,
+      serviceName,
       "node",
       "-e",
       script,
@@ -382,7 +391,7 @@ const probeContainerEndpoints = async (
       statusCode: parsed.statusCode,
       ...(parsed.error ? { error: parsed.error } : {}),
       ...(parsed.body
-        ? { body: sanitizeBody(`http://127.0.0.1:3001${path}`, parsed.body) ?? parsed.body }
+        ? { body: sanitizeBody(`http://127.0.0.1:${port}${path}`, parsed.body) ?? parsed.body }
         : {})
     });
   };
@@ -398,10 +407,12 @@ const isReadyEndpointTrue = (endpoint: EndpointSummary): boolean =>
   endpoint.statusCode === 200 && endpoint.body?.ready === true;
 
 const inferDiagnosis = ({
+  expectedHostPort,
   compose,
   host,
   inContainer
 }: {
+  expectedHostPort: string;
   compose: DockerComposeSummary;
   host: {
     health: EndpointSummary;
@@ -422,7 +433,7 @@ const inferDiagnosis = ({
     return {
       code: "container_not_running",
       status: "error",
-      summary: "The legalbot Compose service is not running."
+      summary: "The selected LegalBot Compose service is not running."
     };
   }
 
@@ -435,12 +446,12 @@ const inferDiagnosis = ({
   }
 
   if (inContainer.health.statusCode === 200 && host.health.statusCode === null) {
-    if (!compose.hostPortBinding || !compose.hostPortBinding.startsWith("127.0.0.1:3001")) {
+    if (!compose.hostPortBinding || !compose.hostPortBinding.startsWith(expectedHostPort)) {
       return {
         code: "host_port_mapping_issue",
         status: "error",
         summary:
-          "The app is healthy inside the container, but the expected host binding for 127.0.0.1:3001 is missing or different."
+          `The app is healthy inside the container, but the expected host binding for ${expectedHostPort} is missing or different.`
       };
     }
 
@@ -448,7 +459,7 @@ const inferDiagnosis = ({
       code: "docker_network_issue",
       status: "error",
       summary:
-        "The app is healthy inside the container, but host access to 127.0.0.1:3001 failed despite a matching published port."
+        `The app is healthy inside the container, but host access to ${expectedHostPort} failed despite a matching published port.`
     };
   }
 
@@ -456,7 +467,7 @@ const inferDiagnosis = ({
     return {
       code: "app_ready",
       status: "healthy",
-      summary: "The app is ready and the WhatsApp runtime is authenticated."
+      summary: "The selected WhatsApp runtime is ready."
     };
   }
 
@@ -474,7 +485,7 @@ const inferDiagnosis = ({
       code: "app_not_ready_auth_missing",
       status: "warning",
       summary:
-        "The app is alive inside the container, but WhatsApp authentication or QR pairing is still pending."
+        "The app is alive inside the container, but the selected transport is not ready yet."
     };
   }
 
@@ -486,23 +497,47 @@ const inferDiagnosis = ({
   };
 };
 
-const getDefaultHostPort = (env: AppEnv): string => `127.0.0.1:${DEFAULT_OPENWA_STATUS_SERVER_PORT}`;
+const getDockerRuntimeConfig = (
+  env: AppEnv
+): {
+  port: string;
+  serviceName: string;
+} =>
+  env.WHATSAPP_TRANSPORT === "cloud"
+    ? {
+        port: DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PORT,
+        serviceName: "legalbot-whatsapp-cloud"
+      }
+    : {
+        port: DEFAULT_OPENWA_STATUS_SERVER_PORT,
+        serviceName: "legalbot"
+      };
 
 export const runDockerDiagnoseCommand = async (
   options: DockerDiagnoseOptions = {}
 ): Promise<DockerDiagnoseSummary> => {
   const logger = options.logger ?? consoleLogger;
   const stdout = options.stdout ?? process.stdout;
-  const env = loadEnv(options.envSource ?? process.env);
+  const effectiveEnvSource = applyTransportOverride(
+    options.envSource ?? process.env,
+    options.transportOverride
+  );
+  const env = loadEnv(effectiveEnvSource);
+  const runtime = getDockerRuntimeConfig(env);
   const composeRunner = options.composeRunner ?? createProcessDockerComposeRunner();
   const httpProbeRunner = options.httpProbeRunner ?? createFetchHttpProbeRunner();
 
   try {
     logger.info("docker_diagnose_starting", {});
 
-    const psEntry = getComposePsEntry(composeRunner);
-    const hostPortBinding = getComposeHostPortBinding(composeRunner, psEntry);
-    const hostPort = getDefaultHostPort(env);
+    const psEntry = getComposePsEntry(composeRunner, runtime.serviceName);
+    const hostPortBinding = getComposeHostPortBinding(
+      composeRunner,
+      psEntry,
+      runtime.serviceName,
+      runtime.port
+    );
+    const hostPort = `127.0.0.1:${runtime.port}`;
     const host = await probeEndpoints(httpProbeRunner, `http://${hostPort}`);
     const composeSummary: DockerComposeSummary = {
       servicePresent: psEntry !== null,
@@ -513,7 +548,7 @@ export const runDockerDiagnoseCommand = async (
     };
     const inContainer =
       composeSummary.servicePresent && composeSummary.running
-        ? await probeContainerEndpoints(composeRunner)
+        ? await probeContainerEndpoints(composeRunner, runtime.serviceName, runtime.port)
         : {
             health: {
               reachable: false,
@@ -533,6 +568,7 @@ export const runDockerDiagnoseCommand = async (
           };
 
     const diagnosis = inferDiagnosis({
+      expectedHostPort: hostPort,
       compose: composeSummary,
       host,
       inContainer
@@ -623,5 +659,15 @@ export const runDockerDiagnoseCommand = async (
 };
 
 if (isDirectExecution(import.meta.url)) {
-  exitWithCode(await runDockerDiagnoseCommand());
+  const transportOverride = parseTransportOverride();
+
+  exitWithCode(
+    await runDockerDiagnoseCommand(
+      transportOverride
+        ? {
+            transportOverride
+          }
+        : {}
+    )
+  );
 }

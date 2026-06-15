@@ -345,4 +345,87 @@ describe("ops post-start command", () => {
     expect(stdout.output).not.toContain("1234567890");
     expect(stdout.output).not.toContain("+15551234567");
   });
+
+  it("reuses Cloud Docker diagnosis when Docker mode is requested", async () => {
+    let receivedTransport: string | undefined;
+    const summary = await runOpsPostStartCommand({
+      envSource: {
+        OPS_POST_START_MODE: "docker",
+        WHATSAPP_TRANSPORT: "cloud",
+        WHATSAPP_CLOUD_API_VERSION: "v22.0",
+        WHATSAPP_CLOUD_PHONE_NUMBER_ID: "1234567890",
+        WHATSAPP_CLOUD_VERIFY_TOKEN: "verify-token-123",
+        WHATSAPP_CLOUD_ACCESS_TOKEN: "access-token-123",
+        WHATSAPP_CLOUD_APP_SECRET: "app-secret-123",
+        WHATSAPP_CLOUD_WEBHOOK_HOST: "0.0.0.0",
+        WHATSAPP_CLOUD_WEBHOOK_PORT: "3002"
+      },
+      dockerDiagnoseRunner: async (options) => {
+        receivedTransport = options?.transportOverride;
+        return {
+          exitCode: 0,
+          report: {
+            status: "healthy",
+            diagnosis: {
+              code: "app_ready",
+              summary: "The selected WhatsApp runtime is ready."
+            },
+            checkedAt: "2026-06-15T10:00:00.000Z",
+            hostPort: "127.0.0.1:3002",
+            compose: {
+              servicePresent: true,
+              running: true,
+              state: "running",
+              health: "healthy",
+              hostPortBinding: "127.0.0.1:3002"
+            },
+            host: {
+              health: { reachable: true, statusCode: 200 },
+              ready: {
+                reachable: true,
+                statusCode: 200,
+                body: { ready: true, state: "ready" }
+              },
+              status: {
+                reachable: true,
+                statusCode: 200,
+                body: { ready: true, state: "ready" }
+              }
+            },
+            inContainer: {
+              health: { reachable: true, statusCode: 200 },
+              ready: {
+                reachable: true,
+                statusCode: 200,
+                body: { ready: true, state: "ready" }
+              },
+              status: {
+                reachable: true,
+                statusCode: 200,
+                body: { ready: true, state: "ready" }
+              }
+            }
+          }
+        };
+      }
+    });
+
+    expect(receivedTransport).toBe("cloud");
+    expect(summary.exitCode).toBe(0);
+    expect(summary.report).toMatchObject({
+      mode: "docker",
+      transport: "cloud",
+      diagnosis: {
+        code: "app_ready"
+      },
+      docker: {
+        reusedDockerDiagnose: true,
+        compose: {
+          servicePresent: true,
+          running: true,
+          health: "healthy"
+        }
+      }
+    });
+  });
 });

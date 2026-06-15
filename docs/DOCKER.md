@@ -2,16 +2,16 @@
 
 ## Scope
 
-This Docker setup is the local and product-like baseline for the current single-bot OpenWA runtime.
+This Docker setup supports the legacy OpenWA development runtime and the WhatsApp
+Cloud production runtime.
 
-- Not a final VPS installer.
-- No `install.sh` yet.
-- No systemd yet.
+- VPS operation is documented in `docs/VPS_SYSTEMD_RUNBOOK.md`.
+- systemd may manage the Cloud Compose service, but not the Node process directly.
 - No dashboard or multi-bot runtime.
 - No automatic case creation.
 - No transcript or raw message-body persistence.
 
-## Minimal Operator Input
+## OpenWA Minimal Operator Input
 
 Keep `.env` minimal:
 
@@ -29,6 +29,26 @@ OpenWA launches Chromium with `--no-sandbox` and `--disable-setuid-sandbox`.
 This avoids Chromium sandbox failures in Docker but weakens Chromium's process isolation, so keep this Compose service single-purpose, local-bound, and isolated from untrusted workloads.
 
 ## Commands
+
+WhatsApp Cloud production commands:
+
+```bash
+npm run docker:cloud:build
+npm run docker:cloud:up
+npm run docker:cloud:ps
+OPS_POST_START_MODE=docker npm run ops:post-start:cloud
+npm run docker:cloud:diagnose
+npm run docker:cloud:logs
+npm run docker:cloud:down
+```
+
+The Cloud service runs `npm run start:whatsapp-cloud`, reads `.env` through Compose,
+publishes only `127.0.0.1:3002:3002`, uses a Node-based `/health` check, and mounts
+only `./data`, `./backups`, and `./logs`. It does not mount OpenWA session state.
+Its `cloud-runtime` image target does not install Chromium.
+Never print or paste `.env`.
+
+OpenWA legacy/development commands:
 
 Build:
 

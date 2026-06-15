@@ -16,7 +16,8 @@ OpenWA listeners and Cloud webhook handlers orchestrate transport concerns only.
 ## WhatsApp Cloud Runtime
 
 - `src/app/whatsappCloudRuntime.ts` is the production-target runtime entrypoint.
-- Operators start it with `npm run start:whatsapp-cloud`.
+- Production operators start the Compose service with `npm run docker:cloud:up`.
+- `npm run start:whatsapp-cloud` is reserved for local foreground debugging.
 - `GET /health`, `GET /ready`, and `GET /status` provide sanitized local health checks on the same port as the webhook server.
 - `GET /webhooks/whatsapp/cloud` performs the Meta verification challenge and returns the challenge only when the mode and verify token are valid.
 - `POST /webhooks/whatsapp/cloud` parses WhatsApp Cloud webhook payloads, extracts text message events, ignores unsupported message types safely, and ignores status events for now.
@@ -43,6 +44,8 @@ OpenWA listeners and Cloud webhook handlers orchestrate transport concerns only.
 - `npm run ops:preflight:cloud` validates Cloud runtime env, migration posture, and repo hygiene without printing secrets.
 - `npm run ops:post-start` checks the sanitized OpenWA status surface after startup.
 - `npm run ops:post-start:cloud` checks the local Cloud health surface after startup without calling live Meta APIs.
+- `OPS_POST_START_MODE=docker npm run ops:post-start:cloud` also verifies the selected
+  Compose service, container health, loopback port mapping, and app readiness.
 - Local replay is separate from public webhook verification and live Meta delivery. The
   latter two remain operator-managed and live delivery is out of scope for this milestone.
 

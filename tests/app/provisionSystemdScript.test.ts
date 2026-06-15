@@ -28,12 +28,14 @@ const writeExecutable = (directory: string, name: string, body: string): string 
 const createFakeBin = () => {
   const fakeBin = createTempDir();
   const npmPath = writeExecutable(fakeBin, "npm", "#!/usr/bin/env bash\nexit 0\n");
+  const dockerPath = writeExecutable(fakeBin, "docker", "#!/usr/bin/env bash\nexit 0\n");
 
   writeExecutable(fakeBin, "uname", "#!/usr/bin/env bash\necho Linux\n");
   writeExecutable(fakeBin, "systemctl", "#!/usr/bin/env bash\nexit 0\n");
 
   return {
     fakeBin,
+    dockerPath,
     npmPath
   };
 };
@@ -41,7 +43,7 @@ const createFakeBin = () => {
 const runDryRun = (args: string[], envFileContents?: string) => {
   const projectRoot = createTempDir();
   const envFilePath = join(projectRoot, "legalbot.env");
-  const { fakeBin, npmPath } = createFakeBin();
+  const { dockerPath, fakeBin, npmPath } = createFakeBin();
   const scriptPath = resolve(process.cwd(), "scripts/provision-systemd.sh");
 
   if (envFileContents !== undefined) {
@@ -59,6 +61,8 @@ const runDryRun = (args: string[], envFileContents?: string) => {
       envFilePath,
       "--npm-path",
       npmPath,
+      "--docker-path",
+      dockerPath,
       "--user",
       "deploy",
       ...args
@@ -75,6 +79,7 @@ const runDryRun = (args: string[], envFileContents?: string) => {
 
   return {
     envFilePath,
+    dockerPath,
     npmPath,
     result
   };
@@ -103,6 +108,8 @@ describe("scripts/provision-systemd.sh", () => {
     expect(script).toContain("--uninstall");
     expect(script).toContain("--status");
     expect(script).toContain("--transport MODE");
+    expect(script).toContain("--deployment MODE");
+    expect(script).toContain("--docker-path PATH");
     expect(script).toContain("--service-name NAME");
     expect(script).toContain("--exec-script NAME");
     expect(script).toContain("legalbot-openwa.service");
@@ -111,6 +118,8 @@ describe("scripts/provision-systemd.sh", () => {
 
   it("keeps provisioning conservative and avoids obvious secret-leaking patterns", () => {
     expect(script).toContain("EnvironmentFile=");
+    expect(script).toContain("Requires=docker.service");
+    expect(script).toContain("RemainAfterExit=yes");
     expect(script).toContain("WorkingDirectory=");
     expect(script).toContain("ExecStart=");
     expect(script).toContain("LEGALBOT_NPM_PATH");
@@ -141,27 +150,48 @@ describe("scripts/provision-systemd.sh", () => {
     expect(result.stdout).toContain("service would remain stopped by default");
   });
 
-  it("generates a Cloud unit with explicit script selection and never prints env contents", () => {
-    const { envFilePath, result, npmPath } = runDryRun(
+  it("generates a Cloud Compose unit and never prints env contents", () => {
+    const { dockerPath, result } = runDryRun(
       [
         "--transport",
         "cloud",
         "--service-name",
-        "legalbot-whatsapp-cloud.service",
-        "--exec-script",
-        "start:whatsapp-cloud"
+        "legalbot-whatsapp-cloud.service"
       ],
       "WHATSAPP_CLOUD_ACCESS_TOKEN=super-secret-token\n"
     );
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Transport: cloud");
+    expect(result.stdout).toContain("Deployment: compose");
     expect(result.stdout).toContain("Service name: legalbot-whatsapp-cloud.service");
-    expect(result.stdout).toContain("Description=LegalBot WhatsApp Cloud Runtime");
-    expect(result.stdout).toContain(`EnvironmentFile=${envFilePath}`);
-    expect(result.stdout).toContain(`ExecStart=${npmPath} run start:whatsapp-cloud`);
+    expect(result.stdout).toContain(
+      "Description=LegalBot WhatsApp Cloud Docker Compose Runtime"
+    );
+    expect(result.stdout).not.toContain("EnvironmentFile=");
+    expect(result.stdout).toContain(
+      `ExecStart=${dockerPath} compose --profile cloud up -d legalbot-whatsapp-cloud`
+    );
+    expect(result.stdout).toContain(
+      `ExecStop=${dockerPath} compose --profile cloud stop legalbot-whatsapp-cloud`
+    );
+    expect(result.stdout).not.toContain("npm run start:whatsapp-cloud");
     expect(result.stdout).toContain("Recommended before service start: npm run ops:preflight:cloud");
     expect(result.stdout).not.toContain("super-secret-token");
     expect(result.stdout).not.toContain("WHATSAPP_CLOUD_ACCESS_TOKEN=");
+  });
+
+  it("rejects direct Node systemd for Cloud", () => {
+    const { result } = runDryRun([
+      "--transport",
+      "cloud",
+      "--deployment",
+      "direct"
+    ]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "Direct Node systemd is not supported for Cloud production."
+    );
   });
 });

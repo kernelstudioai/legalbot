@@ -10,7 +10,11 @@ OpenWA remains in the repo temporarily only as a legacy and development-only tra
 
 ## Runtime Commands
 
-- Cloud runtime entrypoint: `npm run start:whatsapp-cloud`
+- Production Compose start: `npm run docker:cloud:up`
+- Production Compose stop: `npm run docker:cloud:down`
+- Production Compose status: `npm run docker:cloud:ps`
+- Production Docker diagnosis: `npm run docker:cloud:diagnose`
+- Local-debug-only entrypoint: `npm run start:whatsapp-cloud`
 - Preserved compatibility alias: `npm run runtime:cloud`
 - Cloud preflight: `npm run ops:preflight:cloud`
 - Cloud post-start: `npm run ops:post-start:cloud`
@@ -159,6 +163,9 @@ Local replay, public webhook verification, and live Meta delivery are separate s
 
 ## Controlled Foreground Loopback Validation
 
+This direct Node workflow is local debugging only. It is not the preferred production
+deployment and must not be used as the Cloud systemd `ExecStart`.
+
 After loading fake local values without printing them, start the runtime:
 
 ```bash
@@ -189,7 +196,7 @@ npm run webhook:replay:cloud -- --fixture tests/fixtures/whatsapp-cloud/valid-te
 npm run webhook:replay:cloud -- --fixture tests/fixtures/whatsapp-cloud/unsupported-message.json --target http://127.0.0.1:3002/webhooks/whatsapp/cloud
 npm run webhook:replay:cloud -- --fixture tests/fixtures/whatsapp-cloud/status-event.json --target http://127.0.0.1:3002/webhooks/whatsapp/cloud
 npm run webhook:replay:cloud -- --fixture tests/fixtures/whatsapp-cloud/invalid-malformed.json --target http://127.0.0.1:3002/webhooks/whatsapp/cloud || true
-WHATSAPP_CLOUD_APP_SECRET=local-dev-app-secret npm run webhook:replay:cloud -- --signed --fixture tests/fixtures/whatsapp-cloud/valid-text.json --target http://127.0.0.1:3002/webhooks/whatsapp/cloud
+npm run webhook:replay:cloud -- --signed --fixture tests/fixtures/whatsapp-cloud/valid-text.json --target http://127.0.0.1:3002/webhooks/whatsapp/cloud
 ```
 
 Stop the foreground runtime with `Ctrl-C`. The runtime closes its HTTP server and
@@ -201,11 +208,15 @@ a lawyer.
 
 The production shape is:
 
-1. A public HTTPS endpoint receives Meta webhook requests.
-2. A reverse proxy forwards traffic to `WHATSAPP_CLOUD_WEBHOOK_HOST:WHATSAPP_CLOUD_WEBHOOK_PORT`.
-3. The app validates the verify token and the app-secret signature.
-4. The shared business pipeline processes consent and intake.
-5. Outbound text replies are sent through the Graph API sender abstraction.
+1. Docker Compose runs `legalbot-whatsapp-cloud` with `.env` loaded through `env_file`.
+2. The host publishes only `127.0.0.1:3002:3002`.
+3. nginx receives public HTTPS traffic and proxies to `127.0.0.1:3002`.
+4. The app validates the verify token and the app-secret signature.
+5. systemd may manage Docker Compose, but it must not run Node/npm directly.
+
+The Cloud container has a Node-based `/health` check and mounts only `data`, `backups`,
+and `logs`. It does not mount OpenWA sessions or browser profiles. Operators must
+never paste or log `.env`.
 
 The detailed VPS and systemd procedure lives in `docs/VPS_SYSTEMD_RUNBOOK.md`.
 

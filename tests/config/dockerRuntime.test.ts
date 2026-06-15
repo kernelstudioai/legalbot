@@ -40,6 +40,18 @@ describe("docker runtime files", () => {
     expect(packageJson.scripts["docker:diagnose"]).toBe(
       "node --experimental-strip-types src/app/dockerDiagnose.ts"
     );
+    expect(packageJson.scripts["docker:cloud:up"]).toBe(
+      "docker compose --profile cloud up -d legalbot-whatsapp-cloud"
+    );
+    expect(packageJson.scripts["docker:cloud:down"]).toBe(
+      "docker compose --profile cloud stop legalbot-whatsapp-cloud"
+    );
+    expect(packageJson.scripts["docker:cloud:ps"]).toBe(
+      "docker compose --profile cloud ps legalbot-whatsapp-cloud"
+    );
+    expect(packageJson.scripts["docker:cloud:diagnose"]).toBe(
+      "node --experimental-strip-types src/app/dockerDiagnose.ts --transport cloud"
+    );
     expect(packageJson.scripts["ops:preflight"]).toBe(
       "node --experimental-strip-types src/app/opsPreflight.ts"
     );
@@ -108,6 +120,33 @@ describe("docker runtime files", () => {
     expect(dockerfile).not.toContain("COPY .env");
   });
 
+  it("defines a loopback-only Cloud Compose service without OpenWA session state", () => {
+    const compose = readRepoFile("compose.yaml");
+    const cloudService = compose.split("  legalbot-whatsapp-cloud:")[1]?.split("\nvolumes:")[0];
+
+    expect(cloudService).toBeDefined();
+    expect(cloudService).toContain("- cloud");
+    expect(cloudService).toContain("target: cloud-runtime");
+    expect(cloudService).toContain('command: ["npm", "run", "start:whatsapp-cloud"]');
+    expect(cloudService).toContain("env_file:");
+    expect(cloudService).toContain("- .env");
+    expect(cloudService).toContain('WHATSAPP_CLOUD_WEBHOOK_HOST: 0.0.0.0');
+    expect(cloudService).toContain('- "127.0.0.1:3002:3002"');
+    expect(cloudService).toContain("http://127.0.0.1:3002/health");
+    expect(cloudService).toContain("restart: unless-stopped");
+    expect(cloudService).toContain("./data:/app/data");
+    expect(cloudService).toContain("./backups:/app/backups");
+    expect(cloudService).toContain("./logs:/app/logs");
+    expect(cloudService).not.toContain("openwa-session");
+    expect(cloudService).not.toContain("sessions/");
+    expect(cloudService).not.toMatch(/\+[1-9]\d{7,14}/);
+    expect(compose.split("  legalbot:")[1]?.split("  legalbot-whatsapp-cloud:")[0]).not.toContain(
+      "target: cloud-runtime"
+    );
+    expect(readRepoFile("Dockerfile")).toContain("FROM runtime-base AS cloud-runtime");
+    expect(readRepoFile("Dockerfile")).toContain("FROM runtime-base AS openwa-runtime");
+  });
+
   it("documents the operator boundary for Docker and live runtime", () => {
     const dockerDoc = readRepoFile("docs/DOCKER.md");
     const runbook = readRepoFile("docs/LIVE_E2E_RUNBOOK.md");
@@ -139,35 +178,30 @@ describe("docker runtime files", () => {
     expect(persistenceDoc).toContain("backups/ remains git-ignored");
     expect(securityDoc).toContain("Backups may contain personal data.");
     expect(securityDoc).toContain("Backups must not be committed.");
-    expect(vpsRunbook).toContain("Node 22");
-    expect(vpsRunbook).toContain("Chrome or Chromium");
-    expect(vpsRunbook).toContain("npm run ops:preflight");
-    expect(vpsRunbook).toContain("npm run ops:post-start");
     expect(vpsRunbook).toContain("npm run ops:preflight:cloud");
     expect(vpsRunbook).toContain("npm run ops:post-start:cloud");
     expect(vpsRunbook).toContain("npm run webhook:replay:cloud");
     expect(vpsRunbook).toContain("cd ~/legalbot");
-    expect(vpsRunbook).toContain('. "$NVM_DIR/nvm.sh"');
-    expect(vpsRunbook).toContain(". ./.env");
+    expect(vpsRunbook).toContain("docker compose config --quiet");
+    expect(vpsRunbook).toContain("npm run docker:cloud:up");
+    expect(vpsRunbook).toContain("npm run docker:cloud:ps");
+    expect(vpsRunbook).toContain("npm run docker:cloud:diagnose");
     expect(vpsRunbook).toContain("sudo systemctl start legalbot-whatsapp-cloud.service");
-    expect(vpsRunbook).toContain("curl -sS http://127.0.0.1:3002/health");
-    expect(vpsRunbook).toContain("tests/fixtures/whatsapp-cloud/unsupported-message.json");
-    expect(vpsRunbook).toContain("tests/fixtures/whatsapp-cloud/status-event.json");
-    expect(vpsRunbook).toContain("tests/fixtures/whatsapp-cloud/invalid-malformed.json");
+    expect(vpsRunbook).toContain("127.0.0.1:3002");
+    expect(vpsRunbook).toContain("tests/fixtures/whatsapp-cloud/valid-text.json");
     expect(vpsRunbook).toContain("sudo journalctl -u legalbot-whatsapp-cloud.service -n 120 --no-pager");
-    expect(vpsRunbook).toContain("./scripts/provision-systemd.sh --status --transport cloud");
+    expect(vpsRunbook).toContain("./scripts/provision-systemd.sh");
     expect(vpsRunbook).toContain("https://example.com/webhooks/whatsapp/cloud");
     expect(vpsRunbook).toContain('proxy_set_header X-Legalbot-Cloud-Replay ""');
     expect(vpsRunbook).toContain("sudo systemctl stop legalbot-whatsapp-cloud.service || true");
     expect(vpsRunbook).toContain("git status --short");
-    expect(vpsRunbook).toContain("ExecStart=/home/sayan/.nvm/versions/node/v22.22.3/bin/npm run smoke:openwa");
-    expect(vpsRunbook).toContain("ExecStart=/home/deploy/.nvm/versions/node/v22.22.3/bin/npm run start:whatsapp-cloud");
-    expect(vpsRunbook).toContain("npm ci --include=dev");
-    expect(vpsRunbook).toContain("command -v npm");
-    expect(vpsRunbook).toContain("./scripts/provision-systemd.sh --install");
-    expect(vpsRunbook).toContain("legalbot-openwa.service");
+    expect(vpsRunbook).toContain(
+      "ExecStart=<docker> compose --profile cloud up -d legalbot-whatsapp-cloud"
+    );
+    expect(vpsRunbook).toContain("systemd does not embed credentials");
+    expect(vpsRunbook).not.toMatch(/ExecStart=.*npm run start:whatsapp-cloud/);
     expect(vpsRunbook).toContain("legalbot-whatsapp-cloud.service");
-    expect(vpsRunbook).toContain("No multi-bot runtime yet.");
+    expect(vpsRunbook).toContain("No multi-bot runtime");
     expect(securityDoc).toContain("Systemd unit files must not contain secrets.");
     expect(securityDoc).toContain("must never print env-file contents or copy `.env` into `/etc` automatically");
   });

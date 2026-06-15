@@ -11,14 +11,17 @@ DRY_RUN=0
 START_SERVICE=0
 ENABLE_SERVICE=0
 TRANSPORT="openwa"
+DEPLOYMENT=""
 PROJECT_ROOT="$DEFAULT_PROJECT_ROOT"
 UNIT_PATH=""
 ENV_FILE_PATH=""
 SERVICE_USER=""
 SERVICE_NAME=""
 NPM_PATH="${LEGALBOT_NPM_PATH:-}"
+DOCKER_PATH="${LEGALBOT_DOCKER_PATH:-}"
 EXEC_SCRIPT=""
 EXEC_START=""
+EXEC_STOP=""
 UNIT_DESCRIPTION=""
 
 usage() {
@@ -37,6 +40,7 @@ Required mode:
 
 Options:
   --transport MODE      Runtime transport. Supported: openwa, cloud. Default: openwa
+  --deployment MODE     Unit runtime. Supported: direct, compose. Defaults: direct for OpenWA, compose for Cloud
   --project-root PATH   WorkingDirectory for the unit. Default: repo root.
   --env-file PATH       Environment file path. Default: project .env when present, else /etc/legalbot/legalbot.env
   --user USER           User for the unit. Default: current non-root operator user
@@ -44,6 +48,7 @@ Options:
   --service-name NAME   systemd unit filename. Defaults: legalbot-openwa.service or legalbot-whatsapp-cloud.service
   --exec-script NAME    npm script for ExecStart. Defaults: smoke:openwa or start:whatsapp-cloud
   --npm-path PATH       Absolute npm path for ExecStart. Default: LEGALBOT_NPM_PATH or command -v npm
+  --docker-path PATH    Absolute docker path for Compose ExecStart. Default: LEGALBOT_DOCKER_PATH or command -v docker
   --start               With --install only, start the service after install.
   --enable              With --install only, enable the service after install.
   -h, --help            Show this help.
@@ -99,6 +104,11 @@ parse_args() {
         TRANSPORT="$2"
         shift 2
         ;;
+      --deployment)
+        [[ $# -ge 2 ]] || fail "--deployment requires a value."
+        DEPLOYMENT="$2"
+        shift 2
+        ;;
       --project-root)
         [[ $# -ge 2 ]] || fail "--project-root requires a value."
         PROJECT_ROOT="$2"
@@ -127,6 +137,11 @@ parse_args() {
       --npm-path)
         [[ $# -ge 2 ]] || fail "--npm-path requires a value."
         NPM_PATH="$2"
+        shift 2
+        ;;
+      --docker-path)
+        [[ $# -ge 2 ]] || fail "--docker-path requires a value."
+        DOCKER_PATH="$2"
         shift 2
         ;;
       --start)
@@ -188,7 +203,7 @@ resolve_transport_defaults() {
       fi
       ;;
     cloud)
-      UNIT_DESCRIPTION="LegalBot WhatsApp Cloud Runtime"
+      UNIT_DESCRIPTION="LegalBot WhatsApp Cloud Docker Compose Runtime"
       if [[ -z "$SERVICE_NAME" ]]; then
         SERVICE_NAME="legalbot-whatsapp-cloud.service"
       fi
@@ -202,6 +217,22 @@ resolve_transport_defaults() {
   esac
 
   UNIT_PATH="/etc/systemd/system/$SERVICE_NAME"
+
+  if [[ -z "$DEPLOYMENT" ]]; then
+    if [[ "$TRANSPORT" == "cloud" ]]; then
+      DEPLOYMENT="compose"
+    else
+      DEPLOYMENT="direct"
+    fi
+  fi
+
+  if [[ "$DEPLOYMENT" != "direct" && "$DEPLOYMENT" != "compose" ]]; then
+    fail "--deployment must be either 'direct' or 'compose'."
+  fi
+
+  if [[ "$TRANSPORT" == "cloud" && "$DEPLOYMENT" == "direct" ]]; then
+    fail "Direct Node systemd is not supported for Cloud production. Use --deployment compose."
+  fi
 }
 
 resolve_env_file_path() {
@@ -264,6 +295,27 @@ resolve_npm_path() {
   EXEC_START="$NPM_PATH run $EXEC_SCRIPT"
 }
 
+resolve_docker_path() {
+  if [[ -z "$DOCKER_PATH" ]]; then
+    DOCKER_PATH="$(command -v docker 2>/dev/null || true)"
+  fi
+
+  if [[ "$DOCKER_PATH" != /* ]]; then
+    fail "--docker-path must be an absolute path. Found: $DOCKER_PATH"
+  fi
+
+  if [[ ! -e "$DOCKER_PATH" ]]; then
+    fail "Selected docker path does not exist: $DOCKER_PATH"
+  fi
+
+  if [[ ! -x "$DOCKER_PATH" ]]; then
+    fail "Selected docker path is not executable: $DOCKER_PATH"
+  fi
+
+  EXEC_START="$DOCKER_PATH compose --profile cloud up -d legalbot-whatsapp-cloud"
+  EXEC_STOP="$DOCKER_PATH compose --profile cloud stop legalbot-whatsapp-cloud"
+}
+
 validate_inputs() {
   if [[ "$PROJECT_ROOT" != /* ]]; then
     fail "--project-root must be an absolute path."
@@ -273,7 +325,7 @@ validate_inputs() {
     fail "Project root does not exist: $PROJECT_ROOT"
   fi
 
-  if [[ "$ENV_FILE_PATH" != /* ]]; then
+  if [[ "$MODE" != "--uninstall" && "$MODE" != "--status" && "$DEPLOYMENT" == "direct" && "$ENV_FILE_PATH" != /* ]]; then
     fail "--env-file must be an absolute path."
   fi
 
@@ -285,20 +337,41 @@ validate_inputs() {
     fail "--service-name must not be empty."
   fi
 
-  if [[ -z "$EXEC_SCRIPT" ]]; then
+  if [[ "$MODE" != "--uninstall" && "$MODE" != "--status" && "$DEPLOYMENT" == "direct" && -z "$EXEC_SCRIPT" ]]; then
     fail "--exec-script must not be empty."
   fi
 
-  if [[ -z "$NPM_PATH" ]]; then
+  if [[ "$MODE" != "--uninstall" && "$MODE" != "--status" && "$DEPLOYMENT" == "direct" && -z "$NPM_PATH" ]]; then
     fail "npm path resolution failed."
   fi
 
-  if [[ -z "$EXEC_START" ]]; then
+  if [[ "$MODE" != "--uninstall" && "$MODE" != "--status" && -z "$EXEC_START" ]]; then
     fail "ExecStart resolution failed."
   fi
 }
 
 print_unit_preview() {
+  if [[ "$DEPLOYMENT" == "compose" ]]; then
+    cat <<EOF
+[Unit]
+Description=$UNIT_DESCRIPTION
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+User=$SERVICE_USER
+WorkingDirectory=$PROJECT_ROOT
+ExecStart=$EXEC_START
+ExecStop=$EXEC_STOP
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    return 0
+  fi
+
   cat <<EOF
 [Unit]
 Description=$UNIT_DESCRIPTION
@@ -320,12 +393,21 @@ EOF
 
 print_mode_summary() {
   log "Transport: $TRANSPORT"
+  log "Deployment: $DEPLOYMENT"
   log "Service name: $SERVICE_NAME"
   log "Project root: $PROJECT_ROOT"
-  log "Environment file: $ENV_FILE_PATH"
+  if [[ "$DEPLOYMENT" == "direct" ]]; then
+    log "Environment file: $ENV_FILE_PATH"
+  else
+    log "Environment file: managed by compose.yaml env_file; contents are not inspected."
+  fi
   log "Service user: $SERVICE_USER"
-  log "ExecScript: $EXEC_SCRIPT"
-  log "ExecStart: $EXEC_START"
+  if [[ "$DEPLOYMENT" == "direct" ]]; then
+    log "ExecScript: $EXEC_SCRIPT"
+  fi
+  if [[ -n "$EXEC_START" ]]; then
+    log "ExecStart: $EXEC_START"
+  fi
   log "Unit path: $UNIT_PATH"
 }
 
@@ -355,7 +437,7 @@ install_unit() {
   preflight_command="$(recommended_preflight_command)"
   post_start_command="$(recommended_post_start_command)"
 
-  if [[ ! -f "$ENV_FILE_PATH" ]]; then
+  if [[ "$DEPLOYMENT" == "direct" && ! -f "$ENV_FILE_PATH" ]]; then
     warn "Environment file not found yet: $ENV_FILE_PATH"
     warn "Install will still write the unit, but manual start will fail until the env file exists."
   fi
@@ -378,23 +460,7 @@ install_unit() {
   fi
 
   tmp_unit="$(mktemp)"
-  cat >"$tmp_unit" <<EOF
-[Unit]
-Description=$UNIT_DESCRIPTION
-After=network.target
-
-[Service]
-Type=simple
-User=$SERVICE_USER
-WorkingDirectory=$PROJECT_ROOT
-EnvironmentFile=$ENV_FILE_PATH
-ExecStart=$EXEC_START
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
+  print_unit_preview >"$tmp_unit"
 
   install -d -m 0755 "$(dirname "$UNIT_PATH")"
   install -m 0644 "$tmp_unit" "$UNIT_PATH"
@@ -430,6 +496,8 @@ uninstall_unit() {
   fi
 
   if [[ -f "$UNIT_PATH" ]]; then
+    systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+    systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true
     rm -f "$UNIT_PATH"
     log "Removed unit file at $UNIT_PATH"
   else
@@ -459,9 +527,15 @@ main() {
   require_linux
   require_systemctl
   resolve_transport_defaults
-  resolve_env_file_path
   resolve_service_user
-  resolve_npm_path
+  if [[ "$MODE" != "--uninstall" && "$MODE" != "--status" ]]; then
+    if [[ "$DEPLOYMENT" == "compose" ]]; then
+      resolve_docker_path
+    else
+      resolve_env_file_path
+      resolve_npm_path
+    fi
+  fi
   validate_inputs
   require_root_for_mutation
   print_mode_summary

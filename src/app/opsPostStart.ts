@@ -80,6 +80,7 @@ export interface OpsPostStartCommandOptions {
     stdout?: {
       write(chunk: string): void;
     };
+    transportOverride?: RuntimeTransport;
   }) => Promise<DockerDiagnoseSummary>;
   envSource?: NodeJS.ProcessEnv;
   httpProbeRunner?: HttpProbeRunner;
@@ -337,10 +338,13 @@ const detectCloudDiagnosis = ({
   };
 };
 
-const mapDockerDiagnoseReport = (report: DockerDiagnoseReport): OpsPostStartReport => ({
+const mapDockerDiagnoseReport = (
+  report: DockerDiagnoseReport,
+  transport: RuntimeTransport
+): OpsPostStartReport => ({
   status: report.status === "healthy" ? "healthy" : report.status === "warning" ? "warning" : "error",
   mode: "docker",
-  transport: "openwa",
+  transport,
   checkedAt: report.checkedAt,
   diagnosis: {
     code:
@@ -394,7 +398,10 @@ export const runOpsPostStartCommand = async ({
           write() {}
         }
       });
-      const report = mapDockerDiagnoseReport(dockerSummary.report as DockerDiagnoseReport);
+      const report = mapDockerDiagnoseReport(
+        dockerSummary.report as DockerDiagnoseReport,
+        "openwa"
+      );
       toJsonStdout(report, stdout);
 
       return {
@@ -442,6 +449,30 @@ export const runOpsPostStartCommand = async ({
   }
 
   const env = loadWhatsAppCloudRuntimeEnv(effectiveEnvSource);
+  const requestedMode =
+    envSource.OPS_POST_START_MODE === "docker" ? "docker" : "direct";
+
+  if (requestedMode === "docker") {
+    const dockerSummary = await dockerDiagnoseRunner({
+      envSource: effectiveEnvSource,
+      logger: silentLogger,
+      stdout: {
+        write() {}
+      },
+      transportOverride: "cloud"
+    });
+    const report = mapDockerDiagnoseReport(
+      dockerSummary.report as DockerDiagnoseReport,
+      "cloud"
+    );
+    toJsonStdout(report, stdout);
+
+    return {
+      exitCode: report.diagnosis.code === "app_ready" ? 0 : 1,
+      report
+    };
+  }
+
   const hostBaseUrl = getCloudLoopbackBaseUrl(env);
   const [healthProbe, readyProbe, statusProbe] = await Promise.all([
     httpProbeRunner.probe(`${hostBaseUrl}/health`),

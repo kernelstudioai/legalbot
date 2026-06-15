@@ -26,5 +26,37 @@ services:
       - ./data:/app/data
       - legalbot-openwa-session:/app/openwa-session
 
+  legalbot-whatsapp-cloud:
+    profiles:
+      - cloud
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: cloud-runtime
+    command: ["npm", "run", "start:whatsapp-cloud"]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3002/health').then((res) => process.exit(res.status === 200 ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    env_file:
+      - .env
+    environment:
+      WHATSAPP_TRANSPORT: cloud
+      WHATSAPP_CLOUD_WEBHOOK_HOST: 0.0.0.0
+      WHATSAPP_CLOUD_WEBHOOK_PORT: "3002"
+    ports:
+      - "127.0.0.1:3002:3002"
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./backups:/app/backups
+      - ./logs:/app/logs
+
 volumes:
   legalbot-openwa-session:

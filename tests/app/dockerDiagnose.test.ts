@@ -54,6 +54,100 @@ const createHttpProbeRunner = (
 });
 
 describe("docker diagnose command", () => {
+  it("diagnoses the Cloud Compose service on the loopback-only port", async () => {
+    const probeScript = (path: string) =>
+      `exec -T legalbot-whatsapp-cloud node -e const path = process.argv[1];fetch(\`http://127.0.0.1:3002\${path}\`)  .then(async (response) => {    let body;    try { body = await response.json(); } catch { body = undefined; }    process.stdout.write(JSON.stringify({ statusCode: response.status, ok: response.ok, body }));  })  .catch((error) => {    process.stdout.write(JSON.stringify({ statusCode: null, ok: false, error: error.message }));  }); ${path}`;
+    const readyBody = {
+      transport: "cloud",
+      state: "ready",
+      ready: true,
+      signatureVerification: "enforced"
+    };
+    const composeResponses: Record<
+      string,
+      { exitCode: number; stdout: string; stderr: string }
+    > = {
+      "ps --format json": {
+        exitCode: 0,
+        stdout: JSON.stringify([
+          {
+            Service: "legalbot-whatsapp-cloud",
+            State: "running",
+            Health: "healthy"
+          }
+        ]),
+        stderr: ""
+      },
+      "port legalbot-whatsapp-cloud 3002": {
+        exitCode: 0,
+        stdout: "127.0.0.1:3002\n",
+        stderr: ""
+      }
+    };
+
+    for (const path of ["/health", "/ready", "/status"]) {
+      composeResponses[probeScript(path)] = {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          ok: true,
+          statusCode: 200,
+          body:
+            path === "/health"
+              ? {
+                  alive: true,
+                  transport: readyBody
+                }
+              : readyBody
+        }),
+        stderr: ""
+      };
+    }
+
+    const summary = await runDockerDiagnoseCommand({
+      envSource: {
+        WHATSAPP_TRANSPORT: "cloud"
+      },
+      transportOverride: "cloud",
+      logger: createLogger(),
+      stdout: createStdout(),
+      composeRunner: createComposeRunner(composeResponses),
+      httpProbeRunner: createHttpProbeRunner({
+        "http://127.0.0.1:3002/health": {
+          ok: true,
+          statusCode: 200,
+          body: {
+            alive: true,
+            transport: readyBody
+          }
+        },
+        "http://127.0.0.1:3002/ready": {
+          ok: true,
+          statusCode: 200,
+          body: readyBody
+        },
+        "http://127.0.0.1:3002/status": {
+          ok: true,
+          statusCode: 200,
+          body: readyBody
+        }
+      })
+    });
+
+    expect(summary.exitCode).toBe(0);
+    expect(summary.report).toMatchObject({
+      diagnosis: {
+        code: "app_ready"
+      },
+      hostPort: "127.0.0.1:3002",
+      compose: {
+        servicePresent: true,
+        running: true,
+        health: "healthy",
+        hostPortBinding: "127.0.0.1:3002"
+      }
+    });
+  });
+
   it("prints a sanitized JSON shape", async () => {
     const logger = createLogger();
     const stdout = createStdout();
@@ -390,7 +484,7 @@ describe("docker diagnose command", () => {
     expect(summary.report?.diagnosis).toEqual({
       code: "app_not_ready_auth_missing",
       summary:
-        "The app is alive inside the container, but WhatsApp authentication or QR pairing is still pending."
+        "The app is alive inside the container, but the selected transport is not ready yet."
     });
   });
 });

@@ -6,6 +6,8 @@
 - Keep real runtime values in process environment or an external env file. Use `.env.example` placeholders only.
 - `WHATSAPP_CLOUD_ACCESS_TOKEN`, `WHATSAPP_CLOUD_VERIFY_TOKEN`, and `WHATSAPP_CLOUD_APP_SECRET` must never appear in logs or test output.
 - `scripts/provision-systemd.sh` must never print env-file contents or copy `.env` into `/etc` automatically.
+- The production Cloud systemd unit must manage Docker Compose and must not execute
+  `npm run start:whatsapp-cloud` directly.
 
 ## Cloud Webhook Controls
 
@@ -63,6 +65,9 @@
 - Systemd unit files must not contain secrets.
 - The local Cloud application port must not be exposed publicly; only the TLS reverse
   proxy should accept public webhook traffic.
+- Compose must publish the Cloud port only as `127.0.0.1:3002:3002`.
+- The Cloud Compose service may mount only approved runtime directories and must not
+  mount OpenWA sessions, browser profiles, or QR artifacts.
 - Do not commit `data/`, `backups/`, `openwa-session/`, `sessions/`, `logs/`, `tmp/`, database files, QR images, screenshots, or other runtime artifacts.
 - Fake Cloud loopback values documented in `.env.example` and the runbooks are not
   production credentials and must never be promoted to production.
