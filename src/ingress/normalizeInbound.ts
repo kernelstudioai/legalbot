@@ -1,9 +1,11 @@
 import { CanonicalEnvelope } from "../contracts/index.ts";
 import type { CanonicalEnvelopeType } from "../contracts/index.ts";
 import { sanitizeInboundBody } from "../security/sanitize.ts";
-import type { OpenWaMessage } from "../transport/openwa/types.ts";
+import type { TransportInboundMessage } from "../transport/inboundMessage.ts";
 
-export const normalizeInbound = (rawMessage: OpenWaMessage): CanonicalEnvelopeType =>
+export const normalizeInbound = (
+  rawMessage: TransportInboundMessage
+): CanonicalEnvelopeType =>
   CanonicalEnvelope.parse({
     messageId: rawMessage.id,
     channel: "whatsapp",

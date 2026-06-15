@@ -1,3 +1,5 @@
+import type { TransportInboundMessage } from "../inboundMessage.ts";
+
 export interface OpenWaRawMessage {
   id: string;
   from: string;
@@ -11,16 +13,8 @@ export interface OpenWaRawMessage {
   };
 }
 
-export interface OpenWaMessage {
-  id: string;
-  from: string;
-  chatId: string;
-  body: string;
-  sender?: {
-    pushname?: string;
-  };
-  fromMe: boolean;
-  timestamp: number;
+export interface OpenWaMessage extends TransportInboundMessage {
+  transport?: "openwa";
 }
 
 export interface OpenWaDispatchResult {

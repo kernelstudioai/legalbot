@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { loadEnv, loadSmokeRuntimeEnv } from "../../src/config/env";
+import {
+  loadEnv,
+  loadSmokeRuntimeEnv,
+  loadWhatsAppCloudRuntimeEnv
+} from "../../src/config/env";
 
 describe("base app env", () => {
   it("loads persistence defaults without OpenWA-specific env vars", () => {
@@ -7,6 +11,7 @@ describe("base app env", () => {
 
     expect(env.NODE_ENV).toBe("development");
     expect(env.LOG_LEVEL).toBe("info");
+    expect(env.WHATSAPP_TRANSPORT).toBe("openwa");
     expect(env.OPENWA_HEADLESS).toBe(true);
     expect(env.DATABASE_URL).toBe("file:./data/legalbot.sqlite");
     expect(env.DATABASE_MIGRATIONS_ENABLED).toBe(true);
@@ -21,6 +26,7 @@ describe("smoke runtime env", () => {
       LAWYER_PHONE_E164: "+15551234567"
     });
 
+    expect(env.WHATSAPP_TRANSPORT).toBe("openwa");
     expect(env.BOT_MODE).toBe("smoke");
     expect(env.OPENWA_SESSION_ID).toBe("legalbot-smoke");
     expect(env.OPENWA_HEADLESS).toBe(false);
@@ -173,5 +179,37 @@ describe("smoke runtime env", () => {
         LAWYER_PHONE_E164: "+15551234567"
       })
     ).toThrow();
+  });
+
+  it("does not require cloud env vars when the OpenWA runtime is selected", () => {
+    const env = loadSmokeRuntimeEnv({
+      WHATSAPP_TRANSPORT: "openwa",
+      LAWYER_PHONE_E164: "+15551234567"
+    });
+
+    expect(env.WHATSAPP_TRANSPORT).toBe("openwa");
+  });
+});
+
+describe("whatsapp cloud runtime env", () => {
+  it("requires cloud credentials only when the cloud runtime is selected", () => {
+    expect(() =>
+      loadWhatsAppCloudRuntimeEnv({
+        WHATSAPP_TRANSPORT: "cloud"
+      })
+    ).toThrow();
+
+    const env = loadWhatsAppCloudRuntimeEnv({
+      WHATSAPP_TRANSPORT: "cloud",
+      WHATSAPP_CLOUD_API_VERSION: "v22.0",
+      WHATSAPP_CLOUD_PHONE_NUMBER_ID: "1234567890",
+      WHATSAPP_CLOUD_VERIFY_TOKEN: "verify-token",
+      WHATSAPP_CLOUD_ACCESS_TOKEN: "access-token"
+    });
+
+    expect(env.WHATSAPP_TRANSPORT).toBe("cloud");
+    expect(env.WHATSAPP_CLOUD_API_VERSION).toBe("v22.0");
+    expect(env.WHATSAPP_CLOUD_WEBHOOK_HOST).toBe("0.0.0.0");
+    expect(env.WHATSAPP_CLOUD_WEBHOOK_PORT).toBe(3002);
   });
 });

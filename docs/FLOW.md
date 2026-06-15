@@ -1,59 +1,55 @@
 # Flow
 
-## Pipeline
+## Shared Pipeline
 
-1. OpenWA emits a raw WhatsApp message.
-2. `src/transport/openwa/listener.ts` logs `openwa_message_received`, ignores self-authored and duplicate events at the transport boundary, then maps eligible raw payloads into the existing transport input shape and calls `runInboundPipeline`.
-3. `normalizeInbound` maps transport data into `CanonicalEnvelope`.
-4. `resolveRouting` decides which runtime should own the message.
-5. `decideNextAction` produces a runtime decision. For `client` routing it now delegates to `src/runtime/client/clientRuntime.ts`, which can read and update consent state through an injected consent adapter and can advance a separate injected intake persistence adapter.
-6. `buildOutputPlan` prepares outbound transport work.
-7. OpenWA dispatcher sends text actions only, then logs `openwa_output_dispatched` or `openwa_dispatch_failed` without crashing the listener callback path.
-8. OpenWA transport remains transport-only: listener code can accept an injected pipeline runner, but it does not import SQLite stores or perform consent writes directly.
+1. A transport receives an inbound WhatsApp event.
+2. The transport normalizes the inbound event into the shared transport input shape.
+3. `src/ingress/normalizeInbound.ts` converts that shape into `CanonicalEnvelope`.
+4. `src/routing/resolveRouting.ts` decides which runtime should own the message.
+5. `src/runtime/shared/decideNextAction.ts` delegates to the client or lawyer runtime.
+6. `src/output/buildOutputPlan.ts` produces an outbound text-only `OutputPlan`.
+7. The active transport dispatcher or sender delivers supported outbound text messages only.
 
-## Current Behavior
+The domain pipeline remains transport-agnostic. OpenWA listeners and Cloud webhook handlers orchestrate transport concerns only.
 
-- Routing is placeholder logic based on a minimal inbound shape.
-- The consent/privacy boundary is implemented as an isolated client runtime module with `unknown`, `requested`, `granted`, and `denied` states plus strict explicit-consent parsing.
-- M13 wires that consent state into the live client runtime path only.
-- M14 adds the intake state machine under `src/runtime/client/intake.ts`.
-- M15 adds consent-gated intake persistence under `src/persistence/*` and keeps SQLite wiring behind `PersistenceService`.
-- M27 adds an explicit `BusinessPersistenceService` boundary for consent, intake, and manual case creation so live client state does not depend on technical audit or dedupe wiring.
-- M26 adds a transport-agnostic identity-extraction boundary under `src/domain/intake/*`. The default provider is deterministic and local, and it is the only place intended to change when a future behind-the-scenes AI extractor is approved.
-- M16 adds an explicit application-only case-creation boundary under `src/domain/cases/caseCreationService.ts`.
-- When consent is `unknown`, the client runtime returns `request_consent` and upgrades stored consent to `requested` when a consent persistence adapter is available.
-- When consent is `requested`, only strict explicit grant or denial phrases change state. The user-facing copy is formal Italian (`Lei` / `Sua`) and asks for the short commands `Acconsento` or `Non acconsento`, while long legacy phrases remain accepted for backward compatibility. Grant persists `granted`, appends a consent event, and immediately starts intake with `intake_ask_identity`. Denial persists `denied`, appends a consent event, and returns `consent_denied_close`. Ambiguous replies return `consent_clarification` and do not grant consent.
-- When consent is already `granted`, the runtime enters the intake state machine:
-  - `not_started` -> `asking_identity` with `intake_ask_identity`
-  - `asking_identity` + extractable identity -> `asking_problem_summary` with `intake_ask_problem_summary`
-  - `asking_identity` + incomplete or ambiguous identity -> `intake_clarify_identity`
-  - `asking_problem_summary` + valid short structured summary -> `intake_complete` with `intake_complete_ack`
-  - `asking_problem_summary` + empty or too-long value -> `intake_invalid_response`
-- Intake persistence is allowed only after consent is `granted`.
-- Intake stores only explicitly accepted structured fields after consent is granted:
+## WhatsApp Cloud Runtime
+
+- `src/app/whatsappCloudRuntime.ts` starts an HTTP server for the webhook foundation.
+- `GET /webhooks/whatsapp/cloud` performs the Meta verification challenge and returns the challenge only when the mode and verify token are valid.
+- `POST /webhooks/whatsapp/cloud` parses WhatsApp Cloud webhook payloads, extracts text message events, ignores unsupported message types safely, and ignores status events for now.
+- When `WHATSAPP_CLOUD_APP_SECRET` is configured, the webhook handler validates `X-Hub-Signature-256` before processing the payload.
+- Normalized inbound text messages are routed through the same consent, intake, routing, and output-plan pipeline already used by the existing app foundation.
+- Outbound replies go through the Cloud sender abstraction, which constructs Meta Graph API text payloads and supports an injected HTTP client for tests.
+
+## OpenWA Runtime
+
+- `src/app/openwaSmoke.ts` and `src/transport/openwa/*` stay in the repo temporarily.
+- OpenWA is now legacy and development-only.
+- It still uses the same shared routing, consent, intake, and output-plan pipeline.
+- It is no longer the intended production transport because it depends on Chromium, QR/session persistence, WhatsApp Web behavior, and manual recovery.
+
+## Current Client Runtime Behavior
+
+- Consent stays explicit and isolated under `src/runtime/client/consent.ts`.
+- Intake stays isolated under `src/runtime/client/intake.ts`.
+- Accepted fields remain:
   - `firstName`
   - `lastName`
   - `birthDate`
   - `city`
   - `problemSummary`
-- The runtime persists intake state transitions separately from accepted fields and appends sanitized intake events without storing raw message text.
-- Invalid intake replies are rejected in-memory and are not persisted.
-- The live OpenWA smoke runtime now requires explicit business persistence before startup. Tests may still inject process-local adapters deliberately, but runtime startup does not silently fall back to in-memory consent or intake state.
-- When consent is already `denied`, the runtime returns a safe no-processing close response.
-- Before consent is `granted`, the runtime may request consent or clarification, but it must not persist message transcripts, message bodies, legal facts, or create cases.
-- Consent persistence remains separate from M10 technical dedupe and technical audit writes.
-- Intake state remains separate from both consent-state persistence and technical persistence, and OpenWA listener files stay transport-only.
-- Consent subject identity is derived narrowly from the canonical sender/chat id and used only as `subjectId`. Consent metadata stores durable routing facts such as `messageId`, channel, runtime, and source markers, not full phone numbers.
-- Case creation is not part of the live OpenWA runtime path yet. M16 requires an explicit application call to `createCaseFromCompletedIntake(subjectId)` after consent is `granted` and intake state is `intake_complete`.
-- M18 keeps that boundary manual and operator-only through `npm run case:create-from-intake -- --subject <subjectId>`. It is not triggered by intake completion, OpenWA listeners, or any live runtime path.
-- The case-creation boundary revalidates accepted structured identity fields plus `problemSummary`, creates a minimal `draft` case record with the accepted display name, and appends a sanitized `case_created_from_intake` audit event.
-- M19 makes repeated manual runs idempotent by subject. If a `draft` case already exists for the same `subjectId`, the boundary returns that existing case, appends `case_create_from_intake_idempotent_hit`, and does not create a duplicate draft.
-- The case-creation boundary uses only accepted structured intake fields. It does not persist transcripts, raw message bodies, rejected values, attachments, legal advice, or automated case-acceptance decisions.
-- Dispatcher is a thin transport boundary around `client.sendText`.
-- OpenWA startup emits `openwa_client_starting`, drives the supervisor through `starting -> ready|degraded`, and exposes readiness through `getHealth()`.
-- Bounded startup retry is controlled by `OPENWA_STARTUP_MAX_ATTEMPTS` and `OPENWA_STARTUP_RETRY_DELAY_SECONDS`.
-- After readiness, transport liveness uses a read-only heartbeat loop controlled by `OPENWA_LIVENESS_INTERVAL_SECONDS` and `OPENWA_LIVENESS_FAILURE_THRESHOLD`. Malformed OpenWA liveness response shapes are logged as sanitized warnings and do not count as disconnect failures by themselves.
-- Shutdown emits `openwa_shutdown_starting`, `openwa_shutdown_complete`, and `openwa_shutdown_failed`.
-- M22 adds the operator-only helper `npm run intake:list-ready`. It lists only consent-granted `intake_complete` records with all accepted intake fields present, emits operator-safe `subjectId` tokens instead of raw phone-derived identifiers, and still does not create cases automatically.
-- M27 keeps `intake:list-ready` and `case:create-from-intake` on the same explicit business persistence boundary used by the live client runtime.
-- No live OpenWA flow path creates a legal case automatically in this milestone. Case creation exists only as an explicit operator command and application boundary, remains idempotent for repeated manual runs, and is not triggered from listener or intake-completion runtime code.
+- Only accepted structured fields are persisted after consent is granted.
+- Raw transcripts and rejected values are not persisted.
+
+## Case Handling
+
+- Manual case creation stays outside the live transport path.
+- `case:create-from-intake`, `business:check`, `business:backup`, `case:doctor`, and `ops:preflight` remain reusable operator commands.
+- No live transport path creates a case automatically.
+- No automatic WhatsApp notification is sent to the lawyer when a new case is opened.
+
+## LLM Boundary
+
+- LLM usage is not the main conversation engine.
+- Future LLM usage is limited to behind-the-scenes parsing, extraction, and normalization of free-text user input.
+- Recaps and case summaries should be generated from structured fields and templates whenever possible.

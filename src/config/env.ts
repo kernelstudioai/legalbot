@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const DEFAULT_BOT_MODE = "smoke";
+export const DEFAULT_WHATSAPP_TRANSPORT = "openwa";
 export const DEFAULT_OPENWA_SESSION_ID = "legalbot-smoke";
 export const DEFAULT_NODE_ENV = "development";
 export const DEFAULT_LOG_LEVEL = "info";
@@ -8,6 +9,8 @@ export const DEFAULT_DATABASE_URL = "file:./data/legalbot.sqlite";
 export const DEFAULT_DATABASE_MIGRATIONS_ENABLED = "true";
 export const DEFAULT_BUSINESS_PERSISTENCE_ENABLED = "true";
 export const DEFAULT_TECHNICAL_PERSISTENCE_ENABLED = "true";
+export const DEFAULT_WHATSAPP_CLOUD_WEBHOOK_HOST = "0.0.0.0";
+export const DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PORT = "3002";
 export const DEFAULT_OPENWA_STARTUP_MAX_ATTEMPTS = "1";
 export const DEFAULT_OPENWA_STARTUP_RETRY_DELAY_SECONDS = "5";
 export const DEFAULT_OPENWA_LIVENESS_INTERVAL_SECONDS = "30";
@@ -51,6 +54,11 @@ const RecoveryRetryDelaySecondsSchema = z.preprocess(
 
 const StatusServerPortSchema = z.preprocess(
   (value) => (value === undefined ? DEFAULT_OPENWA_STATUS_SERVER_PORT : value),
+  z.coerce.number().int().min(0).max(65535)
+);
+
+const CloudWebhookPortSchema = z.preprocess(
+  (value) => (value === undefined ? DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PORT : value),
   z.coerce.number().int().min(0).max(65535)
 );
 
@@ -100,6 +108,9 @@ const OptionalRecoveryMaxAttemptsSchema = z.preprocess(
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default(DEFAULT_NODE_ENV),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default(DEFAULT_LOG_LEVEL),
+  WHATSAPP_TRANSPORT: z
+    .enum(["openwa", "cloud"])
+    .default(DEFAULT_WHATSAPP_TRANSPORT),
   OPENWA_HEADLESS: createBooleanEnvSchema("true"),
   DATABASE_URL: DatabaseUrlSchema,
   DATABASE_MIGRATIONS_ENABLED: DatabaseMigrationsEnabledSchema,
@@ -112,6 +123,10 @@ export type AppEnv = z.infer<typeof EnvSchema>;
 export const SmokeRuntimeEnvSchema = EnvSchema.omit({
   OPENWA_HEADLESS: true
 }).extend({
+  WHATSAPP_TRANSPORT: z.preprocess(
+    (value) => (value === undefined ? DEFAULT_WHATSAPP_TRANSPORT : value),
+    z.literal("openwa")
+  ),
   BOT_MODE: z.preprocess(
     (value) => (value === undefined ? DEFAULT_BOT_MODE : value),
     z.literal(DEFAULT_BOT_MODE)
@@ -147,11 +162,31 @@ export const SmokeRuntimeEnvSchema = EnvSchema.omit({
 
 export type SmokeRuntimeEnv = z.infer<typeof SmokeRuntimeEnvSchema>;
 
+export const WhatsAppCloudRuntimeEnvSchema = EnvSchema.extend({
+  WHATSAPP_TRANSPORT: z.literal("cloud"),
+  WHATSAPP_CLOUD_API_VERSION: z.string().min(1),
+  WHATSAPP_CLOUD_PHONE_NUMBER_ID: z.string().min(1),
+  WHATSAPP_CLOUD_VERIFY_TOKEN: z.string().min(1),
+  WHATSAPP_CLOUD_ACCESS_TOKEN: z.string().min(1),
+  WHATSAPP_CLOUD_APP_SECRET: z.string().min(1).optional(),
+  WHATSAPP_CLOUD_WEBHOOK_HOST: z
+    .string()
+    .min(1)
+    .default(DEFAULT_WHATSAPP_CLOUD_WEBHOOK_HOST),
+  WHATSAPP_CLOUD_WEBHOOK_PORT: CloudWebhookPortSchema
+});
+
+export type WhatsAppCloudRuntimeEnv = z.infer<typeof WhatsAppCloudRuntimeEnvSchema>;
+
 export const loadEnv = (source: NodeJS.ProcessEnv = process.env): AppEnv =>
   EnvSchema.parse(source);
 
 export const loadSmokeRuntimeEnv = (
   source: NodeJS.ProcessEnv = process.env
 ): SmokeRuntimeEnv => SmokeRuntimeEnvSchema.parse(source);
+
+export const loadWhatsAppCloudRuntimeEnv = (
+  source: NodeJS.ProcessEnv = process.env
+): WhatsAppCloudRuntimeEnv => WhatsAppCloudRuntimeEnvSchema.parse(source);
 
 export { EnvSchema };

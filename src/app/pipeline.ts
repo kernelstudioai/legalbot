@@ -13,7 +13,7 @@ import type {
 import { resolveRouting } from "../routing/resolveRouting.ts";
 import { decideNextAction } from "../runtime/shared/decideNextAction.ts";
 import { deriveRuntimeContext } from "../runtime/shared/runtimeContext.ts";
-import type { OpenWaMessage } from "../transport/openwa/types.ts";
+import type { TransportInboundMessage } from "../transport/inboundMessage.ts";
 
 export interface PipelineResult {
   envelope: CanonicalEnvelopeType;
@@ -29,7 +29,7 @@ export interface RunInboundPipelineOptions {
 }
 
 export const runInboundPipeline = async (
-  rawMessage: OpenWaMessage,
+  rawMessage: TransportInboundMessage,
   options: RunInboundPipelineOptions = {}
 ): Promise<PipelineResult> => {
   const envelope = normalizeInbound(rawMessage);

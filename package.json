@@ -23,6 +23,7 @@
     "docker:up": "docker compose up -d",
     "intake:list-ready": "node --experimental-strip-types src/app/intakeListReady.ts",
     "smoke:openwa": "node --experimental-strip-types src/app/openwaSmoke.ts",
+    "runtime:cloud": "node --experimental-strip-types src/app/whatsappCloudRuntime.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "postinstall": "patch-package"

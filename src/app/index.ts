@@ -7,3 +7,4 @@ export { runOpsPostStartCommand } from "./opsPostStart.ts";
 export { runOpsPreflightCommand } from "./opsPreflight.ts";
 export { startOpenWaSmokeApp } from "./openwaSmoke.ts";
 export { runInboundPipeline } from "./pipeline.ts";
+export { startWhatsAppCloudRuntime } from "./whatsappCloudRuntime.ts";
