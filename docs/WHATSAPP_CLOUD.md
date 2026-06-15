@@ -48,6 +48,29 @@ Additional runtime server settings:
 
 `WHATSAPP_TRANSPORT=openwa|cloud` is the runtime selector.
 Cloud variables are not required unless the Cloud runtime is selected.
+The Cloud webhook server defaults to `127.0.0.1:3002`; a public bind must be an
+explicit deployment decision.
+
+### Fake Local Loopback Values
+
+These values are fake placeholders for local or controlled VPS loopback validation
+only. Never use them in production:
+
+```dotenv
+WHATSAPP_TRANSPORT=cloud
+WHATSAPP_CLOUD_API_VERSION=v21.0
+WHATSAPP_CLOUD_PHONE_NUMBER_ID=000000000000000
+WHATSAPP_CLOUD_VERIFY_TOKEN=local-dev-verify-token
+WHATSAPP_CLOUD_ACCESS_TOKEN=local-dev-access-token
+WHATSAPP_CLOUD_APP_SECRET=local-dev-app-secret
+WHATSAPP_CLOUD_WEBHOOK_HOST=127.0.0.1
+WHATSAPP_CLOUD_WEBHOOK_PORT=3002
+DATABASE_URL=file:./data/legalbot.sqlite
+DATABASE_MIGRATIONS_ENABLED=true
+```
+
+Keep the real `.env` outside version control. Do not print it. The repository
+`.env.example` contains the same fake Cloud loopback example.
 
 ## Health Surface
 
@@ -88,7 +111,10 @@ In production, that app-secret signature verification is mandatory.
 The replay command posts fake fixtures from `tests/fixtures/whatsapp-cloud/` to the
 loopback Cloud webhook URL. It refuses non-loopback targets and never calls Meta APIs.
 The runtime recognizes loopback replay requests, validates the payload and optional
-signature, summarizes event counts, and skips the business pipeline and outbound sender.
+signature, summarizes event counts, and skips the business pipeline, persistence
+dispatch, and outbound sender. Development mode permits an unsigned loopback replay
+even when a fake app secret is configured. A supplied bad signature is still rejected.
+Production mode requires a valid signature.
 
 Unsigned local/development replay:
 
@@ -130,6 +156,46 @@ Local replay, public webhook verification, and live Meta delivery are separate s
 - Local replay validates parsing and signature behavior without Meta connectivity.
 - Public verification is the Meta `GET` challenge against the public HTTPS endpoint.
 - Live delivery is actual Meta webhook traffic and remains out of scope for this milestone.
+
+## Controlled Foreground Loopback Validation
+
+After loading fake local values without printing them, start the runtime:
+
+```bash
+cd ~/legalbot
+git pull
+export NVM_DIR="$HOME/.nvm"
+. "$NVM_DIR/nvm.sh"
+nvm use 22
+npm run typecheck
+npm test
+set -a
+. ./.env
+set +a
+npm run ops:preflight:cloud
+npm run start:whatsapp-cloud
+```
+
+In a second shell from `~/legalbot`, load the same environment and run:
+
+```bash
+set -a
+. ./.env
+set +a
+curl -sS http://127.0.0.1:3002/health
+curl -sS http://127.0.0.1:3002/ready
+curl -sS http://127.0.0.1:3002/status
+npm run webhook:replay:cloud -- --fixture tests/fixtures/whatsapp-cloud/valid-text.json --target http://127.0.0.1:3002/webhooks/whatsapp/cloud
+npm run webhook:replay:cloud -- --fixture tests/fixtures/whatsapp-cloud/unsupported-message.json --target http://127.0.0.1:3002/webhooks/whatsapp/cloud
+npm run webhook:replay:cloud -- --fixture tests/fixtures/whatsapp-cloud/status-event.json --target http://127.0.0.1:3002/webhooks/whatsapp/cloud
+npm run webhook:replay:cloud -- --fixture tests/fixtures/whatsapp-cloud/invalid-malformed.json --target http://127.0.0.1:3002/webhooks/whatsapp/cloud || true
+WHATSAPP_CLOUD_APP_SECRET=local-dev-app-secret npm run webhook:replay:cloud -- --signed --fixture tests/fixtures/whatsapp-cloud/valid-text.json --target http://127.0.0.1:3002/webhooks/whatsapp/cloud
+```
+
+Stop the foreground runtime with `Ctrl-C`. The runtime closes its HTTP server and
+persistence handle before exiting. This workflow does not call Meta, register a public
+webhook, run the business pipeline, dispatch outbound messages, create cases, or notify
+a lawyer.
 
 ## Deployment Shape
 

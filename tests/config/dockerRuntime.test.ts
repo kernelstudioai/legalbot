@@ -150,6 +150,12 @@ describe("docker runtime files", () => {
     expect(vpsRunbook).toContain('. "$NVM_DIR/nvm.sh"');
     expect(vpsRunbook).toContain(". ./.env");
     expect(vpsRunbook).toContain("sudo systemctl start legalbot-whatsapp-cloud.service");
+    expect(vpsRunbook).toContain("curl -sS http://127.0.0.1:3002/health");
+    expect(vpsRunbook).toContain("tests/fixtures/whatsapp-cloud/unsupported-message.json");
+    expect(vpsRunbook).toContain("tests/fixtures/whatsapp-cloud/status-event.json");
+    expect(vpsRunbook).toContain("tests/fixtures/whatsapp-cloud/invalid-malformed.json");
+    expect(vpsRunbook).toContain("sudo journalctl -u legalbot-whatsapp-cloud.service -n 120 --no-pager");
+    expect(vpsRunbook).toContain("./scripts/provision-systemd.sh --status --transport cloud");
     expect(vpsRunbook).toContain("https://example.com/webhooks/whatsapp/cloud");
     expect(vpsRunbook).toContain('proxy_set_header X-Legalbot-Cloud-Replay ""');
     expect(vpsRunbook).toContain("sudo systemctl stop legalbot-whatsapp-cloud.service || true");

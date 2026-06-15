@@ -43,34 +43,29 @@ Cloud target note:
 
 - Example Cloud `ExecStart=/home/deploy/.nvm/versions/node/v22.22.3/bin/npm run start:whatsapp-cloud`
 
-## Minimal Cloud Runtime Env
+## Fake Cloud Loopback Env
 
-Required when `WHATSAPP_TRANSPORT=cloud`:
+The following values are fake placeholders for controlled local/VPS loopback validation
+only. They must not be used in production:
 
 ```dotenv
 WHATSAPP_TRANSPORT=cloud
-WHATSAPP_CLOUD_API_VERSION=vXX.Y
-WHATSAPP_CLOUD_PHONE_NUMBER_ID=1234567890
-WHATSAPP_CLOUD_VERIFY_TOKEN=replace-me
-WHATSAPP_CLOUD_ACCESS_TOKEN=replace-me
-```
-
-Required in production:
-
-```dotenv
-WHATSAPP_CLOUD_APP_SECRET=replace-me
-```
-
-Optional local bind defaults:
-
-```dotenv
+WHATSAPP_CLOUD_API_VERSION=v21.0
+WHATSAPP_CLOUD_PHONE_NUMBER_ID=000000000000000
+WHATSAPP_CLOUD_VERIFY_TOKEN=local-dev-verify-token
+WHATSAPP_CLOUD_ACCESS_TOKEN=local-dev-access-token
+WHATSAPP_CLOUD_APP_SECRET=local-dev-app-secret
 WHATSAPP_CLOUD_WEBHOOK_HOST=127.0.0.1
 WHATSAPP_CLOUD_WEBHOOK_PORT=3002
+DATABASE_URL=file:./data/legalbot.sqlite
+DATABASE_MIGRATIONS_ENABLED=true
 ```
 
 Keep these values outside version control.
 Never print env-file contents.
 Do not paste `.env` contents into chat, logs, tickets, or command output.
+Production requires separately managed real credentials and mandatory app-secret
+signature verification.
 
 ## Preflight And Post-Start
 
@@ -131,7 +126,7 @@ Expected service names:
 - `legalbot-openwa.service`
 - `legalbot-whatsapp-cloud.service`
 
-## Exact Cloud VPS Rollout
+## Foreground Cloud Loopback Validation
 
 Run the following sequence as the VPS operator. Loading `.env` this way does not print it:
 
@@ -141,35 +136,62 @@ git pull
 export NVM_DIR="$HOME/.nvm"
 . "$NVM_DIR/nvm.sh"
 nvm use 22
-npm ci --include=dev
 npm run typecheck
 npm test
 set -a
 . ./.env
 set +a
 npm run ops:preflight:cloud
+npm run start:whatsapp-cloud
+```
+
+In a second VPS shell:
+
+```bash
+cd ~/legalbot
+export NVM_DIR="$HOME/.nvm"
+. "$NVM_DIR/nvm.sh"
+nvm use 22
+set -a
+. ./.env
+set +a
+curl -sS http://127.0.0.1:3002/health
+curl -sS http://127.0.0.1:3002/ready
+curl -sS http://127.0.0.1:3002/status
+npm run webhook:replay:cloud -- --fixture tests/fixtures/whatsapp-cloud/valid-text.json --target http://127.0.0.1:3002/webhooks/whatsapp/cloud
+npm run webhook:replay:cloud -- --fixture tests/fixtures/whatsapp-cloud/unsupported-message.json --target http://127.0.0.1:3002/webhooks/whatsapp/cloud
+npm run webhook:replay:cloud -- --fixture tests/fixtures/whatsapp-cloud/status-event.json --target http://127.0.0.1:3002/webhooks/whatsapp/cloud
+npm run webhook:replay:cloud -- --fixture tests/fixtures/whatsapp-cloud/invalid-malformed.json --target http://127.0.0.1:3002/webhooks/whatsapp/cloud || true
+WHATSAPP_CLOUD_APP_SECRET=local-dev-app-secret npm run webhook:replay:cloud -- --signed --fixture tests/fixtures/whatsapp-cloud/valid-text.json --target http://127.0.0.1:3002/webhooks/whatsapp/cloud
+```
+
+Stop the foreground runtime safely with `Ctrl-C`.
+
+Replay-only requests validate parsing and optional signatures, return sanitized counts
+and status, and stop before the shared pipeline, persistence dispatch, or Graph API
+sender. No live Meta request is made.
+
+## systemd Cloud Loopback Validation
+
+With the fake loopback `.env` loaded, run:
+
+```bash
 ./scripts/provision-systemd.sh --dry-run --transport cloud --service-name legalbot-whatsapp-cloud.service --exec-script start:whatsapp-cloud --project-root "$PWD"
 sudo ./scripts/provision-systemd.sh --install --transport cloud --service-name legalbot-whatsapp-cloud.service --exec-script start:whatsapp-cloud --project-root "$PWD" --user "$USER" --npm-path "$(command -v npm)"
 sudo systemctl start legalbot-whatsapp-cloud.service
 sudo systemctl status legalbot-whatsapp-cloud.service --no-pager || true
 npm run ops:post-start:cloud
 sudo journalctl -u legalbot-whatsapp-cloud.service -n 120 --no-pager
+sudo systemctl stop legalbot-whatsapp-cloud.service
+sudo ./scripts/provision-systemd.sh --uninstall --transport cloud --service-name legalbot-whatsapp-cloud.service --exec-script start:whatsapp-cloud --project-root "$PWD" --user "$USER" --npm-path "$(command -v npm)"
+./scripts/provision-systemd.sh --status --transport cloud --service-name legalbot-whatsapp-cloud.service --exec-script start:whatsapp-cloud --project-root "$PWD"
+git status --short
 ```
 
-The provisioner does not enable or start the service unless explicit flags or commands
-are used. The sequence above starts it explicitly but does not enable boot-time startup.
-Production must enforce webhook signature verification before any live traffic.
-
-Before public webhook work, local replay may be run against the loopback service:
-
-```bash
-npm run webhook:replay:cloud -- \
-  --fixture tests/fixtures/whatsapp-cloud/valid-text.json \
-  --target http://127.0.0.1:3002/webhooks/whatsapp/cloud \
-  --signed
-```
-
-This is a non-live validation only. It does not register a webhook or call Meta.
+The provisioner installs the unit stopped and disabled by default. The explicit
+`systemctl start` is temporary for validation; the sequence stops and uninstalls the
+unit afterward. It does not register a webhook, enable boot-time startup, expose the
+loopback port, or call Meta.
 
 ## Reverse Proxy And TLS
 
@@ -249,6 +271,7 @@ From the checked-out project directory:
 ```bash
 sudo systemctl stop legalbot-whatsapp-cloud.service || true
 sudo ./scripts/provision-systemd.sh --uninstall --transport cloud --service-name legalbot-whatsapp-cloud.service --exec-script start:whatsapp-cloud --project-root "$PWD" --user "$USER" --npm-path "$(command -v npm)"
+./scripts/provision-systemd.sh --status --transport cloud --service-name legalbot-whatsapp-cloud.service --exec-script start:whatsapp-cloud --project-root "$PWD"
 git status --short
 ```
 

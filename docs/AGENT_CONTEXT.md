@@ -38,9 +38,12 @@ This is the only default startup context.
 ## Operational Posture
 
 - Cloud runtime health is checked locally through `/health`, `/ready`, and `/status` on the webhook server.
+- The Cloud webhook server defaults to `127.0.0.1:3002`; public exposure is never a default.
 - Production Cloud startup requires `WHATSAPP_CLOUD_APP_SECRET`.
 - `webhook:replay:cloud` validates fake local fixtures and signatures without running the
   business pipeline, dispatching outbound messages, or calling Meta.
+- Development-only unsigned replay remains loopback-only. Production replay requires a
+  valid app-secret signature.
 - Reverse proxy, TLS, and firewall configuration remain operator-managed infrastructure concerns documented in `docs/VPS_SYSTEMD_RUNBOOK.md`.
 
 ## Safety Rules

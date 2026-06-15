@@ -26,7 +26,9 @@ OpenWA listeners and Cloud webhook handlers orchestrate transport concerns only.
 - Outbound replies go through the Cloud sender abstraction, which constructs Meta Graph API text payloads and supports an injected HTTP client for tests.
 - `npm run webhook:replay:cloud -- --fixture <path> --target <loopback-url>` posts an allowlisted fake fixture to
   the loopback webhook. Replay requests still pass raw-body signature and payload parsing
-  checks, then stop before the shared pipeline and outbound sender.
+  checks, then stop before the shared pipeline, persistence dispatch, and outbound sender.
+  Development permits unsigned loopback replay even when the fake local app secret is
+  configured; production requires a valid signature.
 
 ## OpenWA Runtime
 

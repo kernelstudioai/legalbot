@@ -20,7 +20,9 @@
 - Local replay accepts fixture files only from `tests/fixtures/whatsapp-cloud/`, refuses
   non-loopback target URLs, and suppresses pipeline dispatch and outbound Cloud sending.
 - Replay help is static and sanitized; it does not load fixtures or print environment values.
-- Unsigned replay is development/test-only. Production replay requires a valid signature.
+- Unsigned replay is development/test-only, loopback-only, and accepted only when no
+  signature header is supplied. A supplied invalid signature is rejected.
+- Production replay requires a valid signature.
 - Reverse proxies must clear `X-Legalbot-Cloud-Replay` from public requests.
 
 ## Logging And Payload Minimization
@@ -62,6 +64,8 @@
 - The local Cloud application port must not be exposed publicly; only the TLS reverse
   proxy should accept public webhook traffic.
 - Do not commit `data/`, `backups/`, `openwa-session/`, `sessions/`, `logs/`, `tmp/`, database files, QR images, screenshots, or other runtime artifacts.
+- Fake Cloud loopback values documented in `.env.example` and the runbooks are not
+  production credentials and must never be promoted to production.
 
 ## Current Gaps
 

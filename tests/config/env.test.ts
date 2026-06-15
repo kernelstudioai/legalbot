@@ -209,7 +209,7 @@ describe("whatsapp cloud runtime env", () => {
 
     expect(env.WHATSAPP_TRANSPORT).toBe("cloud");
     expect(env.WHATSAPP_CLOUD_API_VERSION).toBe("v22.0");
-    expect(env.WHATSAPP_CLOUD_WEBHOOK_HOST).toBe("0.0.0.0");
+    expect(env.WHATSAPP_CLOUD_WEBHOOK_HOST).toBe("127.0.0.1");
     expect(env.WHATSAPP_CLOUD_WEBHOOK_PORT).toBe(3002);
   });
 });

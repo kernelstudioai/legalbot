@@ -47,6 +47,11 @@ export interface WhatsAppCloudRuntime {
   stop(reason?: string): Promise<void>;
 }
 
+export interface WhatsAppCloudSignalProcessLike {
+  on(signal: NodeJS.Signals, listener: (signal: NodeJS.Signals) => void): unknown;
+  exit(code?: number): void;
+}
+
 export interface StartWhatsAppCloudRuntimeOptions {
   cwd?: string;
   createHttpServer?: (
@@ -77,6 +82,7 @@ export interface WhatsAppCloudHttpServer {
 }
 
 export interface CreateWhatsAppCloudWebhookRequestHandlerOptions {
+  allowUnsignedLocalReplay?: boolean;
   appSecret?: string;
   dispatcher: WhatsAppCloudDispatcher;
   logger: Logger;
@@ -147,6 +153,7 @@ const createCloudRuntimeStatus = (env: WhatsAppCloudRuntimeEnv): Record<string, 
 });
 
 export const createWhatsAppCloudWebhookRequestHandler = ({
+  allowUnsignedLocalReplay = false,
   appSecret,
   dispatcher,
   logger,
@@ -198,6 +205,7 @@ export const createWhatsAppCloudWebhookRequestHandler = ({
 
     const rawBody = await readRequestBody(request);
     const replayRequested = request.headers[REPLAY_HEADER] === "1";
+    const signatureHeader = request.headers["x-hub-signature-256"];
 
     if (replayRequested && !isLoopbackAddress(request.socket.remoteAddress)) {
       logger.warn("whatsapp_cloud_replay_rejected_non_local", {
@@ -207,11 +215,17 @@ export const createWhatsAppCloudWebhookRequestHandler = ({
       return;
     }
 
+    const unsignedLocalReplayAllowed =
+      replayRequested &&
+      allowUnsignedLocalReplay &&
+      signatureHeader === undefined;
+
     if (
+      !unsignedLocalReplayAllowed &&
       !validateWhatsAppCloudSignature({
         appSecret,
         rawBody,
-        signatureHeader: request.headers["x-hub-signature-256"]
+        signatureHeader
       })
     ) {
       logger.warn("whatsapp_cloud_signature_invalid", {
@@ -388,6 +402,7 @@ export const startWhatsAppCloudRuntime = async ({
   });
   const dispatcher = createWhatsAppCloudDispatcher(sender);
   const requestHandler = createWhatsAppCloudWebhookRequestHandler({
+    allowUnsignedLocalReplay: !isProductionNodeEnv(envSource),
     dispatcher,
     logger,
     pipelineRunner: (message) =>
@@ -531,13 +546,43 @@ export const startWhatsAppCloudRuntime = async ({
   };
 };
 
+export const installWhatsAppCloudSignalHandlers = (
+  runtime: WhatsAppCloudRuntime,
+  processLike: WhatsAppCloudSignalProcessLike = process
+): void => {
+  let stopping = false;
+
+  const stop = async (signal: NodeJS.Signals) => {
+    if (stopping) {
+      return;
+    }
+
+    stopping = true;
+
+    try {
+      await runtime.stop(signal);
+      processLike.exit(0);
+    } catch {
+      processLike.exit(1);
+    }
+  };
+
+  processLike.on("SIGINT", (signal) => {
+    void stop(signal);
+  });
+  processLike.on("SIGTERM", (signal) => {
+    void stop(signal);
+  });
+};
+
 const isDirectExecution = (): boolean => {
   const entrypoint = process.argv[1];
   return entrypoint ? import.meta.url === pathToFileURL(entrypoint).href : false;
 };
 
 const main = async (): Promise<void> => {
-  await startWhatsAppCloudRuntime();
+  const runtime = await startWhatsAppCloudRuntime();
+  installWhatsAppCloudSignalHandlers(runtime);
 };
 
 if (isDirectExecution()) {

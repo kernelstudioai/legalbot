@@ -7,6 +7,7 @@ import type { Logger } from "../../src/logging/logger";
 import { runInboundPipeline } from "../../src/app";
 import {
   createWhatsAppCloudWebhookRequestHandler,
+  installWhatsAppCloudSignalHandlers,
   startWhatsAppCloudRuntime
 } from "../../src/app/whatsappCloudRuntime";
 import {
@@ -168,6 +169,89 @@ describe("whatsapp cloud runtime server", () => {
       })
     ).rejects.toThrow("WHATSAPP_CLOUD_APP_SECRET is required");
   });
+
+  it("defaults the Cloud webhook server to loopback", async () => {
+    const persistenceService = createInMemoryPersistenceService();
+    let listenedHost = "";
+
+    const runtime = await startWhatsAppCloudRuntime({
+      envSource: {
+        WHATSAPP_TRANSPORT: "cloud",
+        BUSINESS_PERSISTENCE_ENABLED: "true",
+        DATABASE_MIGRATIONS_ENABLED: "true",
+        WHATSAPP_CLOUD_API_VERSION: "v21.0",
+        WHATSAPP_CLOUD_PHONE_NUMBER_ID: "000000000000000",
+        WHATSAPP_CLOUD_VERIFY_TOKEN: "local-dev-verify-token",
+        WHATSAPP_CLOUD_ACCESS_TOKEN: "local-dev-access-token",
+        WHATSAPP_CLOUD_WEBHOOK_PORT: "0"
+      },
+      persistenceService,
+      businessPersistenceService: createBusinessPersistenceService(persistenceService),
+      createHttpServer: () => ({
+        once() {
+          return this;
+        },
+        off() {
+          return this;
+        },
+        listen(_port, host, callback) {
+          listenedHost = host;
+          callback();
+          return this;
+        },
+        address() {
+          return {
+            address: listenedHost,
+            family: "IPv4",
+            port: 3002
+          };
+        },
+        close(callback) {
+          callback();
+          return this;
+        }
+      })
+    });
+
+    try {
+      expect(runtime.env.WHATSAPP_CLOUD_WEBHOOK_HOST).toBe("127.0.0.1");
+      expect(listenedHost).toBe("127.0.0.1");
+    } finally {
+      await runtime.stop("test_shutdown");
+    }
+  });
+
+  it("stops cleanly on SIGINT and SIGTERM", async () => {
+    const stop = vi.fn().mockResolvedValue(undefined);
+    const exit = vi.fn();
+    const listeners = new Map<
+      NodeJS.Signals,
+      (signal: NodeJS.Signals) => void
+    >();
+
+    installWhatsAppCloudSignalHandlers(
+      {
+        env: {} as never,
+        getServerAddress: () => undefined,
+        stop
+      },
+      {
+        on(signal, listener) {
+          listeners.set(signal, listener);
+        },
+        exit
+      }
+    );
+
+    listeners.get("SIGINT")?.("SIGINT");
+    await vi.waitFor(() => {
+      expect(stop).toHaveBeenCalledWith("SIGINT");
+      expect(exit).toHaveBeenCalledWith(0);
+    });
+
+    listeners.get("SIGTERM")?.("SIGTERM");
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
 });
 
 const createRequest = ({
@@ -298,6 +382,7 @@ describe("whatsapp cloud runtime request handler", () => {
     };
     const pipelineRunner = vi.fn();
     const handler = createWhatsAppCloudWebhookRequestHandler({
+      allowUnsignedLocalReplay: true,
       dispatcher,
       logger,
       pipelineRunner,
@@ -347,6 +432,48 @@ describe("whatsapp cloud runtime request handler", () => {
     expect(response.result.body).toBe("EVENT_REPLAYED");
     expect(pipelineRunner).not.toHaveBeenCalled();
     expect(dispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("allows unsigned local replay only when explicitly enabled", async () => {
+    const appSecret = "local-dev-app-secret";
+    const dispatcher = {
+      dispatch: vi.fn().mockResolvedValue({
+        messageCount: 0,
+        unsupportedCount: 0
+      })
+    };
+    const rawBody = JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: []
+    });
+
+    for (const allowUnsignedLocalReplay of [false, true]) {
+      const handler = createWhatsAppCloudWebhookRequestHandler({
+        allowUnsignedLocalReplay,
+        appSecret,
+        dispatcher,
+        logger: createLogger(),
+        verifyToken: "local-dev-verify-token"
+      });
+      const response = createResponse();
+
+      await handler(
+        createRequest({
+          method: "POST",
+          url: DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH,
+          remoteAddress: "127.0.0.1",
+          headers: {
+            "x-legalbot-cloud-replay": "1"
+          },
+          body: rawBody
+        }),
+        response.response
+      );
+
+      expect(response.result.statusCode).toBe(
+        allowUnsignedLocalReplay ? 200 : 401
+      );
+    }
   });
 
   it("rejects malformed payloads and non-local replay requests safely", async () => {
