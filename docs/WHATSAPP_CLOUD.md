@@ -14,7 +14,7 @@ OpenWA remains in the repo temporarily only as a legacy and development-only tra
 - Preserved compatibility alias: `npm run runtime:cloud`
 - Cloud preflight: `npm run ops:preflight:cloud`
 - Cloud post-start: `npm run ops:post-start:cloud`
-- Local webhook replay: `npm run webhook:replay:cloud -- --fixture valid-text.json`
+- Local webhook replay: `npm run webhook:replay:cloud -- --fixture tests/fixtures/whatsapp-cloud/valid-text.json --target http://127.0.0.1:3002/webhooks/whatsapp/cloud`
 - Legacy/dev-only OpenWA smoke runtime: `npm run smoke:openwa`
 
 ## Current Foundation
@@ -93,14 +93,22 @@ signature, summarizes event counts, and skips the business pipeline and outbound
 Unsigned local/development replay:
 
 ```bash
-npm run webhook:replay:cloud -- --fixture valid-text.json
+npm run webhook:replay:cloud -- \
+  --fixture tests/fixtures/whatsapp-cloud/valid-text.json \
+  --target http://127.0.0.1:3002/webhooks/whatsapp/cloud
 ```
 
 Signed replay:
 
 ```bash
-npm run webhook:replay:cloud -- --fixture valid-text.json --signed
+npm run webhook:replay:cloud -- \
+  --fixture tests/fixtures/whatsapp-cloud/valid-text.json \
+  --target http://127.0.0.1:3002/webhooks/whatsapp/cloud \
+  --signed
 ```
+
+Run `npm run webhook:replay:cloud -- --help` for sanitized usage. The help path does
+not load fixtures or print environment values.
 
 Signed mode computes `X-Hub-Signature-256: sha256=<hmac>` over the exact raw fixture
 body using `WHATSAPP_CLOUD_APP_SECRET`. It fails when the secret is unavailable.

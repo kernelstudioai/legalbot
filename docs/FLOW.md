@@ -24,7 +24,7 @@ OpenWA listeners and Cloud webhook handlers orchestrate transport concerns only.
 - In production, Cloud signature verification is mandatory.
 - Normalized inbound text messages are routed through the same consent, intake, routing, and output-plan pipeline already used by the existing app foundation.
 - Outbound replies go through the Cloud sender abstraction, which constructs Meta Graph API text payloads and supports an injected HTTP client for tests.
-- `npm run webhook:replay:cloud -- --fixture <name>` posts an allowlisted fake fixture to
+- `npm run webhook:replay:cloud -- --fixture <path> --target <loopback-url>` posts an allowlisted fake fixture to
   the loopback webhook. Replay requests still pass raw-body signature and payload parsing
   checks, then stop before the shared pipeline and outbound sender.
 

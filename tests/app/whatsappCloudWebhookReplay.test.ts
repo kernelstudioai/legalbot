@@ -20,6 +20,66 @@ const createStdout = () => {
 };
 
 describe("whatsapp cloud webhook replay command", () => {
+  it("accepts the documented fixture path and target arguments", async () => {
+    const stdout = createStdout();
+    const post = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200
+    });
+
+    const summary = await runWhatsAppCloudWebhookReplay({
+      args: [
+        "--fixture",
+        "tests/fixtures/whatsapp-cloud/valid-text.json",
+        "--target",
+        "http://127.0.0.1:3002/webhooks/whatsapp/cloud"
+      ],
+      cwd: repoRoot,
+      envSource: {
+        NODE_ENV: "development"
+      },
+      httpClient: {
+        post
+      },
+      stdout
+    });
+
+    expect(summary.exitCode).toBe(0);
+    expect(post).toHaveBeenCalledWith(
+      "http://127.0.0.1:3002/webhooks/whatsapp/cloud",
+      expect.any(Object)
+    );
+    expect(stdout.output).not.toContain("Synthetic webhook replay text.");
+  });
+
+  it("prints sanitized help successfully without exposing environment values", async () => {
+    const stdout = createStdout();
+    const appSecret = "help-secret-must-not-print";
+    const accessToken = "help-access-token-must-not-print";
+
+    const summary = await runWhatsAppCloudWebhookReplay({
+      args: ["--help"],
+      cwd: repoRoot,
+      envSource: {
+        WHATSAPP_CLOUD_APP_SECRET: appSecret,
+        WHATSAPP_CLOUD_ACCESS_TOKEN: accessToken,
+        WHATSAPP_CLOUD_WEBHOOK_PORT: "3999"
+      },
+      httpClient: {
+        post: vi.fn()
+      },
+      stdout
+    });
+
+    expect(summary.exitCode).toBe(0);
+    expect(stdout.output).toContain("Usage:");
+    expect(stdout.output).toContain("--fixture <path>");
+    expect(stdout.output).toContain("--target <loopback-http-url>");
+    expect(stdout.output).not.toContain(appSecret);
+    expect(stdout.output).not.toContain(accessToken);
+    expect(stdout.output).not.toContain("3999");
+  });
+
   it.each([
     ["valid-text.json", 1, 0, 0, false],
     ["unsupported-message.json", 0, 0, 1, false],
@@ -143,26 +203,39 @@ describe("whatsapp cloud webhook replay command", () => {
     ).rejects.toThrow("signed_replay_requires_app_secret");
   });
 
-  it("rejects paths outside the fixture directory and non-local targets", async () => {
+  it("rejects path traversal before posting or loading fixture content", async () => {
+    const post = vi.fn();
+
     await expect(
       runWhatsAppCloudWebhookReplay({
-        args: ["--fixture", "../valid-text.json"],
+        args: [
+          "--fixture",
+          "../.env",
+          "--target",
+          "http://127.0.0.1:3002/webhooks/whatsapp/cloud"
+        ],
         cwd: repoRoot,
         envSource: {
           NODE_ENV: "development"
         },
         httpClient: {
-          post: vi.fn()
+          post
         }
       })
-    ).rejects.toThrow("fixture_name_invalid");
+    ).rejects.toThrow("fixture_outside_safe_directory");
+
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-loopback targets", async () => {
+    const post = vi.fn();
 
     await expect(
       runWhatsAppCloudWebhookReplay({
         args: [
           "--fixture",
           "valid-text.json",
-          "--url",
+          "--target",
           "https://example.com/webhooks/whatsapp/cloud"
         ],
         cwd: repoRoot,
@@ -170,9 +243,36 @@ describe("whatsapp cloud webhook replay command", () => {
           NODE_ENV: "development"
         },
         httpClient: {
-          post: vi.fn()
+          post
         }
       })
     ).rejects.toThrow("local_cloud_webhook_url_required");
+
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("returns a sanitized connection failure after accepting valid arguments", async () => {
+    const stdout = createStdout();
+
+    await expect(
+      runWhatsAppCloudWebhookReplay({
+        args: [
+          "--fixture",
+          "tests/fixtures/whatsapp-cloud/valid-text.json",
+          "--target",
+          "http://127.0.0.1:3002/webhooks/whatsapp/cloud"
+        ],
+        cwd: repoRoot,
+        envSource: {
+          NODE_ENV: "development"
+        },
+        httpClient: {
+          post: vi.fn().mockRejectedValue(new Error("private connection detail"))
+        },
+        stdout
+      })
+    ).rejects.toThrow("replay_connection_failed");
+
+    expect(stdout.output).not.toContain("private connection detail");
   });
 });

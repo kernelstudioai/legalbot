@@ -19,6 +19,7 @@
 - Tests use dependency injection and mocks. They must not call live Meta APIs.
 - Local replay accepts fixture files only from `tests/fixtures/whatsapp-cloud/`, refuses
   non-loopback target URLs, and suppresses pipeline dispatch and outbound Cloud sending.
+- Replay help is static and sanitized; it does not load fixtures or print environment values.
 - Unsigned replay is development/test-only. Production replay requires a valid signature.
 - Reverse proxies must clear `X-Legalbot-Cloud-Replay` from public requests.
 

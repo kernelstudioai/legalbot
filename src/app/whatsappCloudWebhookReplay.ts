@@ -11,6 +11,16 @@ import { toJsonStdout } from "./opsCommandCommon.ts";
 const DEFAULT_FIXTURES_DIRECTORY = "tests/fixtures/whatsapp-cloud";
 const DEFAULT_CLOUD_WEBHOOK_PORT = "3002";
 const REPLAY_HEADER = "x-legalbot-cloud-replay";
+const REPLAY_USAGE = [
+  "Usage:",
+  "  npm run webhook:replay:cloud -- --fixture <path> --target <loopback-http-url> [--signed]",
+  "",
+  "Options:",
+  "  --fixture <path>  JSON fixture inside tests/fixtures/whatsapp-cloud/",
+  "  --target <url>    Loopback HTTP webhook URL (default: http://127.0.0.1:3002/webhooks/whatsapp/cloud)",
+  "  --signed          Sign with WHATSAPP_CLOUD_APP_SECRET",
+  "  --help            Show this sanitized usage"
+].join("\n");
 
 interface ReplayHttpClient {
   post(
@@ -66,8 +76,9 @@ export interface WhatsAppCloudReplaySummary {
 
 interface ParsedReplayArgs {
   fixture: string;
+  help: boolean;
   signed: boolean;
-  url?: string;
+  target?: string;
 }
 
 const createFetchHttpClient = (): ReplayHttpClient => ({
@@ -83,11 +94,27 @@ const createFetchHttpClient = (): ReplayHttpClient => ({
 
 const parseReplayArgs = (args: string[]): ParsedReplayArgs => {
   let fixture: string | undefined;
+  let help = false;
   let signed = false;
-  let url: string | undefined;
+  let target: string | undefined;
+
+  const readValue = (index: number, errorCode: string): string => {
+    const value = args[index + 1];
+
+    if (!value || value.startsWith("--")) {
+      throw new Error(errorCode);
+    }
+
+    return value;
+  };
 
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
+
+    if (argument === "--help") {
+      help = true;
+      continue;
+    }
 
     if (argument === "--signed") {
       signed = true;
@@ -95,13 +122,13 @@ const parseReplayArgs = (args: string[]): ParsedReplayArgs => {
     }
 
     if (argument === "--fixture") {
-      fixture = args[index + 1];
+      fixture = readValue(index, "fixture_required");
       index += 1;
       continue;
     }
 
-    if (argument === "--url") {
-      url = args[index + 1];
+    if (argument === "--target" || argument === "--url") {
+      target = readValue(index, "local_cloud_webhook_url_required");
       index += 1;
       continue;
     }
@@ -109,14 +136,15 @@ const parseReplayArgs = (args: string[]): ParsedReplayArgs => {
     throw new Error("unsupported_replay_argument");
   }
 
-  if (!fixture) {
+  if (!help && !fixture) {
     throw new Error("fixture_required");
   }
 
   return {
-    fixture,
+    fixture: fixture ?? "not_loaded",
+    help,
     signed,
-    ...(url ? { url } : {})
+    ...(target ? { target } : {})
   };
 };
 
@@ -129,7 +157,21 @@ const resolveFixturePath = ({
   fixture: string;
   fixturesDirectory: string;
 }): string => {
-  if (path.basename(fixture) !== fixture || !fixture.endsWith(".json")) {
+  const fixtureRootPath = path.resolve(cwd, fixturesDirectory);
+  const candidatePath =
+    path.basename(fixture) === fixture
+      ? path.join(fixtureRootPath, fixture)
+      : path.resolve(cwd, fixture);
+  const lexicalRelativePath = path.relative(fixtureRootPath, candidatePath);
+
+  if (
+    lexicalRelativePath.startsWith("..") ||
+    path.isAbsolute(lexicalRelativePath)
+  ) {
+    throw new Error("fixture_outside_safe_directory");
+  }
+
+  if (!fixture.endsWith(".json")) {
     throw new Error("fixture_name_invalid");
   }
 
@@ -137,8 +179,8 @@ const resolveFixturePath = ({
   let fixturePath: string;
 
   try {
-    fixtureRoot = realpathSync(path.resolve(cwd, fixturesDirectory));
-    fixturePath = realpathSync(path.join(fixtureRoot, fixture));
+    fixtureRoot = realpathSync(fixtureRootPath);
+    fixturePath = realpathSync(candidatePath);
   } catch {
     throw new Error("fixture_not_found");
   }
@@ -263,7 +305,23 @@ export const runWhatsAppCloudWebhookReplay = async ({
     };
   }
 
-  const target = validateLocalTarget(parsedArgs.url ?? createDefaultUrl(envSource));
+  if (parsedArgs.help) {
+    stdout.write(`${REPLAY_USAGE}\n`);
+    return {
+      exitCode: 0,
+      report: createFailureReport({
+        fixture: "not_loaded",
+        signed: false,
+        target: new URL(
+          `http://127.0.0.1:${DEFAULT_CLOUD_WEBHOOK_PORT}${DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH}`
+        )
+      })
+    };
+  }
+
+  const target = validateLocalTarget(
+    parsedArgs.target ?? createDefaultUrl(envSource)
+  );
 
   if (!parsedArgs.signed && envSource.NODE_ENV === "production") {
     throw new Error("unsigned_replay_not_allowed_in_production");
@@ -299,11 +357,17 @@ export const runWhatsAppCloudWebhookReplay = async ({
     });
   }
 
-  const response = await httpClient.post(target.href, {
-    body: rawBody,
-    headers,
-    signal: AbortSignal.timeout(5000)
-  });
+  let response: Awaited<ReturnType<ReplayHttpClient["post"]>>;
+
+  try {
+    response = await httpClient.post(target.href, {
+      body: rawBody,
+      headers,
+      signal: AbortSignal.timeout(5000)
+    });
+  } catch {
+    throw new Error("replay_connection_failed");
+  }
   const report: WhatsAppCloudReplayReport = {
     status: response.ok ? "accepted" : "rejected",
     fixture: parsedArgs.fixture,
@@ -339,6 +403,7 @@ const SAFE_ERROR_CODES = new Set([
   "fixture_required",
   "fixture_unreadable",
   "local_cloud_webhook_url_required",
+  "replay_connection_failed",
   "signed_replay_requires_app_secret",
   "unsigned_replay_not_allowed_in_production",
   "unsupported_replay_argument"

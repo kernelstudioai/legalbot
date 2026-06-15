@@ -163,7 +163,10 @@ Production must enforce webhook signature verification before any live traffic.
 Before public webhook work, local replay may be run against the loopback service:
 
 ```bash
-npm run webhook:replay:cloud -- --fixture valid-text.json --signed
+npm run webhook:replay:cloud -- \
+  --fixture tests/fixtures/whatsapp-cloud/valid-text.json \
+  --target http://127.0.0.1:3002/webhooks/whatsapp/cloud \
+  --signed
 ```
 
 This is a non-live validation only. It does not register a webhook or call Meta.
