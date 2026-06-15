@@ -1,0 +1,23 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "fake-business-account-001",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messages": [
+              {
+                "id": "wamid.fake-image-001",
+                "from": "12025550102",
+                "timestamp": "1718049601",
+                "type": "image"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

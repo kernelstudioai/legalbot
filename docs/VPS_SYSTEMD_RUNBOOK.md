@@ -64,12 +64,13 @@ WHATSAPP_CLOUD_APP_SECRET=replace-me
 Optional local bind defaults:
 
 ```dotenv
-WHATSAPP_CLOUD_WEBHOOK_HOST=0.0.0.0
+WHATSAPP_CLOUD_WEBHOOK_HOST=127.0.0.1
 WHATSAPP_CLOUD_WEBHOOK_PORT=3002
 ```
 
 Keep these values outside version control.
 Never print env-file contents.
+Do not paste `.env` contents into chat, logs, tickets, or command output.
 
 ## Preflight And Post-Start
 
@@ -130,6 +131,43 @@ Expected service names:
 - `legalbot-openwa.service`
 - `legalbot-whatsapp-cloud.service`
 
+## Exact Cloud VPS Rollout
+
+Run the following sequence as the VPS operator. Loading `.env` this way does not print it:
+
+```bash
+cd ~/legalbot
+git pull
+export NVM_DIR="$HOME/.nvm"
+. "$NVM_DIR/nvm.sh"
+nvm use 22
+npm ci --include=dev
+npm run typecheck
+npm test
+set -a
+. ./.env
+set +a
+npm run ops:preflight:cloud
+./scripts/provision-systemd.sh --dry-run --transport cloud --service-name legalbot-whatsapp-cloud.service --exec-script start:whatsapp-cloud --project-root "$PWD"
+sudo ./scripts/provision-systemd.sh --install --transport cloud --service-name legalbot-whatsapp-cloud.service --exec-script start:whatsapp-cloud --project-root "$PWD" --user "$USER" --npm-path "$(command -v npm)"
+sudo systemctl start legalbot-whatsapp-cloud.service
+sudo systemctl status legalbot-whatsapp-cloud.service --no-pager || true
+npm run ops:post-start:cloud
+sudo journalctl -u legalbot-whatsapp-cloud.service -n 120 --no-pager
+```
+
+The provisioner does not enable or start the service unless explicit flags or commands
+are used. The sequence above starts it explicitly but does not enable boot-time startup.
+Production must enforce webhook signature verification before any live traffic.
+
+Before public webhook work, local replay may be run against the loopback service:
+
+```bash
+npm run webhook:replay:cloud -- --fixture valid-text.json --signed
+```
+
+This is a non-live validation only. It does not register a webhook or call Meta.
+
 ## Reverse Proxy And TLS
 
 Meta webhook delivery requires a public HTTPS endpoint.
@@ -140,10 +178,10 @@ Example nginx server block:
 ```nginx
 server {
     listen 443 ssl http2;
-    server_name webhook.example.invalid;
+    server_name example.com;
 
-    ssl_certificate /etc/letsencrypt/live/webhook.example.invalid/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/webhook.example.invalid/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
 
     location /webhooks/whatsapp/cloud {
         proxy_pass http://127.0.0.1:3002;
@@ -151,6 +189,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Legalbot-Cloud-Replay "";
     }
 
     location /health {
@@ -170,14 +209,21 @@ server {
 Webhook verification URL example:
 
 ```text
-https://webhook.example.invalid/webhooks/whatsapp/cloud
+https://example.com/webhooks/whatsapp/cloud
 ```
 
 Firewall notes:
 
-- Allow inbound `443/tcp` to the reverse proxy.
-- Keep `WHATSAPP_CLOUD_WEBHOOK_PORT` bound to localhost or private interfaces unless infrastructure requires otherwise.
+- Allow only inbound `80/tcp` and `443/tcp` publicly for HTTP redirect/certificate
+  issuance and HTTPS delivery.
+- Bind `WHATSAPP_CLOUD_WEBHOOK_PORT` to `127.0.0.1` or otherwise prevent public access.
 - Do not expose `/health`, `/ready`, or `/status` publicly.
+- Do not place tokens, verify tokens, app secrets, or phone-number IDs in nginx config.
+- Clear `X-Legalbot-Cloud-Replay` at the proxy so public callers cannot request replay-only handling.
+
+Public HTTPS is required for Meta webhook verification and delivery. TLS certificate
+issuance, DNS, firewall changes, public verification, and live Meta registration are
+operator-managed and are not performed by repository commands.
 
 ## Safe Log Review
 
@@ -191,6 +237,20 @@ journalctl -u legalbot-whatsapp-cloud.service --since "15 minutes ago" --no-page
 
 Do not grep or echo tokens.
 Do not print QR data, session artifacts, or browser-profile paths.
+Do not expose the local app port publicly.
+
+## Rollback
+
+From the checked-out project directory:
+
+```bash
+sudo systemctl stop legalbot-whatsapp-cloud.service || true
+sudo ./scripts/provision-systemd.sh --uninstall --transport cloud --service-name legalbot-whatsapp-cloud.service --exec-script start:whatsapp-cloud --project-root "$PWD" --user "$USER" --npm-path "$(command -v npm)"
+git status --short
+```
+
+The rollback removes the systemd unit only. Confirm that `.env`, database files, and
+runtime data remain untouched. Do not print their contents.
 
 ## Business Constraints
 

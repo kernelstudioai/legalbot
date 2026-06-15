@@ -39,6 +39,8 @@ This is the only default startup context.
 
 - Cloud runtime health is checked locally through `/health`, `/ready`, and `/status` on the webhook server.
 - Production Cloud startup requires `WHATSAPP_CLOUD_APP_SECRET`.
+- `webhook:replay:cloud` validates fake local fixtures and signatures without running the
+  business pipeline, dispatching outbound messages, or calling Meta.
 - Reverse proxy, TLS, and firewall configuration remain operator-managed infrastructure concerns documented in `docs/VPS_SYSTEMD_RUNBOOK.md`.
 
 ## Safety Rules

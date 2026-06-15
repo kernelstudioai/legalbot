@@ -17,12 +17,17 @@
 - Unsupported Cloud message types are ignored safely.
 - Delivery and status events are ignored for now and do not trigger business logic.
 - Tests use dependency injection and mocks. They must not call live Meta APIs.
+- Local replay accepts fixture files only from `tests/fixtures/whatsapp-cloud/`, refuses
+  non-loopback target URLs, and suppresses pipeline dispatch and outbound Cloud sending.
+- Unsigned replay is development/test-only. Production replay requires a valid signature.
+- Reverse proxies must clear `X-Legalbot-Cloud-Replay` from public requests.
 
 ## Logging And Payload Minimization
 
 - Access token, verify token, app secret, and phone-number ID must never be logged.
 - Webhook payload logs must stay minimized to counts, message IDs, and sanitized state only.
 - Raw webhook bodies, full transcript text, and full transport errors must not be printed in operator commands.
+- Replay output must contain event counts and HTTP status only, never raw fixture bodies.
 
 ## Persistence Boundary
 
@@ -53,9 +58,12 @@
 - Backups must not be committed.
 - Backups must stay ignored and be handled with explicit retention discipline.
 - Systemd unit files must not contain secrets.
+- The local Cloud application port must not be exposed publicly; only the TLS reverse
+  proxy should accept public webhook traffic.
 - Do not commit `data/`, `backups/`, `openwa-session/`, `sessions/`, `logs/`, `tmp/`, database files, QR images, screenshots, or other runtime artifacts.
 
 ## Current Gaps
 
 - Reverse proxy, HTTPS termination, firewall changes, and public Meta app registration still require operator-managed infrastructure.
+- Local replay does not prove public DNS, TLS, Meta verification, or live delivery.
 - Authentication beyond the WhatsApp transport boundary, encryption at rest, and retention policies are still out of scope.

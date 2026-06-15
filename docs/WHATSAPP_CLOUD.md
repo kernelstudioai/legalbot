@@ -14,6 +14,7 @@ OpenWA remains in the repo temporarily only as a legacy and development-only tra
 - Preserved compatibility alias: `npm run runtime:cloud`
 - Cloud preflight: `npm run ops:preflight:cloud`
 - Cloud post-start: `npm run ops:post-start:cloud`
+- Local webhook replay: `npm run webhook:replay:cloud -- --fixture valid-text.json`
 - Legacy/dev-only OpenWA smoke runtime: `npm run smoke:openwa`
 
 ## Current Foundation
@@ -81,6 +82,46 @@ Inbound flow:
 
 When configured, `WHATSAPP_CLOUD_APP_SECRET` is used to validate `X-Hub-Signature-256` before payload processing.
 In production, that app-secret signature verification is mandatory.
+
+## Local Webhook Replay
+
+The replay command posts fake fixtures from `tests/fixtures/whatsapp-cloud/` to the
+loopback Cloud webhook URL. It refuses non-loopback targets and never calls Meta APIs.
+The runtime recognizes loopback replay requests, validates the payload and optional
+signature, summarizes event counts, and skips the business pipeline and outbound sender.
+
+Unsigned local/development replay:
+
+```bash
+npm run webhook:replay:cloud -- --fixture valid-text.json
+```
+
+Signed replay:
+
+```bash
+npm run webhook:replay:cloud -- --fixture valid-text.json --signed
+```
+
+Signed mode computes `X-Hub-Signature-256: sha256=<hmac>` over the exact raw fixture
+body using `WHATSAPP_CLOUD_APP_SECRET`. It fails when the secret is unavailable.
+Unsigned replay is rejected when `NODE_ENV=production`.
+
+Available fake fixtures:
+
+- `valid-text.json`
+- `unsupported-message.json`
+- `status-event.json`
+- `invalid-malformed.json`
+
+Replay output contains only fixture name, target origin/path, event counts, signature
+mode, and HTTP status. It never prints fixture bodies, user text, tokens, or private
+configuration.
+
+Local replay, public webhook verification, and live Meta delivery are separate steps:
+
+- Local replay validates parsing and signature behavior without Meta connectivity.
+- Public verification is the Meta `GET` challenge against the public HTTPS endpoint.
+- Live delivery is actual Meta webhook traffic and remains out of scope for this milestone.
 
 ## Deployment Shape
 

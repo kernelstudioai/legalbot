@@ -1,0 +1,23 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "fake-business-account-001",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "statuses": [
+              {
+                "id": "wamid.fake-status-001",
+                "recipient_id": "12025550103",
+                "status": "delivered",
+                "timestamp": "1718049602"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

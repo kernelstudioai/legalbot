@@ -27,6 +27,7 @@
     "smoke:openwa": "node --experimental-strip-types src/app/openwaSmoke.ts",
     "start:whatsapp-cloud": "node --experimental-strip-types src/app/whatsappCloudRuntime.ts",
     "runtime:cloud": "node --experimental-strip-types src/app/whatsappCloudRuntime.ts",
+    "webhook:replay:cloud": "node --experimental-strip-types src/app/whatsappCloudWebhookReplay.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "postinstall": "patch-package"

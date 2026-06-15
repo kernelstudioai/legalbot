@@ -1,4 +1,5 @@
 import { Readable } from "node:stream";
+import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { AddressInfo } from "node:net";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -173,16 +174,21 @@ const createRequest = ({
   body = "",
   headers = {},
   method,
+  remoteAddress,
   url
 }: {
   body?: string;
   headers?: Record<string, string>;
   method: string;
+  remoteAddress?: string;
   url: string;
 }): IncomingMessage =>
   Object.assign(Readable.from(body.length > 0 ? [body] : []), {
     headers,
     method,
+    socket: {
+      remoteAddress
+    },
     url
   }) as IncomingMessage;
 
@@ -219,6 +225,191 @@ const createResponse = (): {
 };
 
 describe("whatsapp cloud runtime request handler", () => {
+  it("requires and validates signatures when an app secret is configured", async () => {
+    const logger = createLogger();
+    const dispatcher = {
+      dispatch: vi.fn().mockResolvedValue({
+        messageCount: 0,
+        unsupportedCount: 0
+      })
+    };
+    const appSecret = "fake-app-secret-for-signature-test";
+    const rawBody = JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: []
+    });
+    const handler = createWhatsAppCloudWebhookRequestHandler({
+      appSecret,
+      dispatcher,
+      logger,
+      verifyToken: "fake-verify-token"
+    });
+
+    const unsignedResponse = createResponse();
+    await handler(
+      createRequest({
+        method: "POST",
+        url: DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH,
+        body: rawBody
+      }),
+      unsignedResponse.response
+    );
+    expect(unsignedResponse.result.statusCode).toBe(401);
+
+    const invalidResponse = createResponse();
+    await handler(
+      createRequest({
+        method: "POST",
+        url: DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH,
+        body: rawBody,
+        headers: {
+          "x-hub-signature-256": "sha256=invalid"
+        }
+      }),
+      invalidResponse.response
+    );
+    expect(invalidResponse.result.statusCode).toBe(401);
+
+    const validResponse = createResponse();
+    await handler(
+      createRequest({
+        method: "POST",
+        url: DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH,
+        body: rawBody,
+        headers: {
+          "x-hub-signature-256": `sha256=${createHmac("sha256", appSecret)
+            .update(rawBody)
+            .digest("hex")}`
+        }
+      }),
+      validResponse.response
+    );
+    expect(validResponse.result.statusCode).toBe(200);
+    expect(validResponse.result.body).toBe("EVENT_RECEIVED");
+  });
+
+  it("validates local replay payloads without dispatching outbound messages", async () => {
+    const logger = createLogger();
+    const dispatcher = {
+      dispatch: vi.fn().mockResolvedValue({
+        messageCount: 0,
+        unsupportedCount: 0
+      })
+    };
+    const pipelineRunner = vi.fn();
+    const handler = createWhatsAppCloudWebhookRequestHandler({
+      dispatcher,
+      logger,
+      pipelineRunner,
+      verifyToken: "fake-verify-token"
+    });
+    const rawBody = JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          changes: [
+            {
+              field: "messages",
+              value: {
+                messages: [
+                  {
+                    id: "wamid.fake-local-replay",
+                    from: "12025550101",
+                    timestamp: "1718049600",
+                    type: "text",
+                    text: {
+                      body: "Synthetic replay text"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    });
+
+    const response = createResponse();
+    await handler(
+      createRequest({
+        method: "POST",
+        url: DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH,
+        remoteAddress: "127.0.0.1",
+        headers: {
+          "x-legalbot-cloud-replay": "1"
+        },
+        body: rawBody
+      }),
+      response.response
+    );
+
+    expect(response.result.statusCode).toBe(200);
+    expect(response.result.body).toBe("EVENT_REPLAYED");
+    expect(pipelineRunner).not.toHaveBeenCalled();
+    expect(dispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed payloads and non-local replay requests safely", async () => {
+    const logger = createLogger();
+    const dispatcher = {
+      dispatch: vi.fn().mockResolvedValue({
+        messageCount: 0,
+        unsupportedCount: 0
+      })
+    };
+    const handler = createWhatsAppCloudWebhookRequestHandler({
+      dispatcher,
+      logger,
+      verifyToken: "fake-verify-token"
+    });
+
+    const malformedResponse = createResponse();
+    await handler(
+      createRequest({
+        method: "POST",
+        url: DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH,
+        body: "{\"entry\":["
+      }),
+      malformedResponse.response
+    );
+    expect(malformedResponse.result.statusCode).toBe(400);
+
+    const invalidShapeResponse = createResponse();
+    await handler(
+      createRequest({
+        method: "POST",
+        url: DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH,
+        body: JSON.stringify({
+          entry: [
+            {
+              changes: "invalid"
+            }
+          ]
+        })
+      }),
+      invalidShapeResponse.response
+    );
+    expect(invalidShapeResponse.result.statusCode).toBe(400);
+
+    const nonLocalResponse = createResponse();
+    await handler(
+      createRequest({
+        method: "POST",
+        url: DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH,
+        remoteAddress: "203.0.113.10",
+        headers: {
+          "x-legalbot-cloud-replay": "1"
+        },
+        body: JSON.stringify({
+          object: "whatsapp_business_account",
+          entry: []
+        })
+      }),
+      nonLocalResponse.response
+    );
+    expect(nonLocalResponse.result.statusCode).toBe(403);
+  });
+
   it("verifies webhooks, processes text messages, ignores unsupported events, and redacts tokens from logs", async () => {
     const logger = createLogger();
     const persistenceService = createInMemoryPersistenceService();

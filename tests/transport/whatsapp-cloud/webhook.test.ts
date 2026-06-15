@@ -1,10 +1,37 @@
 import { describe, expect, it } from "vitest";
 import {
+  createWhatsAppCloudSignature,
   parseWhatsAppCloudWebhookPayload,
+  validateWhatsAppCloudSignature,
   verifyWhatsAppCloudWebhook
 } from "../../../src/transport/whatsapp-cloud";
 
 describe("whatsapp cloud webhook helpers", () => {
+  it("creates and validates the signed raw-body header", () => {
+    const appSecret = "fake-app-secret";
+    const rawBody = "{\"fake\":true}";
+    const signature = createWhatsAppCloudSignature({
+      appSecret,
+      rawBody
+    });
+
+    expect(signature).toMatch(/^sha256=[a-f0-9]{64}$/);
+    expect(
+      validateWhatsAppCloudSignature({
+        appSecret,
+        rawBody,
+        signatureHeader: signature
+      })
+    ).toBe(true);
+    expect(
+      validateWhatsAppCloudSignature({
+        appSecret,
+        rawBody: `${rawBody} `,
+        signatureHeader: signature
+      })
+    ).toBe(false);
+  });
+
   it("accepts a valid verification challenge and rejects invalid tokens", () => {
     expect(
       verifyWhatsAppCloudWebhook(

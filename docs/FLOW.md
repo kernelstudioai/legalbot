@@ -24,6 +24,9 @@ OpenWA listeners and Cloud webhook handlers orchestrate transport concerns only.
 - In production, Cloud signature verification is mandatory.
 - Normalized inbound text messages are routed through the same consent, intake, routing, and output-plan pipeline already used by the existing app foundation.
 - Outbound replies go through the Cloud sender abstraction, which constructs Meta Graph API text payloads and supports an injected HTTP client for tests.
+- `npm run webhook:replay:cloud -- --fixture <name>` posts an allowlisted fake fixture to
+  the loopback webhook. Replay requests still pass raw-body signature and payload parsing
+  checks, then stop before the shared pipeline and outbound sender.
 
 ## OpenWA Runtime
 
@@ -38,6 +41,8 @@ OpenWA listeners and Cloud webhook handlers orchestrate transport concerns only.
 - `npm run ops:preflight:cloud` validates Cloud runtime env, migration posture, and repo hygiene without printing secrets.
 - `npm run ops:post-start` checks the sanitized OpenWA status surface after startup.
 - `npm run ops:post-start:cloud` checks the local Cloud health surface after startup without calling live Meta APIs.
+- Local replay is separate from public webhook verification and live Meta delivery. The
+  latter two remain operator-managed and live delivery is out of scope for this milestone.
 
 ## Current Client Runtime Behavior
 

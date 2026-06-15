@@ -1,0 +1,34 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "fake-business-account-001",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "contacts": [
+              {
+                "wa_id": "12025550101",
+                "profile": {
+                  "name": "Test Client"
+                }
+              }
+            ],
+            "messages": [
+              {
+                "id": "wamid.fake-text-001",
+                "from": "12025550101",
+                "timestamp": "1718049600",
+                "type": "text",
+                "text": {
+                  "body": "Synthetic webhook replay text."
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

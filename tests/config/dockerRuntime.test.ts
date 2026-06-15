@@ -58,6 +58,9 @@ describe("docker runtime files", () => {
     expect(packageJson.scripts["runtime:cloud"]).toBe(
       "node --experimental-strip-types src/app/whatsappCloudRuntime.ts"
     );
+    expect(packageJson.scripts["webhook:replay:cloud"]).toBe(
+      "node --experimental-strip-types src/app/whatsappCloudWebhookReplay.ts"
+    );
     expect(packageJson.scripts["docker:up"]).toBe("docker compose up -d");
     expect(packageJson.scripts["docker:down"]).toBe("docker compose down");
     expect(packageJson.scripts["docker:status"]).toBe("docker compose ps");
@@ -142,6 +145,15 @@ describe("docker runtime files", () => {
     expect(vpsRunbook).toContain("npm run ops:post-start");
     expect(vpsRunbook).toContain("npm run ops:preflight:cloud");
     expect(vpsRunbook).toContain("npm run ops:post-start:cloud");
+    expect(vpsRunbook).toContain("npm run webhook:replay:cloud");
+    expect(vpsRunbook).toContain("cd ~/legalbot");
+    expect(vpsRunbook).toContain('. "$NVM_DIR/nvm.sh"');
+    expect(vpsRunbook).toContain(". ./.env");
+    expect(vpsRunbook).toContain("sudo systemctl start legalbot-whatsapp-cloud.service");
+    expect(vpsRunbook).toContain("https://example.com/webhooks/whatsapp/cloud");
+    expect(vpsRunbook).toContain('proxy_set_header X-Legalbot-Cloud-Replay ""');
+    expect(vpsRunbook).toContain("sudo systemctl stop legalbot-whatsapp-cloud.service || true");
+    expect(vpsRunbook).toContain("git status --short");
     expect(vpsRunbook).toContain("ExecStart=/home/sayan/.nvm/versions/node/v22.22.3/bin/npm run smoke:openwa");
     expect(vpsRunbook).toContain("ExecStart=/home/deploy/.nvm/versions/node/v22.22.3/bin/npm run start:whatsapp-cloud");
     expect(vpsRunbook).toContain("npm ci --include=dev");

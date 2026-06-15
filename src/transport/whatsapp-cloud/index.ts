@@ -11,6 +11,7 @@ export {
 } from "./sender.ts";
 export {
   DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH,
+  createWhatsAppCloudSignature,
   parseWhatsAppCloudWebhookPayload,
   validateWhatsAppCloudSignature,
   verifyWhatsAppCloudWebhook,

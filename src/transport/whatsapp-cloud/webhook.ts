@@ -132,6 +132,15 @@ export const validateWhatsAppCloudSignature = ({
   return timingSafeEqual(Buffer.from(expectedDigest), Buffer.from(actualDigest));
 };
 
+export const createWhatsAppCloudSignature = ({
+  appSecret,
+  rawBody
+}: {
+  appSecret: string;
+  rawBody: string;
+}): string =>
+  `sha256=${createHmac("sha256", appSecret).update(rawBody).digest("hex")}`;
+
 export const parseWhatsAppCloudWebhookPayload = (
   payload: unknown
 ): ParsedWhatsAppCloudWebhook => {

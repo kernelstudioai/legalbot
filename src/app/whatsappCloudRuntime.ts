@@ -39,6 +39,7 @@ const REDACTED_PHONE = "[redacted-phone]";
 const HEALTH_PATH = "/health";
 const READY_PATH = "/ready";
 const STATUS_PATH = "/status";
+const REPLAY_HEADER = "x-legalbot-cloud-replay";
 
 export interface WhatsAppCloudRuntime {
   env: WhatsAppCloudRuntimeEnv;
@@ -120,6 +121,11 @@ const readRequestBody = async (request: IncomingMessage): Promise<string> => {
   return Buffer.concat(chunks).toString("utf8");
 };
 
+const isLoopbackAddress = (address: string | undefined): boolean =>
+  address === "127.0.0.1" ||
+  address === "::1" ||
+  address === "::ffff:127.0.0.1";
+
 const isSqlitePersistenceService = (
   persistenceService: PersistenceService
 ): persistenceService is SqlitePersistenceService =>
@@ -191,6 +197,15 @@ export const createWhatsAppCloudWebhookRequestHandler = ({
     }
 
     const rawBody = await readRequestBody(request);
+    const replayRequested = request.headers[REPLAY_HEADER] === "1";
+
+    if (replayRequested && !isLoopbackAddress(request.socket.remoteAddress)) {
+      logger.warn("whatsapp_cloud_replay_rejected_non_local", {
+        path
+      });
+      writeResponse(response, 403, "Forbidden");
+      return;
+    }
 
     if (
       !validateWhatsAppCloudSignature({
@@ -219,7 +234,17 @@ export const createWhatsAppCloudWebhookRequestHandler = ({
       return;
     }
 
-    const parsedWebhook = parseWhatsAppCloudWebhookPayload(payload);
+    let parsedWebhook;
+
+    try {
+      parsedWebhook = parseWhatsAppCloudWebhookPayload(payload);
+    } catch {
+      logger.warn("whatsapp_cloud_payload_invalid_shape", {
+        path
+      });
+      writeResponse(response, 400, "Bad Request");
+      return;
+    }
 
     if (parsedWebhook.statusEventCount > 0) {
       logger.info("whatsapp_cloud_status_events_ignored", {
@@ -231,6 +256,18 @@ export const createWhatsAppCloudWebhookRequestHandler = ({
       logger.info("whatsapp_cloud_unsupported_messages_ignored", {
         count: parsedWebhook.unsupportedMessageCount
       });
+    }
+
+    if (replayRequested) {
+      logger.info("whatsapp_cloud_replay_validated", {
+        normalized_text_message_count: parsedWebhook.messages.length,
+        status_event_count: parsedWebhook.statusEventCount,
+        unsupported_message_count: parsedWebhook.unsupportedMessageCount
+      });
+      writeResponse(response, 200, "EVENT_REPLAYED", {
+        "Content-Type": "text/plain; charset=utf-8"
+      });
+      return;
     }
 
     for (const message of parsedWebhook.messages) {
