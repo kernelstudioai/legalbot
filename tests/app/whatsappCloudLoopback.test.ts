@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createHmac } from "node:crypto";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runOpsPostStartCommand } from "../../src/app/opsPostStart.ts";
@@ -79,6 +80,10 @@ describe("whatsapp cloud loopback validation", () => {
       const port = address!.port;
       const baseUrl = `http://127.0.0.1:${port}`;
       const target = `${baseUrl}/webhooks/whatsapp/cloud`;
+      const signedFixture = readFileSync(
+        path.join(repoRoot, "tests/fixtures/whatsapp-cloud/valid-text.json"),
+        "utf8"
+      );
 
       for (const endpoint of ["/health", "/ready", "/status"]) {
         const response = await fetch(`${baseUrl}${endpoint}`);
@@ -105,7 +110,7 @@ describe("whatsapp cloud loopback validation", () => {
       ] of expectedReplays) {
         const stdout = createStdout();
         const summary = await runWhatsAppCloudWebhookReplay({
-          args: ["--fixture", fixture, "--target", target],
+          args: ["--signed", "--fixture", fixture, "--target", target],
           cwd: repoRoot,
           envSource: createFakeCloudEnv(),
           stdout
@@ -129,6 +134,15 @@ describe("whatsapp cloud loopback validation", () => {
       });
       expect(signed.exitCode).toBe(0);
 
+      const unsignedEnforced = await runWhatsAppCloudWebhookReplay({
+        args: ["--fixture", "valid-text.json", "--target", target],
+        cwd: repoRoot,
+        envSource: createFakeCloudEnv(),
+        stdout: createStdout()
+      });
+      expect(unsignedEnforced.exitCode).toBe(1);
+      expect(unsignedEnforced.report.response.statusCode).toBe(401);
+
       const wrongSignature = await runWhatsAppCloudWebhookReplay({
         args: ["--signed", "--fixture", "valid-text.json", "--target", target],
         cwd: repoRoot,
@@ -140,6 +154,41 @@ describe("whatsapp cloud loopback validation", () => {
       });
       expect(wrongSignature.exitCode).toBe(1);
       expect(wrongSignature.report.response.statusCode).toBe(401);
+
+      const directValidationHeaders = {
+        "content-type": "application/json",
+        "x-legalbot-cloud-replay": "1"
+      };
+
+      const missingSignature = await fetch(target, {
+        method: "POST",
+        headers: directValidationHeaders,
+        body: signedFixture
+      });
+      expect(missingSignature.status).toBe(401);
+
+      const invalidSignature = await fetch(target, {
+        method: "POST",
+        headers: {
+          ...directValidationHeaders,
+          "x-hub-signature-256": "sha256=invalid"
+        },
+        body: signedFixture
+      });
+      expect(invalidSignature.status).toBe(401);
+
+      const validSignature = await fetch(target, {
+        method: "POST",
+        headers: {
+          ...directValidationHeaders,
+          "x-hub-signature-256": `sha256=${createHmac("sha256", fakeAppSecret)
+            .update(signedFixture)
+            .digest("hex")}`
+        },
+        body: signedFixture
+      });
+      expect(validSignature.status).toBe(200);
+      expect(await validSignature.text()).toBe("EVENT_REPLAYED");
 
       const postStart = await runOpsPostStartCommand({
         envSource: {

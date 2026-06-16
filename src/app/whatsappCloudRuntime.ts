@@ -132,6 +132,26 @@ const isLoopbackAddress = (address: string | undefined): boolean =>
   address === "::1" ||
   address === "::ffff:127.0.0.1";
 
+const isLoopbackHostHeader = (hostHeader: string | string[] | undefined): boolean => {
+  const normalizedHostHeader = Array.isArray(hostHeader) ? hostHeader[0] : hostHeader;
+
+  if (!normalizedHostHeader) {
+    return false;
+  }
+
+  try {
+    const host = new URL(`http://${normalizedHostHeader}`).hostname;
+    return host === "127.0.0.1" || host === "localhost" || host === "::1";
+  } catch {
+    return false;
+  }
+};
+
+const isTrustedLocalReplayRequest = (request: IncomingMessage): boolean =>
+  request.headers["x-forwarded-for"] === undefined &&
+  (isLoopbackAddress(request.socket.remoteAddress) ||
+    isLoopbackHostHeader(request.headers.host));
+
 const isSqlitePersistenceService = (
   persistenceService: PersistenceService
 ): persistenceService is SqlitePersistenceService =>
@@ -207,7 +227,7 @@ export const createWhatsAppCloudWebhookRequestHandler = ({
     const replayRequested = request.headers[REPLAY_HEADER] === "1";
     const signatureHeader = request.headers["x-hub-signature-256"];
 
-    if (replayRequested && !isLoopbackAddress(request.socket.remoteAddress)) {
+    if (replayRequested && !isTrustedLocalReplayRequest(request)) {
       logger.warn("whatsapp_cloud_replay_rejected_non_local", {
         path
       });
@@ -218,6 +238,7 @@ export const createWhatsAppCloudWebhookRequestHandler = ({
     const unsignedLocalReplayAllowed =
       replayRequested &&
       allowUnsignedLocalReplay &&
+      !appSecret &&
       signatureHeader === undefined;
 
     if (
