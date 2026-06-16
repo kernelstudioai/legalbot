@@ -201,11 +201,27 @@ describe("docker runtime files", () => {
     expect(vpsRunbook).toContain('proxy_set_header X-Legalbot-Cloud-Replay ""');
     expect(vpsRunbook).toContain("sudo systemctl stop legalbot-whatsapp-cloud.service || true");
     expect(vpsRunbook).toContain("git checkout de9d20a");
+    expect(vpsRunbook).toContain('current_commit="$(git rev-parse --short HEAD)"');
     expect(vpsRunbook).toContain("git status --short");
     expect(vpsRunbook).toContain(
       "ExecStart=<docker> compose --profile cloud up -d --wait legalbot-whatsapp-cloud"
     );
+    expect(vpsRunbook).toContain("## M39 Evidence Checklist");
+    expect(vpsRunbook).toContain("signed replay returns `200`");
+    expect(vpsRunbook).toContain("unsigned replay returns `401`");
+    expect(vpsRunbook).toContain("## M39 Restart, Rebuild, And Recreate Decision Tree");
+    expect(vpsRunbook).toContain("active (exited)");
+    expect(vpsRunbook).toContain("a plain service restart is not enough");
+    expect(vpsRunbook).toContain("docker compose --profile cloud up -d --force-recreate legalbot-whatsapp-cloud");
+    expect(vpsRunbook).toContain(
+      "docker compose --profile cloud up -d --build --force-recreate legalbot-whatsapp-cloud"
+    );
+    expect(vpsRunbook).toContain("## M39 Rollback Drill To `de9d20a`");
+    expect(vpsRunbook).toContain("## M39 Forward Restore To The Original Commit");
+    expect(vpsRunbook).toContain("## M39 Stale-Env Recovery Drill");
+    expect(vpsRunbook).toContain("Docker container env requires recreate, not only restart.");
     expect(vpsRunbook).toContain("Stale container env");
+    expect(vpsRunbook).toContain("Container reused after code change");
     expect(vpsRunbook).toContain("Data dir ownership mismatch");
     expect(vpsRunbook).toContain("Fixture missing in image/container");
     expect(vpsRunbook).toContain("Missing Cloud env");

@@ -40,6 +40,16 @@ const createFakeBin = () => {
   };
 };
 
+const canRunBashScript = (): boolean => {
+  const probe = spawnSync("bash", ["-lc", "echo legalbot-bash-ready"], {
+    encoding: "utf8"
+  });
+
+  return probe.status === 0 && probe.stdout.includes("legalbot-bash-ready");
+};
+
+const bashScriptRuntimeAvailable = canRunBashScript();
+
 const runDryRun = (args: string[], envFileContents?: string) => {
   const projectRoot = createTempDir();
   const envFilePath = join(projectRoot, "legalbot.env");
@@ -141,51 +151,61 @@ describe("scripts/provision-systemd.sh", () => {
     expect(script).not.toMatch(/\+[1-9]\d{7,14}/);
   });
 
-  it("generates an OpenWA legacy unit without auto-start defaults", () => {
-    const { result, npmPath } = runDryRun([]);
+  it.skipIf(!bashScriptRuntimeAvailable)(
+    "generates an OpenWA legacy unit without auto-start defaults",
+    () => {
+      const { result, npmPath } = runDryRun([]);
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Transport: openwa");
-    expect(result.stdout).toContain("Service name: legalbot-openwa.service");
-    expect(result.stdout).toContain("Description=LegalBot OpenWA Smoke Runtime (legacy/dev-only)");
-    expect(result.stdout).toContain(`ExecStart=${npmPath} run smoke:openwa`);
-    expect(result.stdout).toContain("Recommended before service start: npm run ops:preflight");
-    expect(result.stdout).toContain("service would remain disabled by default");
-    expect(result.stdout).toContain("service would remain stopped by default");
-  });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("Transport: openwa");
+      expect(result.stdout).toContain("Service name: legalbot-openwa.service");
+      expect(result.stdout).toContain(
+        "Description=LegalBot OpenWA Smoke Runtime (legacy/dev-only)"
+      );
+      expect(result.stdout).toContain(`ExecStart=${npmPath} run smoke:openwa`);
+      expect(result.stdout).toContain("Recommended before service start: npm run ops:preflight");
+      expect(result.stdout).toContain("service would remain disabled by default");
+      expect(result.stdout).toContain("service would remain stopped by default");
+    }
+  );
 
-  it("generates a Cloud Compose unit and never prints env contents", () => {
-    const { dockerPath, result } = runDryRun(
-      [
-        "--transport",
-        "cloud",
-        "--service-name",
-        "legalbot-whatsapp-cloud.service"
-      ],
-      "WHATSAPP_CLOUD_ACCESS_TOKEN=super-secret-token\n"
-    );
+  it.skipIf(!bashScriptRuntimeAvailable)(
+    "generates a Cloud Compose unit and never prints env contents",
+    () => {
+      const { dockerPath, result } = runDryRun(
+        [
+          "--transport",
+          "cloud",
+          "--service-name",
+          "legalbot-whatsapp-cloud.service"
+        ],
+        "WHATSAPP_CLOUD_ACCESS_TOKEN=super-secret-token\n"
+      );
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Transport: cloud");
-    expect(result.stdout).toContain("Deployment: compose");
-    expect(result.stdout).toContain("Service name: legalbot-whatsapp-cloud.service");
-    expect(result.stdout).toContain(
-      "Description=LegalBot WhatsApp Cloud Docker Compose Runtime"
-    );
-    expect(result.stdout).not.toContain("EnvironmentFile=");
-    expect(result.stdout).toContain(
-      `ExecStart=${dockerPath} compose --profile cloud up -d --wait legalbot-whatsapp-cloud`
-    );
-    expect(result.stdout).toContain(
-      `ExecStop=${dockerPath} compose --profile cloud stop legalbot-whatsapp-cloud`
-    );
-    expect(result.stdout).not.toContain("npm run start:whatsapp-cloud");
-    expect(result.stdout).toContain("Recommended before service start: npm run ops:preflight:cloud");
-    expect(result.stdout).not.toContain("super-secret-token");
-    expect(result.stdout).not.toContain("WHATSAPP_CLOUD_ACCESS_TOKEN=");
-  });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("Transport: cloud");
+      expect(result.stdout).toContain("Deployment: compose");
+      expect(result.stdout).toContain("Service name: legalbot-whatsapp-cloud.service");
+      expect(result.stdout).toContain(
+        "Description=LegalBot WhatsApp Cloud Docker Compose Runtime"
+      );
+      expect(result.stdout).not.toContain("EnvironmentFile=");
+      expect(result.stdout).toContain(
+        `ExecStart=${dockerPath} compose --profile cloud up -d --wait legalbot-whatsapp-cloud`
+      );
+      expect(result.stdout).toContain(
+        `ExecStop=${dockerPath} compose --profile cloud stop legalbot-whatsapp-cloud`
+      );
+      expect(result.stdout).not.toContain("npm run start:whatsapp-cloud");
+      expect(result.stdout).toContain(
+        "Recommended before service start: npm run ops:preflight:cloud"
+      );
+      expect(result.stdout).not.toContain("super-secret-token");
+      expect(result.stdout).not.toContain("WHATSAPP_CLOUD_ACCESS_TOKEN=");
+    }
+  );
 
-  it("rejects direct Node systemd for Cloud", () => {
+  it.skipIf(!bashScriptRuntimeAvailable)("rejects direct Node systemd for Cloud", () => {
     const { result } = runDryRun([
       "--transport",
       "cloud",
