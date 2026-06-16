@@ -350,21 +350,14 @@ than a stale-env issue.
 
 ## nginx Boundary
 
-nginx or an equivalent TLS reverse proxy is the only public listener:
+nginx or an equivalent TLS reverse proxy is the only public listener.
 
-Public webhook URL example: `https://example.com/webhooks/whatsapp/cloud`.
+- Public webhook URL example: `https://example.com/webhooks/whatsapp/cloud`
+- Runtime target: `http://127.0.0.1:3002/webhooks/whatsapp/cloud`
+- Public traffic must not forward `X-Legalbot-Cloud-Replay`
+- `/health`, `/ready`, and `/status` must remain local-only
 
-```nginx
-location /webhooks/whatsapp/cloud {
-    proxy_pass http://127.0.0.1:3002;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto https;
-    proxy_set_header X-Legalbot-Cloud-Replay "";
-}
-```
-
-Do not expose `/health`, `/ready`, or `/status` publicly. Public DNS, TLS issuance,
-firewall changes, Meta verification, and live delivery remain operator-managed and
-outside this replay-only validation.
+Use `docs/CLOUD_NGINX_TLS_EDGE_RUNBOOK.md` and
+`docs/templates/nginx-whatsapp-cloud-edge.conf` for the M41 operator dry-run,
+protected edge-health probe, syntax validation, rollback, and go/no-go criteria before
+Meta registration.

@@ -198,7 +198,8 @@ describe("docker runtime files", () => {
     expect(vpsRunbook).toContain("sudo journalctl -u legalbot-whatsapp-cloud.service -n 120 --no-pager");
     expect(vpsRunbook).toContain("./scripts/provision-systemd.sh");
     expect(vpsRunbook).toContain("https://example.com/webhooks/whatsapp/cloud");
-    expect(vpsRunbook).toContain('proxy_set_header X-Legalbot-Cloud-Replay ""');
+    expect(vpsRunbook).toContain("docs/CLOUD_NGINX_TLS_EDGE_RUNBOOK.md");
+    expect(vpsRunbook).toContain("docs/templates/nginx-whatsapp-cloud-edge.conf");
     expect(vpsRunbook).toContain("sudo systemctl stop legalbot-whatsapp-cloud.service || true");
     expect(vpsRunbook).toContain("git checkout de9d20a");
     expect(vpsRunbook).toContain('current_commit="$(git rev-parse --short HEAD)"');
