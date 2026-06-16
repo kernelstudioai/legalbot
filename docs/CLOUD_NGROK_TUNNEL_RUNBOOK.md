@@ -5,6 +5,9 @@
 This runbook provides a temporary HTTPS validation path for the WhatsApp Cloud webhook
 runtime already bound to `127.0.0.1:3002`.
 
+For the manual Meta webhook verification and first real signed delivery evidence flow
+that builds on this tunnel, use `docs/META_WEBHOOK_NGROK_EVIDENCE_RUNBOOK.md`.
+
 - Temporary and staging-only unless the operator has a stable reserved ngrok domain.
 - The production target remains a real domain plus nginx/TLS as documented in
   `docs/CLOUD_NGINX_TLS_EDGE_RUNBOOK.md`.

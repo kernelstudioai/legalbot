@@ -222,6 +222,8 @@ The detailed VPS and systemd procedure lives in `docs/VPS_SYSTEMD_RUNBOOK.md`.
 For a temporary HTTPS validation path before real-domain nginx/TLS is ready, use
 `docs/CLOUD_NGROK_TUNNEL_RUNBOOK.md`. The ngrok path is staging-only unless a stable
 reserved domain is configured.
+For the manual Meta webhook verification and first real signed delivery evidence path,
+use `docs/META_WEBHOOK_NGROK_EVIDENCE_RUNBOOK.md`.
 
 ## Business Assumptions
 
