@@ -70,6 +70,26 @@ describe("ops post-start command", () => {
           };
         }
       },
+      cloudReplayRunner: async () => ({
+        fixture: "tests/fixtures/whatsapp-cloud/valid-text.json#messages=1",
+        target: {
+          origin: "http://127.0.0.1:3002",
+          path: "/webhooks/whatsapp/cloud"
+        },
+        signatureVerificationEnforced: true,
+        signed: {
+          mode: "signed",
+          ok: true,
+          responseStatusCode: 200,
+          replayStatus: "accepted"
+        },
+        unsigned: {
+          mode: "unsigned",
+          ok: false,
+          responseStatusCode: 401,
+          replayStatus: "rejected"
+        }
+      }),
       stdout
     });
 
@@ -327,6 +347,26 @@ describe("ops post-start command", () => {
           };
         }
       },
+      cloudReplayRunner: async () => ({
+        fixture: "tests/fixtures/whatsapp-cloud/valid-text.json#messages=1",
+        target: {
+          origin: "http://127.0.0.1:3002",
+          path: "/webhooks/whatsapp/cloud"
+        },
+        signatureVerificationEnforced: true,
+        signed: {
+          mode: "signed",
+          ok: true,
+          responseStatusCode: 200,
+          replayStatus: "accepted"
+        },
+        unsigned: {
+          mode: "unsigned",
+          ok: false,
+          responseStatusCode: 401,
+          replayStatus: "rejected"
+        }
+      }),
       stdout
     });
 
@@ -338,7 +378,10 @@ describe("ops post-start command", () => {
       diagnosis: {
         code: "app_ready"
       },
-      hostBaseUrl: "http://127.0.0.1:3002"
+      hostBaseUrl: "http://127.0.0.1:3002",
+      replay: {
+        signatureVerificationEnforced: true
+      }
     });
     expect(stdout.output).not.toContain("access-token-123");
     expect(stdout.output).not.toContain("app-secret-123");
@@ -407,7 +450,27 @@ describe("ops post-start command", () => {
             }
           }
         };
-      }
+      },
+      cloudReplayRunner: async () => ({
+        fixture: "tests/fixtures/whatsapp-cloud/valid-text.json#messages=1",
+        target: {
+          origin: "http://127.0.0.1:3002",
+          path: "/webhooks/whatsapp/cloud"
+        },
+        signatureVerificationEnforced: true,
+        signed: {
+          mode: "signed",
+          ok: true,
+          responseStatusCode: 200,
+          replayStatus: "accepted"
+        },
+        unsigned: {
+          mode: "unsigned",
+          ok: false,
+          responseStatusCode: 401,
+          replayStatus: "rejected"
+        }
+      })
     });
 
     expect(receivedTransport).toBe("cloud");
@@ -425,7 +488,61 @@ describe("ops post-start command", () => {
           running: true,
           health: "healthy"
         }
+      },
+      replay: {
+        signatureVerificationEnforced: true
       }
     });
+  });
+
+  it("fails Cloud post-start when unsigned replay is not rejected under signature enforcement", async () => {
+    const summary = await runOpsPostStartCommand({
+      envSource: {
+        WHATSAPP_TRANSPORT: "cloud",
+        WHATSAPP_CLOUD_API_VERSION: "v22.0",
+        WHATSAPP_CLOUD_PHONE_NUMBER_ID: "1234567890",
+        WHATSAPP_CLOUD_VERIFY_TOKEN: "verify-token-123",
+        WHATSAPP_CLOUD_ACCESS_TOKEN: "access-token-123",
+        WHATSAPP_CLOUD_APP_SECRET: "app-secret-123",
+        WHATSAPP_CLOUD_WEBHOOK_HOST: "0.0.0.0",
+        WHATSAPP_CLOUD_WEBHOOK_PORT: "3002"
+      },
+      httpProbeRunner: {
+        async probe() {
+          return {
+            ok: true,
+            statusCode: 200,
+            body: {
+              ready: true,
+              state: "ready",
+              signatureVerification: "enforced"
+            }
+          };
+        }
+      },
+      cloudReplayRunner: async () => ({
+        fixture: "tests/fixtures/whatsapp-cloud/valid-text.json#messages=1",
+        target: {
+          origin: "http://127.0.0.1:3002",
+          path: "/webhooks/whatsapp/cloud"
+        },
+        signatureVerificationEnforced: true,
+        signed: {
+          mode: "signed",
+          ok: true,
+          responseStatusCode: 200,
+          replayStatus: "accepted"
+        },
+        unsigned: {
+          mode: "unsigned",
+          ok: true,
+          responseStatusCode: 200,
+          replayStatus: "accepted"
+        }
+      })
+    });
+
+    expect(summary.exitCode).toBe(1);
+    expect(summary.report.diagnosis.code).toBe("unsigned_replay_not_rejected");
   });
 });

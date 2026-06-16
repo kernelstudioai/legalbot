@@ -186,7 +186,13 @@ describe("docker runtime files", () => {
     expect(vpsRunbook).toContain("npm run docker:cloud:up");
     expect(vpsRunbook).toContain("npm run docker:cloud:ps");
     expect(vpsRunbook).toContain("npm run docker:cloud:diagnose");
+    expect(vpsRunbook).toContain("docker --version");
+    expect(vpsRunbook).toContain("docker compose version");
+    expect(vpsRunbook).toContain("docker compose --profile cloud config --services");
+    expect(vpsRunbook).toContain("sudo systemctl enable legalbot-whatsapp-cloud.service");
     expect(vpsRunbook).toContain("sudo systemctl start legalbot-whatsapp-cloud.service");
+    expect(vpsRunbook).toContain("sudo systemctl restart legalbot-whatsapp-cloud.service");
+    expect(vpsRunbook).toContain("sudo systemctl stop legalbot-whatsapp-cloud.service");
     expect(vpsRunbook).toContain("127.0.0.1:3002");
     expect(vpsRunbook).toContain("tests/fixtures/whatsapp-cloud/valid-text.json");
     expect(vpsRunbook).toContain("sudo journalctl -u legalbot-whatsapp-cloud.service -n 120 --no-pager");
@@ -194,10 +200,15 @@ describe("docker runtime files", () => {
     expect(vpsRunbook).toContain("https://example.com/webhooks/whatsapp/cloud");
     expect(vpsRunbook).toContain('proxy_set_header X-Legalbot-Cloud-Replay ""');
     expect(vpsRunbook).toContain("sudo systemctl stop legalbot-whatsapp-cloud.service || true");
+    expect(vpsRunbook).toContain("git checkout de9d20a");
     expect(vpsRunbook).toContain("git status --short");
     expect(vpsRunbook).toContain(
-      "ExecStart=<docker> compose --profile cloud up -d legalbot-whatsapp-cloud"
+      "ExecStart=<docker> compose --profile cloud up -d --wait legalbot-whatsapp-cloud"
     );
+    expect(vpsRunbook).toContain("Stale container env");
+    expect(vpsRunbook).toContain("Data dir ownership mismatch");
+    expect(vpsRunbook).toContain("Fixture missing in image/container");
+    expect(vpsRunbook).toContain("Missing Cloud env");
     expect(vpsRunbook).toContain("systemd does not embed credentials");
     expect(vpsRunbook).not.toMatch(/ExecStart=.*npm run start:whatsapp-cloud/);
     expect(vpsRunbook).toContain("legalbot-whatsapp-cloud.service");

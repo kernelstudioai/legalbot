@@ -68,6 +68,10 @@ fail() {
   exit 1
 }
 
+is_absolute_path() {
+  [[ "$1" == /* || "$1" =~ ^[A-Za-z]:[\\/] ]]
+}
+
 run_cmd() {
   if [[ "$DRY_RUN" -eq 1 ]]; then
     log "DRY-RUN: $*"
@@ -172,7 +176,9 @@ parse_args() {
 }
 
 require_linux() {
-  if [[ "$(uname -s)" != "Linux" ]]; then
+  local host_uname="${LEGALBOT_HOST_UNAME:-$(uname -s)}"
+
+  if [[ "$host_uname" != "Linux" ]]; then
     fail "This systemd provisioner supports Linux hosts only."
   fi
 }
@@ -280,7 +286,7 @@ resolve_npm_path() {
     NPM_PATH="$discovered_path"
   fi
 
-  if [[ "$NPM_PATH" != /* ]]; then
+  if ! is_absolute_path "$NPM_PATH"; then
     fail "--npm-path must be an absolute path. Found: $NPM_PATH"
   fi
 
@@ -300,7 +306,7 @@ resolve_docker_path() {
     DOCKER_PATH="$(command -v docker 2>/dev/null || true)"
   fi
 
-  if [[ "$DOCKER_PATH" != /* ]]; then
+  if ! is_absolute_path "$DOCKER_PATH"; then
     fail "--docker-path must be an absolute path. Found: $DOCKER_PATH"
   fi
 
@@ -312,12 +318,12 @@ resolve_docker_path() {
     fail "Selected docker path is not executable: $DOCKER_PATH"
   fi
 
-  EXEC_START="$DOCKER_PATH compose --profile cloud up -d legalbot-whatsapp-cloud"
+  EXEC_START="$DOCKER_PATH compose --profile cloud up -d --wait legalbot-whatsapp-cloud"
   EXEC_STOP="$DOCKER_PATH compose --profile cloud stop legalbot-whatsapp-cloud"
 }
 
 validate_inputs() {
-  if [[ "$PROJECT_ROOT" != /* ]]; then
+  if ! is_absolute_path "$PROJECT_ROOT"; then
     fail "--project-root must be an absolute path."
   fi
 
@@ -325,7 +331,7 @@ validate_inputs() {
     fail "Project root does not exist: $PROJECT_ROOT"
   fi
 
-  if [[ "$MODE" != "--uninstall" && "$MODE" != "--status" && "$DEPLOYMENT" == "direct" && "$ENV_FILE_PATH" != /* ]]; then
+  if [[ "$MODE" != "--uninstall" && "$MODE" != "--status" && "$DEPLOYMENT" == "direct" ]] && ! is_absolute_path "$ENV_FILE_PATH"; then
     fail "--env-file must be an absolute path."
   fi
 
@@ -356,6 +362,7 @@ print_unit_preview() {
 [Unit]
 Description=$UNIT_DESCRIPTION
 Requires=docker.service
+Wants=network-online.target
 After=docker.service network-online.target
 
 [Service]
@@ -364,6 +371,8 @@ User=$SERVICE_USER
 WorkingDirectory=$PROJECT_ROOT
 ExecStart=$EXEC_START
 ExecStop=$EXEC_STOP
+TimeoutStartSec=180
+TimeoutStopSec=60
 RemainAfterExit=yes
 
 [Install]

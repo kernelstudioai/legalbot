@@ -71,6 +71,7 @@ const runDryRun = (args: string[], envFileContents?: string) => {
       cwd: process.cwd(),
       encoding: "utf8",
       env: {
+        LEGALBOT_HOST_UNAME: "Linux",
         ...process.env,
         PATH: `${fakeBin}:${process.env.PATH ?? ""}`
       }
@@ -119,7 +120,10 @@ describe("scripts/provision-systemd.sh", () => {
   it("keeps provisioning conservative and avoids obvious secret-leaking patterns", () => {
     expect(script).toContain("EnvironmentFile=");
     expect(script).toContain("Requires=docker.service");
+    expect(script).toContain("Wants=network-online.target");
     expect(script).toContain("RemainAfterExit=yes");
+    expect(script).toContain("TimeoutStartSec=180");
+    expect(script).toContain("TimeoutStopSec=60");
     expect(script).toContain("WorkingDirectory=");
     expect(script).toContain("ExecStart=");
     expect(script).toContain("LEGALBOT_NPM_PATH");
@@ -170,7 +174,7 @@ describe("scripts/provision-systemd.sh", () => {
     );
     expect(result.stdout).not.toContain("EnvironmentFile=");
     expect(result.stdout).toContain(
-      `ExecStart=${dockerPath} compose --profile cloud up -d legalbot-whatsapp-cloud`
+      `ExecStart=${dockerPath} compose --profile cloud up -d --wait legalbot-whatsapp-cloud`
     );
     expect(result.stdout).toContain(
       `ExecStop=${dockerPath} compose --profile cloud stop legalbot-whatsapp-cloud`

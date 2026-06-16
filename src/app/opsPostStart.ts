@@ -1,5 +1,6 @@
 import {
   DEFAULT_OPENWA_STATUS_SERVER_PORT,
+  DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PORT,
   isProductionNodeEnv,
   loadEnv,
   loadSmokeRuntimeEnv,
@@ -8,6 +9,12 @@ import {
   type SmokeRuntimeEnv,
   type WhatsAppCloudRuntimeEnv
 } from "../config/env.ts";
+import { readFileSync } from "node:fs";
+import {
+  createWhatsAppCloudSignature,
+  DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH,
+  parseWhatsAppCloudWebhookPayload
+} from "../transport/whatsapp-cloud/index.ts";
 import {
   runDockerDiagnoseCommand,
   type DockerDiagnoseReport,
@@ -27,7 +34,9 @@ type OpsPostStartCode =
   | "compose_service_missing"
   | "container_not_running"
   | "container_unhealthy"
-  | "host_port_mapping_issue";
+  | "host_port_mapping_issue"
+  | "signed_replay_failed"
+  | "unsigned_replay_not_rejected";
 
 type OpsPostStartStatus = "healthy" | "warning" | "error";
 type OpsPostStartMode = "direct" | "docker";
@@ -48,6 +57,24 @@ interface EndpointSummary {
 
 interface HttpProbeRunner {
   probe(url: string): Promise<HttpProbeResult>;
+}
+
+interface CloudReplayProbeResult {
+  mode: "signed" | "unsigned";
+  ok: boolean;
+  responseStatusCode: number | null;
+  replayStatus: "accepted" | "rejected" | "connection_failed";
+}
+
+interface CloudReplaySummary {
+  fixture: string;
+  target: {
+    origin: string;
+    path: string;
+  };
+  signatureVerificationEnforced: boolean;
+  signed: CloudReplayProbeResult | null;
+  unsigned: CloudReplayProbeResult | null;
 }
 
 export interface OpsPostStartReport {
@@ -72,9 +99,15 @@ export interface OpsPostStartReport {
       | Pick<DockerDiagnoseReport["compose"], "servicePresent" | "running" | "state" | "health">
       | null;
   };
+  replay: CloudReplaySummary | null;
 }
 
 export interface OpsPostStartCommandOptions {
+  cloudReplayRunner?: (options: {
+    envSource: NodeJS.ProcessEnv;
+    fixturePath?: string;
+    targetUrl: string;
+  }) => Promise<CloudReplaySummary>;
   dockerDiagnoseRunner?: (options?: {
     envSource?: NodeJS.ProcessEnv;
     logger?: typeof silentLogger;
@@ -117,6 +150,93 @@ const sanitizeUnknownString = (value: unknown): string | undefined => {
 
   return value;
 };
+
+const DEFAULT_CLOUD_REPLAY_FIXTURE = "../../tests/fixtures/whatsapp-cloud/valid-text.json";
+
+const createFetchHttpClient = () => ({
+  async post(
+    url: string,
+    options: {
+      body: string;
+      headers: Record<string, string>;
+    }
+  ) {
+    return fetch(url, {
+      method: "POST",
+      body: options.body,
+      headers: options.headers,
+      signal: AbortSignal.timeout(5000)
+    });
+  }
+});
+
+const resolveCloudReplayFixture = (fixturePath?: string): string =>
+  readFileSync(new URL(fixturePath ?? DEFAULT_CLOUD_REPLAY_FIXTURE, import.meta.url), "utf8");
+
+const runCloudReplayChecks = async ({
+  envSource,
+  fixturePath,
+  targetUrl
+}: {
+  envSource: NodeJS.ProcessEnv;
+  fixturePath?: string;
+  targetUrl: string;
+}): Promise<CloudReplaySummary> => {
+  const rawBody = resolveCloudReplayFixture(fixturePath);
+  const parsed = parseWhatsAppCloudWebhookPayload(JSON.parse(rawBody) as unknown);
+  const httpClient = createFetchHttpClient();
+  const target = new URL(targetUrl);
+  const signatureVerificationEnforced = hasConfiguredCloudAppSecret(envSource);
+  const runReplay = async (mode: "signed" | "unsigned"): Promise<CloudReplayProbeResult> => {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      "x-legalbot-cloud-replay": "1"
+    };
+
+    if (mode === "signed" && envSource.WHATSAPP_CLOUD_APP_SECRET) {
+      headers["x-hub-signature-256"] = createWhatsAppCloudSignature({
+        appSecret: envSource.WHATSAPP_CLOUD_APP_SECRET,
+        rawBody
+      });
+    }
+
+    try {
+      const response = await httpClient.post(target.href, {
+        body: rawBody,
+        headers
+      });
+
+      return {
+        mode,
+        ok: response.ok,
+        responseStatusCode: response.status,
+        replayStatus: response.ok ? "accepted" : "rejected"
+      };
+    } catch {
+      return {
+        mode,
+        ok: false,
+        responseStatusCode: null,
+        replayStatus: "connection_failed"
+      };
+    }
+  };
+
+  return {
+    fixture: `tests/fixtures/whatsapp-cloud/valid-text.json#messages=${parsed.messages.length}`,
+    target: {
+      origin: target.origin,
+      path: target.pathname
+    },
+    signatureVerificationEnforced,
+    signed: signatureVerificationEnforced ? await runReplay("signed") : null,
+    unsigned: signatureVerificationEnforced ? await runReplay("unsigned") : null
+  };
+};
+
+const hasConfiguredCloudAppSecret = (envSource: NodeJS.ProcessEnv): boolean =>
+  typeof envSource.WHATSAPP_CLOUD_APP_SECRET === "string" &&
+  envSource.WHATSAPP_CLOUD_APP_SECRET.trim().length > 0;
 
 const sanitizeTransportBody = (
   transport: Record<string, unknown>
@@ -313,17 +433,37 @@ const detectOpenWaDiagnosis = ({
 };
 
 const detectCloudDiagnosis = ({
-  ready
+  ready,
+  replay
 }: {
   health: EndpointSummary;
   ready: EndpointSummary;
   status: EndpointSummary;
+  replay: CloudReplaySummary | null;
 }): {
   code: OpsPostStartCode;
   status: OpsPostStartStatus;
   summary: string;
 } => {
   if (isReady(ready)) {
+    if (replay?.signatureVerificationEnforced && replay.signed?.responseStatusCode !== 200) {
+      return {
+        code: "signed_replay_failed",
+        status: "error",
+        summary:
+          "The Cloud webhook surface is reachable, but signed local replay did not return HTTP 200."
+      };
+    }
+
+    if (replay?.signatureVerificationEnforced && replay.unsigned?.responseStatusCode !== 401) {
+      return {
+        code: "unsigned_replay_not_rejected",
+        status: "error",
+        summary:
+          "The Cloud webhook surface is reachable, but unsigned local replay was not rejected with HTTP 401."
+      };
+    }
+
     return {
       code: "app_ready",
       status: "healthy",
@@ -341,7 +481,8 @@ const detectCloudDiagnosis = ({
 
 const mapDockerDiagnoseReport = (
   report: DockerDiagnoseReport,
-  transport: RuntimeTransport
+  transport: RuntimeTransport,
+  replay: CloudReplaySummary | null = null
 ): OpsPostStartReport => ({
   status: report.status === "healthy" ? "healthy" : report.status === "warning" ? "warning" : "error",
   mode: "docker",
@@ -367,12 +508,14 @@ const mapDockerDiagnoseReport = (
       state: report.compose.state,
       health: report.compose.health
     }
-  }
+  },
+  replay
 });
 
 const loadBaseEnv = (envSource: NodeJS.ProcessEnv): AppEnv => loadEnv(envSource);
 
 export const runOpsPostStartCommand = async ({
+  cloudReplayRunner = runCloudReplayChecks,
   dockerDiagnoseRunner = runDockerDiagnoseCommand,
   envSource = process.env,
   httpProbeRunner = createFetchHttpProbeRunner(),
@@ -438,7 +581,8 @@ export const runOpsPostStartCommand = async ({
       docker: {
         reusedDockerDiagnose: false,
         compose: null
-      }
+      },
+      replay: null
     };
 
     toJsonStdout(report, stdout);
@@ -462,10 +606,38 @@ export const runOpsPostStartCommand = async ({
       },
       transportOverride: "cloud"
     });
+    const replay = await cloudReplayRunner({
+      envSource: effectiveEnvSource,
+      targetUrl: `http://127.0.0.1:${
+        env.WHATSAPP_CLOUD_WEBHOOK_PORT ?? Number(DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PORT)
+      }${DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH}`
+    });
     const report = mapDockerDiagnoseReport(
       dockerSummary.report as DockerDiagnoseReport,
-      "cloud"
+      "cloud",
+      replay
     );
+    if (report.diagnosis.code === "app_ready") {
+      const diagnosis = detectCloudDiagnosis({
+        health: report.host.health,
+        ready: report.host.ready,
+        status: report.host.status,
+        replay
+      });
+      report.diagnosis = {
+        code: diagnosis.code,
+        summary: diagnosis.summary
+      };
+      report.status = diagnosis.status;
+    }
+    if (isProductionNodeEnv(effectiveEnvSource) && !env.WHATSAPP_CLOUD_APP_SECRET) {
+      report.status = "error";
+      report.diagnosis = {
+        code: "host_port_mapping_issue",
+        summary:
+          "The Cloud runtime requires WHATSAPP_CLOUD_APP_SECRET in production before local readiness can be trusted."
+      };
+    }
     toJsonStdout(report, stdout);
 
     return {
@@ -485,7 +657,14 @@ export const runOpsPostStartCommand = async ({
     ready: toEndpointSummary(readyProbe, `${hostBaseUrl}/ready`),
     status: toEndpointSummary(statusProbe, `${hostBaseUrl}/status`)
   };
-  const diagnosis = detectCloudDiagnosis(host);
+  const replay = await cloudReplayRunner({
+    envSource: effectiveEnvSource,
+    targetUrl: `${hostBaseUrl}${DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH}`
+  });
+  const diagnosis = detectCloudDiagnosis({
+    ...host,
+    replay
+  });
   const report: OpsPostStartReport = {
     status: diagnosis.status,
     mode: "direct",
@@ -501,7 +680,8 @@ export const runOpsPostStartCommand = async ({
     docker: {
       reusedDockerDiagnose: false,
       compose: null
-    }
+    },
+    replay
   };
 
   if (isProductionNodeEnv(effectiveEnvSource) && !env.WHATSAPP_CLOUD_APP_SECRET) {

@@ -96,7 +96,7 @@ Dry-run:
   --project-root "$PWD"
 ```
 
-Install, validate, and remove:
+Install:
 
 ```bash
 sudo ./scripts/provision-systemd.sh \
@@ -106,12 +106,102 @@ sudo ./scripts/provision-systemd.sh \
   --project-root "$PWD" \
   --user "$USER" \
   --docker-path "$(command -v docker)"
+sudo systemctl enable legalbot-whatsapp-cloud.service
+```
+
+Preflight before any start or restart:
+
+```bash
+cd ~/legalbot
+docker --version
+docker compose version
+docker compose --profile cloud config --services
+npm run ops:preflight:cloud
+```
+
+Start and validate:
+
+```bash
 sudo systemctl start legalbot-whatsapp-cloud.service
 sudo systemctl status legalbot-whatsapp-cloud.service --no-pager || true
 OPS_POST_START_MODE=docker npm run ops:post-start:cloud
 npm run docker:cloud:diagnose
-sudo journalctl -u legalbot-whatsapp-cloud.service -n 120 --no-pager
+```
+
+The generated unit uses:
+
+- `WorkingDirectory` set to the existing project root.
+- `ExecStart=<docker> compose --profile cloud up -d --wait legalbot-whatsapp-cloud`.
+- `ExecStop=<docker> compose --profile cloud stop legalbot-whatsapp-cloud`.
+- `Type=oneshot` with `RemainAfterExit=yes`.
+- no `EnvironmentFile`, token, secret, or npm command.
+
+## Operator Commands
+
+Service lifecycle:
+
+```bash
+sudo systemctl start legalbot-whatsapp-cloud.service
 sudo systemctl stop legalbot-whatsapp-cloud.service
+sudo systemctl restart legalbot-whatsapp-cloud.service
+sudo systemctl status legalbot-whatsapp-cloud.service --no-pager
+./scripts/provision-systemd.sh \
+  --status \
+  --transport cloud \
+  --deployment compose \
+  --project-root "$PWD" \
+  --docker-path "$(command -v docker)"
+```
+
+Safe logs:
+
+```bash
+sudo journalctl -u legalbot-whatsapp-cloud.service -n 120 --no-pager
+docker compose --profile cloud logs --tail=100 legalbot-whatsapp-cloud
+```
+
+Rebuild and redeploy:
+
+```bash
+cd ~/legalbot
+git fetch --all --tags
+git pull --ff-only
+npm run docker:cloud:build
+npm run ops:preflight:cloud
+sudo systemctl restart legalbot-whatsapp-cloud.service
+OPS_POST_START_MODE=docker npm run ops:post-start:cloud
+```
+
+Rollback to the previous git commit:
+
+```bash
+cd ~/legalbot
+git log --oneline -n 5
+sudo systemctl stop legalbot-whatsapp-cloud.service
+git checkout de9d20a
+npm run docker:cloud:build
+sudo systemctl start legalbot-whatsapp-cloud.service
+OPS_POST_START_MODE=docker npm run ops:post-start:cloud
+```
+
+Rerun the M37 replay harness:
+
+```bash
+cd ~/legalbot
+npm run webhook:replay:cloud -- \
+  --signed \
+  --fixture tests/fixtures/whatsapp-cloud/valid-text.json \
+  --target http://127.0.0.1:3002/webhooks/whatsapp/cloud
+npm run webhook:replay:cloud -- \
+  --fixture tests/fixtures/whatsapp-cloud/valid-text.json \
+  --target http://127.0.0.1:3002/webhooks/whatsapp/cloud
+OPS_POST_START_MODE=docker npm run ops:post-start:cloud
+```
+
+Remove the unit cleanly:
+
+```bash
+sudo systemctl stop legalbot-whatsapp-cloud.service || true
 sudo ./scripts/provision-systemd.sh \
   --uninstall \
   --transport cloud \
@@ -119,22 +209,15 @@ sudo ./scripts/provision-systemd.sh \
   --project-root "$PWD" \
   --user "$USER" \
   --docker-path "$(command -v docker)"
-./scripts/provision-systemd.sh \
-  --status \
-  --transport cloud \
-  --deployment compose \
-  --project-root "$PWD" \
-  --docker-path "$(command -v docker)"
 git status --short
 ```
 
-The generated unit uses:
+## Common Failures
 
-- `WorkingDirectory` set to the existing project root.
-- `ExecStart=<docker> compose --profile cloud up -d legalbot-whatsapp-cloud`.
-- `ExecStop=<docker> compose --profile cloud stop legalbot-whatsapp-cloud`.
-- `Type=oneshot` with `RemainAfterExit=yes`.
-- no `EnvironmentFile`, token, secret, or npm command.
+- Stale container env: `docker compose --profile cloud up -d` can keep an older container if the image was not rebuilt after env or code changes. Rebuild with `npm run docker:cloud:build` and then `sudo systemctl restart legalbot-whatsapp-cloud.service`.
+- Data dir ownership mismatch: if `ops:preflight:cloud` reports non-writable runtime directories, fix host ownership or permissions on `data/`, `backups/`, and `logs/` before restarting.
+- Fixture missing in image/container: if replay validation fails after a successful health check, confirm `tests/fixtures/whatsapp-cloud/valid-text.json` exists in the checkout used for the operator commands and rerun `npm test`.
+- Missing Cloud env: if `ops:preflight:cloud` reports `cloud_api_version_missing`, `cloud_phone_number_id_missing`, `cloud_verify_token_missing`, `cloud_access_token_missing`, or `cloud_app_secret_required_in_production`, fix the env file out of band and rerun preflight. Do not print the env file to diagnose it.
 
 ## nginx Boundary
 

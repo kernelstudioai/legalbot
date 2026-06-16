@@ -45,7 +45,13 @@ export const hasGitIgnoreDirectoryEntry = ({
 }): boolean => {
   const gitignorePath = path.join(cwd, ".gitignore");
   const normalizedDirectory = directory.replaceAll("\\", "/").replace(/\/+$/, "");
-  const gitignore = readFileSync(gitignorePath, "utf8");
+  let gitignore = "";
+
+  try {
+    gitignore = readFileSync(gitignorePath, "utf8");
+  } catch {
+    return false;
+  }
 
   return gitignore
     .split(/\r?\n/)

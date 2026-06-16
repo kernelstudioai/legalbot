@@ -1,4 +1,7 @@
 import { ZodError } from "zod";
+import { accessSync, constants, existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   isProductionNodeEnv,
   loadEnv,
@@ -28,6 +31,9 @@ type PreflightStatus = "ready" | "blocking_failure";
 interface OpsPreflightDirectoryCheck {
   ignored: boolean;
   path: string;
+  exists: boolean;
+  creatable: boolean;
+  writable: boolean;
 }
 
 interface OpsPreflightReport {
@@ -81,6 +87,18 @@ interface OpsPreflightReport {
       "status" | "migration_status" | "case_consistency" | "remediation"
     > | null;
   };
+  docker: {
+    required: boolean;
+    dockerAvailable: boolean;
+    composeAvailable: boolean;
+    cloudServiceConfigured: boolean;
+  };
+  runtimeDirectories: {
+    runtimeUid: number | null;
+    runtimeGid: number | null;
+    requiredDirectories: OpsPreflightDirectoryCheck[];
+    ok: boolean;
+  };
   repoHygiene: {
     requiredIgnoredDirectories: OpsPreflightDirectoryCheck[];
     ok: boolean;
@@ -90,6 +108,13 @@ interface OpsPreflightReport {
 
 export interface OpsPreflightCommandOptions {
   cwd?: string;
+  dockerRunner?: {
+    run(args: string[]): {
+      exitCode: number;
+      stdout: string;
+      stderr: string;
+    };
+  };
   envSource?: NodeJS.ProcessEnv;
   nodeVersion?: string;
   repoRoot?: string;
@@ -119,6 +144,22 @@ const CLOUD_REQUIRED_ENV = [
   "WHATSAPP_CLOUD_VERIFY_TOKEN",
   "WHATSAPP_CLOUD_ACCESS_TOKEN"
 ];
+
+const WRITABLE_RUNTIME_DIRECTORIES = ["data", "backups", "logs"] as const;
+
+const createProcessDockerRunner = () => ({
+  run(args: string[]) {
+    const result = spawnSync("docker", args, {
+      encoding: "utf8"
+    });
+
+    return {
+      exitCode: result.status ?? 1,
+      stdout: result.stdout ?? "",
+      stderr: result.stderr ?? ""
+    };
+  }
+});
 
 const toZodMessage = (error: ZodError): string =>
   error.issues.map((issue) => issue.message).join("; ");
@@ -153,6 +194,74 @@ const toCaseDoctorReport = (
 const hasConfiguredValue = (value: string | undefined): boolean =>
   typeof value === "string" && value.trim().length > 0;
 
+const sanitizeProcessError = (value: string): string => {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return "command_unavailable";
+  }
+
+  return trimmed
+    .replace(/[A-Za-z]:\\[^\s"]+/g, "redacted_path")
+    .replace(/\/(?:Users|home|tmp|var|opt|etc|appdata|openwa-session)[^\s"]*/gi, "redacted_path")
+    .replace(/\+[1-9]\d{7,14}/g, "redacted_phone")
+    .replace(/(token|secret|body|session|cookie|browser|profile|auth)/gi, "redacted_sensitive");
+};
+
+const isWritablePath = (targetPath: string): boolean => {
+  try {
+    accessSync(targetPath, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const getDirectoryCheck = ({
+  repoRoot,
+  directory
+}: {
+  repoRoot: string;
+  directory: string;
+}): OpsPreflightDirectoryCheck => {
+  const absolutePath = path.join(repoRoot, directory);
+  const exists = existsSync(absolutePath);
+  const creatable = exists
+    ? true
+    : isWritablePath(path.dirname(absolutePath));
+  const writable = exists ? isWritablePath(absolutePath) : creatable;
+
+  return {
+    path: `${directory}/`,
+    ignored: hasGitIgnoreDirectoryEntry({
+      cwd: repoRoot,
+      directory
+    }),
+    exists,
+    creatable,
+    writable
+  };
+};
+
+const getRuntimeIdentity = (): {
+  runtimeUid: number | null;
+  runtimeGid: number | null;
+} => ({
+  runtimeUid: typeof process.getuid === "function" ? process.getuid() : null,
+  runtimeGid: typeof process.getgid === "function" ? process.getgid() : null
+});
+
+const hasCloudComposeService = (repoRoot: string): boolean => {
+  const composePath = path.join(repoRoot, "compose.yaml");
+
+  try {
+    const compose = readFileSync(composePath, "utf8");
+    return compose.includes("  legalbot-whatsapp-cloud:");
+  } catch {
+    return false;
+  }
+};
+
 const inferTransport = (
   envSource: NodeJS.ProcessEnv,
   transportOverride?: RuntimeTransport
@@ -183,6 +292,7 @@ const loadBaseEnv = (
 
 export const runOpsPreflightCommand = ({
   cwd = process.cwd(),
+  dockerRunner = createProcessDockerRunner(),
   envSource = process.env,
   nodeVersion = process.version,
   repoRoot = cwd,
@@ -228,6 +338,9 @@ export const runOpsPreflightCommand = ({
   let cloudSignatureVerificationEnforced = false;
   let webhookHostConfigured = false;
   let webhookPort: number | null = null;
+  let dockerAvailable = false;
+  let composeAvailable = false;
+  let cloudServiceConfigured = false;
 
   if (transport === "openwa") {
     try {
@@ -293,6 +406,31 @@ export const runOpsPreflightCommand = ({
         blockers.push("runtime_env_invalid");
       }
     }
+
+    const dockerVersion = dockerRunner.run(["--version"]);
+    dockerAvailable = dockerVersion.exitCode === 0;
+    if (!dockerAvailable) {
+      blockers.push(
+        `docker_unavailable:${sanitizeProcessError(dockerVersion.stderr || dockerVersion.stdout)}`
+      );
+    }
+
+    if (dockerAvailable) {
+      const composeVersion = dockerRunner.run(["compose", "version"]);
+      composeAvailable = composeVersion.exitCode === 0;
+      if (!composeAvailable) {
+        blockers.push(
+          `docker_compose_unavailable:${sanitizeProcessError(
+            composeVersion.stderr || composeVersion.stdout
+          )}`
+        );
+      }
+    }
+
+    cloudServiceConfigured = hasCloudComposeService(repoRoot);
+    if (!cloudServiceConfigured) {
+      blockers.push("compose_service_missing");
+    }
   }
 
   const migrationStatus =
@@ -346,16 +484,28 @@ export const runOpsPreflightCommand = ({
     blockers.push("case_doctor_failed");
   }
 
-  const requiredIgnoredDirectories = REQUIRED_IGNORED_DIRECTORIES.map((directory) => ({
-    path: `${directory}/`,
-    ignored: hasGitIgnoreDirectoryEntry({
-      cwd: repoRoot,
+  const requiredIgnoredDirectories = REQUIRED_IGNORED_DIRECTORIES.map((directory) =>
+    getDirectoryCheck({
+      repoRoot,
       directory
     })
-  }));
+  );
+  const writableRuntimeDirectories = WRITABLE_RUNTIME_DIRECTORIES.map((directory) =>
+    getDirectoryCheck({
+      repoRoot,
+      directory
+    })
+  );
+  const runtimeIdentity = getRuntimeIdentity();
 
   if (requiredIgnoredDirectories.some((entry) => !entry.ignored)) {
     blockers.push("required_runtime_directories_not_gitignored");
+  }
+  if (writableRuntimeDirectories.some((entry) => !entry.creatable)) {
+    blockers.push("required_runtime_directories_not_creatable");
+  }
+  if (writableRuntimeDirectories.some((entry) => !entry.writable)) {
+    blockers.push("required_runtime_directories_not_writable");
   }
 
   const report: OpsPreflightReport = {
@@ -396,6 +546,17 @@ export const runOpsPreflightCommand = ({
     caseDoctor: {
       healthy: caseDoctorSummary.exitCode === 0,
       report: toCaseDoctorReport(caseDoctorSummary.report)
+    },
+    docker: {
+      required: transport === "cloud",
+      dockerAvailable,
+      composeAvailable,
+      cloudServiceConfigured
+    },
+    runtimeDirectories: {
+      ...runtimeIdentity,
+      requiredDirectories: writableRuntimeDirectories,
+      ok: writableRuntimeDirectories.every((entry) => entry.creatable && entry.writable)
     },
     repoHygiene: {
       requiredIgnoredDirectories,

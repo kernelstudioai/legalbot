@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -155,6 +155,23 @@ describe("ops preflight command", () => {
 
     const summary = runOpsPreflightCommand({
       cwd: tempDir,
+      dockerRunner: {
+        run(args: string[]) {
+          if (args.join(" ") === "--version") {
+            return {
+              exitCode: 0,
+              stdout: "Docker version 27.0.0\n",
+              stderr: ""
+            };
+          }
+
+          return {
+            exitCode: 0,
+            stdout: "Docker Compose version v2.29.0\n",
+            stderr: ""
+          };
+        }
+      },
       envSource: {
         NODE_ENV: "production",
         WHATSAPP_TRANSPORT: "cloud",
@@ -201,6 +218,15 @@ describe("ops preflight command", () => {
         webhookHostConfigured: true,
         webhookPort: 3002
       },
+      docker: {
+        required: true,
+        dockerAvailable: true,
+        composeAvailable: true,
+        cloudServiceConfigured: true
+      },
+      runtimeDirectories: {
+        ok: true
+      },
       blockers: []
     });
     expect(stdout.output).not.toContain("verify-token-123");
@@ -222,6 +248,15 @@ describe("ops preflight command", () => {
 
     const summary = runOpsPreflightCommand({
       cwd: tempDir,
+      dockerRunner: {
+        run() {
+          return {
+            exitCode: 0,
+            stdout: "Docker Compose version v2.29.0\n",
+            stderr: ""
+          };
+        }
+      },
       envSource: {
         NODE_ENV: "production",
         WHATSAPP_TRANSPORT: "cloud",
@@ -244,6 +279,63 @@ describe("ops preflight command", () => {
     expect(summary.report.runtimeEnv.cloudAppSecretConfigured).toBe(false);
     expect(stdout.output).not.toContain("verify-token-123");
     expect(stdout.output).not.toContain("access-token-123");
+    expect(stdout.output).not.toContain("1234567890");
+  });
+
+  it("fails Cloud preflight when Docker Compose is unavailable or runtime directories are not writable", () => {
+    const tempDir = createTempDir();
+    const stdout = createStdout();
+    const missingRepoRoot = path.join(tempDir, "missing-repo", "nested");
+    writeFileSync(path.join(tempDir, ".gitignore"), "data/\nbackups/\nlogs/\ntmp/\nopenwa-session/\n");
+
+    const summary = runOpsPreflightCommand({
+      cwd: tempDir,
+      dockerRunner: {
+        run(args: string[]) {
+          if (args.join(" ") === "--version") {
+            return {
+              exitCode: 0,
+              stdout: "Docker version 27.0.0\n",
+              stderr: ""
+            };
+          }
+
+          return {
+            exitCode: 1,
+            stdout: "",
+            stderr: "compose plugin unavailable in /opt/legalbot/private/path"
+          };
+        }
+      },
+      envSource: {
+        NODE_ENV: "production",
+        WHATSAPP_TRANSPORT: "cloud",
+        DATABASE_URL: "file:./tmp/legalbot-cloud.sqlite",
+        DATABASE_MIGRATIONS_ENABLED: "true",
+        BUSINESS_PERSISTENCE_ENABLED: "true",
+        WHATSAPP_CLOUD_API_VERSION: "v22.0",
+        WHATSAPP_CLOUD_PHONE_NUMBER_ID: "1234567890",
+        WHATSAPP_CLOUD_VERIFY_TOKEN: "verify-token-123",
+        WHATSAPP_CLOUD_ACCESS_TOKEN: "access-token-123",
+        WHATSAPP_CLOUD_APP_SECRET: "app-secret-123"
+      },
+      nodeVersion: "v22.3.0",
+      repoRoot: missingRepoRoot,
+      stdout
+    });
+
+    expect(summary.exitCode).toBe(1);
+    expect(summary.report.blockers).toContain(
+      "docker_compose_unavailable:compose plugin unavailable in redacted_path"
+    );
+    expect(summary.report.blockers).toContain("compose_service_missing");
+    expect(summary.report.blockers).toContain("required_runtime_directories_not_gitignored");
+    expect(summary.report.blockers).toContain("required_runtime_directories_not_creatable");
+    expect(summary.report.blockers).toContain("required_runtime_directories_not_writable");
+    expect(summary.report.runtimeDirectories.ok).toBe(false);
+    expect(stdout.output).not.toContain("verify-token-123");
+    expect(stdout.output).not.toContain("access-token-123");
+    expect(stdout.output).not.toContain("app-secret-123");
   });
 
   it("fails when business persistence is disabled", () => {
