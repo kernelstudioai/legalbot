@@ -17,9 +17,15 @@ runtime already bound to `127.0.0.1:3002`.
 
 - The ngrok URL is public while the tunnel is running.
 - ngrok forwards public traffic directly to the runtime.
+- The public ngrok path is not the local replay harness.
+- Local replay stays loopback-only, can use the replay header, and stops before pipeline
+  dispatch or outbound Cloud API calls.
+- Public ngrok requests hit the real webhook route, run normal signature enforcement,
+  and may continue into normal dispatch.
 - Unlike the nginx edge, ngrok does not strip `X-Legalbot-Cloud-Replay`.
 - Do not use `X-Legalbot-Cloud-Replay` against the public ngrok URL.
-- Use the replay header only for loopback-only validation paths documented elsewhere.
+- The replay header is local-only because it bypasses the normal public delivery path
+  and would be unsafe evidence if sent through a public tunnel.
 
 ## Prerequisites
 
@@ -71,13 +77,21 @@ https://<ngrok-host>/webhooks/whatsapp/cloud
 
 ## Public ngrok Validation
 
+Keep the two validation paths separate:
+
+- local replay harness: loopback-only, optional signed replay, expected signed `200`,
+  and no outbound Meta call
+- public ngrok path: real public webhook route, expected `401` for missing or invalid
+  signatures, and fake signed fixtures may continue into normal dispatch
+
 The public validation path must exercise the real webhook route:
 
 - target path: `/webhooks/whatsapp/cloud`
 - runtime target: `127.0.0.1:3002`
 - expected missing-signature result: `401`
 - expected invalid-signature result: `401`
-- expected valid-signature result: `200`
+- expected fake valid-signature result: accepted signature, with runtime evidence or a
+  sanitized `500`
 
 Missing signature. Expect `401`:
 
@@ -112,7 +126,35 @@ curl --silent --show-error --output /dev/null --write-out "%{http_code}\n" \
 unset signature
 ```
 
-Expected valid-signature result: `200`.
+Expected fake valid-signature outcome:
+
+- the signature is accepted if the runtime logs show sanitized
+  `whatsapp_cloud_message_received` followed by sanitized
+  `whatsapp_cloud_request_failed`
+- the HTTP response may be `500` because the fake fixture can reach normal outbound
+  Cloud API dispatch and fail with a sanitized upstream `401`
+- do not require `200` for a fake public fixture over ngrok
+
+This is expected because the public ngrok path does not use the local replay bypass.
+With a valid signature, the fake fixture is treated as a real inbound webhook event and
+can reach normal outbound dispatch with fake identifiers or credentials.
+
+Inspect sanitized container evidence after the valid signed request:
+
+```bash
+docker compose --profile cloud logs --tail=120 legalbot-whatsapp-cloud | \
+  grep -E "whatsapp_cloud_message_received|whatsapp_cloud_request_failed|401|500"
+```
+
+Expected evidence is limited to sanitized runtime markers. Do not store raw payloads,
+tokens, secrets, or full phone numbers.
+
+Public `200` success should be validated by:
+
+- the Meta verification `GET` challenge against the public callback URL
+- later real Meta-signed webhook deliveries
+
+Do not use the fake public message fixture as proof of end-to-end `200`.
 
 ## Replay-Header Warning
 
@@ -120,6 +162,8 @@ Expected valid-signature result: `200`.
 - Do not reuse loopback replay commands against `${M41B_NGROK_URL}`.
 - ngrok forwards public traffic directly to the runtime, unlike nginx which strips the
   replay header at the edge.
+- The replay header is reserved for loopback-only validation because it bypasses normal
+  public webhook handling and would make the public tunnel evidence unsafe.
 - If public validation must be repeated, use the missing, invalid, and valid signature
   commands in this runbook only.
 
@@ -181,7 +225,10 @@ Go only if all items below are true:
 - the public callback path is exactly `/webhooks/whatsapp/cloud`
 - missing signatures return `401`
 - invalid signatures return `401`
-- valid signatures return `200`
+- the fake valid signed fixture reaches the runtime and produces sanitized accepted
+  evidence, including `whatsapp_cloud_message_received` followed by sanitized dispatch
+  failure, or the HTTP response is a sanitized `500` caused by outbound Cloud API
+  failure
 - no public validation uses `X-Legalbot-Cloud-Replay`
 - logs and evidence stay sanitized
 - the operator understands this remains temporary and staging-only
@@ -194,7 +241,9 @@ No-go if any item below is observed:
 - replay-header bypass is attempted on the public ngrok URL
 - raw webhook bodies, secrets, tokens, raw DB rows, or full phone numbers appear in
   logs or evidence
+- the valid signed fake fixture does not reach sanitized runtime handling
 - the operator starts treating the temporary ngrok URL as final production ingress
+- the runtime is unreachable through the tunnel
 
 ## Evidence Checklist
 
@@ -207,7 +256,7 @@ Record sanitized evidence only:
 - ngrok HTTPS hostname used for the dry-run
 - missing-signature public result `401`
 - invalid-signature public result `401`
-- valid-signature public result `200`
+- valid-signature public result and sanitized log outcome
 - confirmation that `X-Legalbot-Cloud-Replay` was not used publicly
 - confirmation that logs remained sanitized
 - confirmation that ngrok was stopped and the host returned to local-only state
