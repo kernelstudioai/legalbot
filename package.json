@@ -27,6 +27,7 @@
     "ops:post-start:cloud": "node --experimental-strip-types src/app/opsPostStart.ts --transport cloud",
     "ops:preflight": "node --experimental-strip-types src/app/opsPreflight.ts",
     "ops:preflight:cloud": "node --experimental-strip-types src/app/opsPreflight.ts --transport cloud",
+    "ops:evidence:cloud": "node --experimental-strip-types src/app/cloudOpsEvidencePack.ts",
     "docker:status": "docker compose ps",
     "docker:up": "docker compose up -d",
     "intake:list-ready": "node --experimental-strip-types src/app/intakeListReady.ts",

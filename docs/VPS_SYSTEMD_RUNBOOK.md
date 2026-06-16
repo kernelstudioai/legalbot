@@ -10,6 +10,10 @@ OpenWA remains available as a legacy/development-only service. No multi-bot runt
 attachments, PDFs, automatic case creation, automatic lawyer WhatsApp notifications,
 dashboard, or LLM integration is enabled.
 
+For M40 rollout evidence collection, use `docs/CLOUD_OPS_EVIDENCE_PACK.md` as the
+authoritative evidence template, command list, sanitization rule set, and go/no-go
+criteria.
+
 ## Host Boundary
 
 - Install Docker Engine with the Compose plugin.
