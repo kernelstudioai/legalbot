@@ -219,6 +219,9 @@ and `logs`. It does not mount OpenWA sessions or browser profiles. Operators mus
 never paste or log `.env`.
 
 The detailed VPS and systemd procedure lives in `docs/VPS_SYSTEMD_RUNBOOK.md`.
+For a temporary HTTPS validation path before real-domain nginx/TLS is ready, use
+`docs/CLOUD_NGROK_TUNNEL_RUNBOOK.md`. The ngrok path is staging-only unless a stable
+reserved domain is configured.
 
 ## Business Assumptions
 

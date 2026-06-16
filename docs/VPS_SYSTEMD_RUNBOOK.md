@@ -14,6 +14,10 @@ For M40 rollout evidence collection, use `docs/CLOUD_OPS_EVIDENCE_PACK.md` as th
 authoritative evidence template, command list, sanitization rule set, and go/no-go
 criteria.
 
+For the temporary M41b HTTPS tunnel dry-run before a real domain and certificate exist,
+use `docs/CLOUD_NGROK_TUNNEL_RUNBOOK.md`. Treat ngrok as staging-only unless the
+operator has a stable reserved domain.
+
 ## Host Boundary
 
 - Install Docker Engine with the Compose plugin.
@@ -361,3 +365,7 @@ Use `docs/CLOUD_NGINX_TLS_EDGE_RUNBOOK.md` and
 `docs/templates/nginx-whatsapp-cloud-edge.conf` for the M41 operator dry-run,
 protected edge-health probe, syntax validation, rollback, and go/no-go criteria before
 Meta registration.
+
+If a real domain and certificate are not available yet, use the temporary
+`docs/CLOUD_NGROK_TUNNEL_RUNBOOK.md` procedure for M41b public HTTPS validation instead
+of exposing the runtime directly.
