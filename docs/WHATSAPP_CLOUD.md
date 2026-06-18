@@ -36,6 +36,7 @@ OpenWA remains in the repo temporarily only as a legacy and development-only tra
 
 Required only when `WHATSAPP_TRANSPORT=cloud`:
 
+- `LAWYER_PHONE_E164`
 - `WHATSAPP_CLOUD_API_VERSION`
 - `WHATSAPP_CLOUD_PHONE_NUMBER_ID`
 - `WHATSAPP_CLOUD_VERIFY_TOKEN`
@@ -62,6 +63,7 @@ only. Never use them in production:
 
 ```dotenv
 WHATSAPP_TRANSPORT=cloud
+LAWYER_PHONE_E164=+<operator-e164-phone>
 WHATSAPP_CLOUD_API_VERSION=v21.0
 WHATSAPP_CLOUD_PHONE_NUMBER_ID=000000000000000
 WHATSAPP_CLOUD_VERIFY_TOKEN=local-dev-verify-token
@@ -103,12 +105,89 @@ Inbound flow:
 2. `GET /webhooks/whatsapp/cloud` performs the verification challenge.
 3. `POST /webhooks/whatsapp/cloud` accepts the Cloud webhook payload.
 4. Only inbound text messages are normalized into the shared pipeline input shape.
-5. Unsupported message types are ignored safely.
-6. The shared consent, intake, routing, and output-plan pipeline handles business logic.
-7. Outbound text replies are sent through the Cloud sender abstraction.
+5. The sender `wa_id` is compared to `LAWYER_PHONE_E164` after both are normalized
+   to digits-only comparable phone values.
+6. Unsupported message types are ignored safely.
+7. The shared consent, intake, routing, and output-plan pipeline handles business logic.
+8. Outbound text replies are sent through the Cloud sender abstraction.
 
 When configured, `WHATSAPP_CLOUD_APP_SECRET` is used to validate `X-Hub-Signature-256` before payload processing.
 In production, that app-secret signature verification is mandatory.
+
+## Cloud Product Slice
+
+Actor recognition:
+
+- `LAWYER_PHONE_E164` is the supported operator phone env name.
+- A configured operator is recognized only when the Cloud sender `wa_id` matches the
+  normalized E.164 value.
+- Message wording alone never routes a sender to the operator branch.
+- Runtime logs use sanitized events such as `cloud_actor_resolved`,
+  `cloud_operator_command_received`, `cloud_operator_command_handled`,
+  `cloud_operator_command_rejected`, and `cloud_client_turn_received`.
+
+Client flow over Cloud:
+
+1. First client text asks for explicit privacy consent.
+2. `Acconsento` starts the minimal intake.
+3. The client provides name, surname, birth date, and city in one message.
+4. The client provides a short problem summary.
+5. The bot stores only approved structured fields and replies with the intake completion
+   acknowledgement. It does not create a case automatically.
+
+Supported Cloud operator commands from the configured operator number:
+
+- `help` / `aiuto`
+- `status` / `stato`
+- `ping`
+- `intake-ready` / `intake pronti` / `intake completati`
+
+`status` returns only sanitized runtime readiness, persistence enabled state, and
+migration counts when available. `intake-ready` returns only safe operator subject IDs,
+intake state, update time, and present field names. It does not include message bodies,
+transcripts, rejected input, full phone numbers, secrets, or raw database rows.
+
+## Operator Runbook
+
+Set the operator phone out of band in `.env` before Cloud preflight:
+
+```bash
+LAWYER_PHONE_E164=+<operator-e164-phone>
+```
+
+Load the runtime environment without printing values:
+
+```bash
+set -a
+. ./.env
+set +a
+```
+
+Run local checks from the repo root:
+
+```bash
+npm run typecheck
+npm test
+npx vitest run tests/app/whatsappCloudProductSlice.test.ts tests/app/whatsappCloudWebhookReplay.test.ts
+npm run ops:preflight:cloud
+OPS_POST_START_MODE=docker npm run ops:post-start:cloud
+npm run docker:cloud:diagnose
+```
+
+Expected sanitized logs during live Cloud messages include:
+
+- `cloud_actor_resolved`
+- `cloud_client_turn_received`
+- `cloud_operator_command_received`
+- `cloud_operator_command_handled`
+- `cloud_operator_command_rejected`
+- `whatsapp_cloud_output_dispatched`
+
+Once a phone and live Meta delivery are available, capture evidence by sending a
+controlled operator `ping` from the configured phone and one client consent/intake turn
+from a non-operator phone. Record only sanitized log event names and HTTP status
+evidence. Do not store tokens, raw webhook bodies, full phone numbers, transcripts, or
+raw database rows.
 
 ## Local Webhook Replay
 

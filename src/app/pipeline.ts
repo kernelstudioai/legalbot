@@ -10,6 +10,7 @@ import type {
   ClientConsentPersistence,
   ClientIntakePersistence
 } from "../runtime/client/clientRuntime.ts";
+import type { LawyerRuntimeOptions } from "../runtime/lawyer/lawyerRuntime.ts";
 import { resolveRouting } from "../routing/resolveRouting.ts";
 import { decideNextAction } from "../runtime/shared/decideNextAction.ts";
 import { deriveRuntimeContext } from "../runtime/shared/runtimeContext.ts";
@@ -25,6 +26,7 @@ export interface PipelineResult {
 export interface RunInboundPipelineOptions {
   clientConsentPersistence?: ClientConsentPersistence;
   clientIntakePersistence?: ClientIntakePersistence;
+  lawyerRuntime?: LawyerRuntimeOptions;
   requireBusinessPersistence?: boolean;
 }
 
@@ -48,6 +50,11 @@ export const runInboundPipeline = async (
     ...(options.clientIntakePersistence
       ? {
           clientIntakePersistence: options.clientIntakePersistence
+        }
+      : {}),
+    ...(options.lawyerRuntime
+      ? {
+          lawyerRuntime: options.lawyerRuntime
         }
       : {})
   });

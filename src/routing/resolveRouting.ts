@@ -4,8 +4,6 @@ import type { CanonicalEnvelopeType, RoutingDecisionType } from "../contracts/in
 export const resolveRouting = (
   envelope: CanonicalEnvelopeType
 ): RoutingDecisionType => {
-  const normalizedBody = envelope.body.toLowerCase();
-
   if (envelope.transportMetadata.fromMe) {
     return RoutingDecision.parse({
       targetRuntime: "drop",
@@ -14,11 +12,11 @@ export const resolveRouting = (
     });
   }
 
-  if (normalizedBody.includes("lawyer")) {
+  if (envelope.transportMetadata.actor === "lawyer") {
     return RoutingDecision.parse({
       targetRuntime: "lawyer",
-      reason: "Inbound text explicitly mentions lawyer routing",
-      labels: ["keyword:lawyer"]
+      reason: "Inbound sender matched configured operator identity",
+      labels: ["actor:lawyer"]
     });
   }
 

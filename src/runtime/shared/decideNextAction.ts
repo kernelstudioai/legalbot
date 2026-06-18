@@ -5,6 +5,7 @@ import type {
   ClientIntakePersistence
 } from "../client/clientRuntime.ts";
 import { runClientRuntime } from "../client/clientRuntime.ts";
+import { runLawyerRuntime, type LawyerRuntimeOptions } from "../lawyer/lawyerRuntime.ts";
 import type { RuntimeContext } from "./runtimeContext.ts";
 
 export interface DecideNextActionInput {
@@ -13,6 +14,7 @@ export interface DecideNextActionInput {
   runtimeContext: RuntimeContext;
   clientConsentPersistence?: ClientConsentPersistence;
   clientIntakePersistence?: ClientIntakePersistence;
+  lawyerRuntime?: LawyerRuntimeOptions;
   requireBusinessPersistence?: boolean;
 }
 
@@ -22,6 +24,7 @@ export const decideNextAction = ({
   runtimeContext,
   clientConsentPersistence,
   clientIntakePersistence,
+  lawyerRuntime,
   requireBusinessPersistence = false
 }: DecideNextActionInput): Promise<RuntimeDecisionType> => {
   if (runtimeContext.runtime === "client") {
@@ -39,6 +42,22 @@ export const decideNextAction = ({
           }
         : {})
     }).then((result) => result.runtimeDecision);
+  }
+
+  if (runtimeContext.runtime === "lawyer") {
+    return runLawyerRuntime({
+      envelope,
+      ...(lawyerRuntime?.getStatus
+        ? {
+            getStatus: lawyerRuntime.getStatus
+          }
+        : {}),
+      ...(lawyerRuntime?.listReadyIntakes
+        ? {
+            listReadyIntakes: lawyerRuntime.listReadyIntakes
+          }
+        : {})
+    });
   }
 
   return Promise.resolve(

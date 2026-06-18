@@ -14,7 +14,12 @@ export const RuntimeDecision = z.object({
     "intake_clarify_identity",
     "intake_ask_problem_summary",
     "intake_complete_ack",
-    "intake_invalid_response"
+    "intake_invalid_response",
+    "lawyer_help",
+    "lawyer_status",
+    "lawyer_ping",
+    "lawyer_intake_ready",
+    "lawyer_unknown_command"
   ]),
   rationale: z.string().min(1),
   messageOverride: z.string().min(1).optional()

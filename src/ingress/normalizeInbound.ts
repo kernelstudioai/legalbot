@@ -15,6 +15,7 @@ export const normalizeInbound = (
     receivedAt: new Date(rawMessage.timestamp).toISOString(),
     transportMetadata: {
       chatId: rawMessage.chatId,
-      fromMe: rawMessage.fromMe
+      fromMe: rawMessage.fromMe,
+      ...(rawMessage.actor ? { actor: rawMessage.actor } : {})
     }
   });

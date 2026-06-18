@@ -201,6 +201,7 @@ describe("whatsapp cloud runtime env", () => {
 
     const env = loadWhatsAppCloudRuntimeEnv({
       WHATSAPP_TRANSPORT: "cloud",
+      LAWYER_PHONE_E164: "+15551234567",
       WHATSAPP_CLOUD_API_VERSION: "v22.0",
       WHATSAPP_CLOUD_PHONE_NUMBER_ID: "1234567890",
       WHATSAPP_CLOUD_VERIFY_TOKEN: "verify-token",
@@ -208,6 +209,7 @@ describe("whatsapp cloud runtime env", () => {
     });
 
     expect(env.WHATSAPP_TRANSPORT).toBe("cloud");
+    expect(env.LAWYER_PHONE_E164).toBe("+15551234567");
     expect(env.WHATSAPP_CLOUD_API_VERSION).toBe("v22.0");
     expect(env.WHATSAPP_CLOUD_WEBHOOK_HOST).toBe("127.0.0.1");
     expect(env.WHATSAPP_CLOUD_WEBHOOK_PORT).toBe(3002);

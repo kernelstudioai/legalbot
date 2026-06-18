@@ -5,6 +5,7 @@ export interface TransportInboundMessage {
   body: string;
   fromMe: boolean;
   timestamp: number;
+  actor?: "client" | "lawyer";
   sender?: {
     pushname?: string;
   };

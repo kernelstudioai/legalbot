@@ -26,6 +26,8 @@ OpenWA remains in the repo temporarily as a legacy and development-only transpor
 
 - `src/app/whatsappCloudRuntime.ts` starts the webhook server foundation.
 - `src/transport/whatsapp-cloud/webhook.ts` handles verification, signature validation, payload parsing, and text-message normalization.
+- `src/transport/whatsapp-cloud/actor.ts` normalizes Cloud `wa_id` values and the
+  configured operator E.164 phone into comparable digits for actor resolution.
 - `src/transport/whatsapp-cloud/sender.ts` constructs Graph API text payloads and sends them through an injected HTTP client.
 
 ### OpenWA

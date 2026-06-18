@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   createWhatsAppCloudSignature,
+  normalizeCloudWaIdToComparablePhone,
+  normalizeE164ToComparablePhone,
   parseWhatsAppCloudWebhookPayload,
+  resolveCloudActor,
   validateWhatsAppCloudSignature,
   verifyWhatsAppCloudWebhook
 } from "../../../src/transport/whatsapp-cloud";
@@ -115,6 +118,28 @@ describe("whatsapp cloud webhook helpers", () => {
         }
       }
     ]);
+  });
+
+  it("normalizes Cloud wa_id and E.164 operator phones for actor resolution", () => {
+    expect(normalizeCloudWaIdToComparablePhone("393331112222")).toBe("393331112222");
+    expect(normalizeCloudWaIdToComparablePhone("+39 333 111 2222")).toBe("393331112222");
+    expect(normalizeE164ToComparablePhone("+393331112222")).toBe("393331112222");
+    expect(
+      resolveCloudActor({
+        cloudWaId: "393331112222",
+        lawyerPhoneE164: "+393331112222"
+      })
+    ).toMatchObject({
+      actor: "lawyer",
+      operatorConfigured: true,
+      senderRef: "suffix:2222"
+    });
+    expect(
+      resolveCloudActor({
+        cloudWaId: "393331119999",
+        lawyerPhoneE164: "+393331112222"
+      }).actor
+    ).toBe("client");
   });
 
   it("ignores unsupported message types and status events safely", () => {

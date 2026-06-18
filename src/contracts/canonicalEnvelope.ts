@@ -9,7 +9,8 @@ export const CanonicalEnvelope = z.object({
   receivedAt: z.string().datetime(),
   transportMetadata: z.object({
     chatId: z.string().min(1),
-    fromMe: z.boolean()
+    fromMe: z.boolean(),
+    actor: z.enum(["client", "lawyer"]).optional()
   })
 });
 

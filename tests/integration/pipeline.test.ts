@@ -20,8 +20,8 @@ describe("inbound pipeline", () => {
     const result = await runInboundPipeline(rawMessage);
 
     expect(result.envelope.messageId).toBe("wamid.test-1");
-    expect(result.routingDecision.targetRuntime).toBe("lawyer");
-    expect(result.runtimeDecision.action).toBe("acknowledge");
+    expect(result.routingDecision.targetRuntime).toBe("client");
+    expect(result.runtimeDecision.action).toBe("request_consent");
     expect(result.outputPlan.messages).toHaveLength(1);
     expect(result.outputPlan.messages[0]?.to).toBe("client-123@c.us");
   });

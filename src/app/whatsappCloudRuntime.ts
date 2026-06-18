@@ -8,13 +8,15 @@ import {
 } from "../config/env.ts";
 import { consoleLogger, type Logger } from "../logging/logger.ts";
 import {
-  assertSqliteMigrationsApplied
+  assertSqliteMigrationsApplied,
+  getSqliteMigrationStatus
 } from "../persistence/sqlite/index.ts";
 import {
   createBusinessPersistenceService,
   createSqliteBusinessPersistenceServiceFromPersistence,
   createSqlitePersistenceService,
   type BusinessPersistenceService,
+  type BusinessReadyIntakeCandidate,
   type PersistenceService,
   type SqlitePersistenceService
 } from "../persistence/index.ts";
@@ -24,10 +26,15 @@ import type {
 } from "../runtime/client/clientRuntime.ts";
 import { runInboundPipeline, type PipelineResult } from "./pipeline.ts";
 import {
+  classifyLawyerCommand,
+  type LawyerRuntimeStatus
+} from "../runtime/lawyer/lawyerRuntime.ts";
+import {
   DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH,
   createWhatsAppCloudDispatcher,
   createWhatsAppCloudSender,
   parseWhatsAppCloudWebhookPayload,
+  resolveCloudActor,
   validateWhatsAppCloudSignature,
   verifyWhatsAppCloudWebhook,
   type WhatsAppCloudDispatcher,
@@ -63,6 +70,8 @@ export interface StartWhatsAppCloudRuntimeOptions {
   businessPersistenceService?: BusinessPersistenceService;
   clientConsentPersistence?: ClientConsentPersistence;
   clientIntakePersistence?: ClientIntakePersistence;
+  operatorStatusProvider?: () => LawyerRuntimeStatus | Promise<LawyerRuntimeStatus>;
+  readyIntakeLister?: () => BusinessReadyIntakeCandidate[] | Promise<BusinessReadyIntakeCandidate[]>;
   createSqlitePersistence?: (config: {
     databaseUrl: string;
     cwd?: string;
@@ -86,13 +95,16 @@ export interface CreateWhatsAppCloudWebhookRequestHandlerOptions {
   appSecret?: string;
   dispatcher: WhatsAppCloudDispatcher;
   logger: Logger;
+  lawyerPhoneE164?: string;
   markMessageProcessed?: (
     messageId: string
   ) => Promise<void>;
+  operatorStatusProvider?: () => LawyerRuntimeStatus | Promise<LawyerRuntimeStatus>;
   path?: string;
   pipelineRunner?: (
     message: TransportInboundMessage
   ) => Promise<PipelineResult>;
+  readyIntakeLister?: () => BusinessReadyIntakeCandidate[] | Promise<BusinessReadyIntakeCandidate[]>;
   verifyToken: string;
   wasMessageProcessed?: (messageId: string) => Promise<boolean>;
 }
@@ -159,6 +171,17 @@ const isSqlitePersistenceService = (
   "close" in persistenceService &&
   typeof persistenceService.close === "function";
 
+const hasReadyIntakeListing = (
+  businessPersistenceService: BusinessPersistenceService | undefined
+): businessPersistenceService is BusinessPersistenceService & {
+  listReadyIntakeCandidates(): Promise<BusinessReadyIntakeCandidate[]>;
+} =>
+  typeof (
+    businessPersistenceService as
+      | { listReadyIntakeCandidates?: unknown }
+      | undefined
+  )?.listReadyIntakeCandidates === "function";
+
 const getCloudSignatureVerificationMode = (
   env: WhatsAppCloudRuntimeEnv
 ): "enforced" | "optional" => (env.WHATSAPP_CLOUD_APP_SECRET ? "enforced" : "optional");
@@ -177,12 +200,33 @@ export const createWhatsAppCloudWebhookRequestHandler = ({
   appSecret,
   dispatcher,
   logger,
+  lawyerPhoneE164,
   markMessageProcessed,
+  operatorStatusProvider,
   path = DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH,
-  pipelineRunner = (message) => runInboundPipeline(message),
+  pipelineRunner,
+  readyIntakeLister,
   verifyToken,
   wasMessageProcessed
 }: CreateWhatsAppCloudWebhookRequestHandlerOptions) => {
+  const runPipeline =
+    pipelineRunner ??
+    ((message: TransportInboundMessage) =>
+      runInboundPipeline(message, {
+        lawyerRuntime: {
+          ...(operatorStatusProvider
+            ? {
+                getStatus: operatorStatusProvider
+              }
+            : {}),
+          ...(readyIntakeLister
+            ? {
+                listReadyIntakes: readyIntakeLister
+              }
+            : {})
+        }
+      }));
+
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const method = request.method ?? "GET";
     const url = new URL(request.url ?? "/", "http://localhost");
@@ -313,11 +357,44 @@ export const createWhatsAppCloudWebhookRequestHandler = ({
         continue;
       }
 
+      const actorResolution = resolveCloudActor({
+        cloudWaId: message.from,
+        lawyerPhoneE164
+      });
+      const resolvedMessage: TransportInboundMessage = {
+        ...message,
+        actor: actorResolution.actor
+      };
+
+      logger.info("cloud_actor_resolved", {
+        messageId: message.id,
+        actor: actorResolution.actor,
+        operatorConfigured: actorResolution.operatorConfigured,
+        senderRef: actorResolution.senderRef
+      });
+
+      const operatorCommand =
+        actorResolution.actor === "lawyer"
+          ? classifyLawyerCommand(message.body)
+          : null;
+
+      if (operatorCommand) {
+        logger.info("cloud_operator_command_received", {
+          messageId: message.id,
+          command: operatorCommand
+        });
+      } else {
+        logger.info("cloud_client_turn_received", {
+          messageId: message.id,
+          actor: "client"
+        });
+      }
+
       logger.info("whatsapp_cloud_message_received", {
         messageId: message.id
       });
 
-      const pipelineResult = await pipelineRunner(message);
+      const pipelineResult = await runPipeline(resolvedMessage);
       const dispatchResult = await dispatcher.dispatch(pipelineResult.outputPlan);
 
       logger.info("whatsapp_cloud_output_dispatched", {
@@ -329,6 +406,20 @@ export const createWhatsAppCloudWebhookRequestHandler = ({
 
       if (markMessageProcessed) {
         await markMessageProcessed(message.id);
+      }
+
+      if (operatorCommand) {
+        const logPayload = {
+          messageId: message.id,
+          command: operatorCommand,
+          outputCount: pipelineResult.outputPlan.messages.length
+        };
+
+        if (operatorCommand === "unknown") {
+          logger.warn("cloud_operator_command_rejected", logPayload);
+        } else {
+          logger.info("cloud_operator_command_handled", logPayload);
+        }
       }
     }
 
@@ -346,6 +437,8 @@ export const startWhatsAppCloudRuntime = async ({
   businessPersistenceService,
   clientConsentPersistence,
   clientIntakePersistence,
+  operatorStatusProvider,
+  readyIntakeLister,
   createSqlitePersistence = createSqlitePersistenceService,
   createBusinessPersistence = createBusinessPersistenceService,
   createHttpServer = createServer,
@@ -404,6 +497,34 @@ export const startWhatsAppCloudRuntime = async ({
     );
   }
 
+  const defaultOperatorStatusProvider = (): LawyerRuntimeStatus => {
+    const migrationStatus = getSqliteMigrationStatus({
+      databaseUrl: env.DATABASE_URL,
+      cwd
+    });
+
+    return {
+      runtime: {
+        ready: true,
+        state: "ready"
+      },
+      persistence: {
+        enabled: env.BUSINESS_PERSISTENCE_ENABLED
+      },
+      migrations: {
+        appliedMigrationCount: migrationStatus.appliedMigrationIds.length,
+        pendingMigrationCount: migrationStatus.pendingMigrationIds.length
+      }
+    };
+  };
+  const resolvedOperatorStatusProvider =
+    operatorStatusProvider ?? defaultOperatorStatusProvider;
+  const resolvedReadyIntakeLister =
+    readyIntakeLister ??
+    (hasReadyIntakeListing(defaultBusinessPersistence)
+      ? () => defaultBusinessPersistence.listReadyIntakeCandidates()
+      : undefined);
+
   const closeSharedPersistence = () => {
     if (
       shouldClosePersistence &&
@@ -426,12 +547,27 @@ export const startWhatsAppCloudRuntime = async ({
     allowUnsignedLocalReplay: !isProductionNodeEnv(envSource),
     dispatcher,
     logger,
+    lawyerPhoneE164: env.LAWYER_PHONE_E164,
+    operatorStatusProvider: resolvedOperatorStatusProvider,
     pipelineRunner: (message) =>
       runInboundPipeline(message, {
         requireBusinessPersistence: true,
         clientConsentPersistence: resolvedConsentPersistence,
-        clientIntakePersistence: resolvedIntakePersistence
+        clientIntakePersistence: resolvedIntakePersistence,
+        lawyerRuntime: {
+          getStatus: resolvedOperatorStatusProvider,
+          ...(resolvedReadyIntakeLister
+            ? {
+                listReadyIntakes: resolvedReadyIntakeLister
+              }
+            : {})
+        }
       }),
+    ...(resolvedReadyIntakeLister
+      ? {
+          readyIntakeLister: resolvedReadyIntakeLister
+        }
+      : {}),
     verifyToken: env.WHATSAPP_CLOUD_VERIFY_TOKEN,
     ...(sharedPersistenceService
       ? {
@@ -497,7 +633,8 @@ export const startWhatsAppCloudRuntime = async ({
     webhook_port: env.WHATSAPP_CLOUD_WEBHOOK_PORT,
     webhook_path: DEFAULT_WHATSAPP_CLOUD_WEBHOOK_PATH,
     signature_verification: getCloudSignatureVerificationMode(env),
-    business_persistence_enabled: env.BUSINESS_PERSISTENCE_ENABLED
+    business_persistence_enabled: env.BUSINESS_PERSISTENCE_ENABLED,
+    lawyer_phone_configured: true
   });
 
   try {

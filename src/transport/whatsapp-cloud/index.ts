@@ -18,3 +18,10 @@ export {
   type ParsedWhatsAppCloudWebhook,
   type WebhookVerificationResult
 } from "./webhook.ts";
+export {
+  normalizeCloudWaIdToComparablePhone,
+  normalizeE164ToComparablePhone,
+  resolveCloudActor,
+  type CloudActor,
+  type CloudActorResolution
+} from "./actor.ts";

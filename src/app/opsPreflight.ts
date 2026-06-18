@@ -139,6 +139,7 @@ const REQUIRED_IGNORED_DIRECTORIES = [
 const OPENWA_REQUIRED_ENV = ["LAWYER_PHONE_E164"];
 const CLOUD_REQUIRED_ENV = [
   "WHATSAPP_TRANSPORT",
+  "LAWYER_PHONE_E164",
   "WHATSAPP_CLOUD_API_VERSION",
   "WHATSAPP_CLOUD_PHONE_NUMBER_ID",
   "WHATSAPP_CLOUD_VERIFY_TOKEN",
@@ -359,6 +360,7 @@ export const runOpsPreflightCommand = ({
       blockers.push("lawyer_phone_missing");
     }
   } else {
+    lawyerPhoneConfigured = hasConfiguredValue(effectiveEnvSource.LAWYER_PHONE_E164);
     cloudApiVersionConfigured = hasConfiguredValue(
       effectiveEnvSource.WHATSAPP_CLOUD_API_VERSION
     );
@@ -378,6 +380,9 @@ export const runOpsPreflightCommand = ({
 
     if (effectiveEnvSource.WHATSAPP_TRANSPORT !== "cloud") {
       blockers.push("cloud_transport_not_selected");
+    }
+    if (!lawyerPhoneConfigured) {
+      blockers.push("lawyer_phone_missing");
     }
     if (!cloudApiVersionConfigured) {
       blockers.push("cloud_api_version_missing");

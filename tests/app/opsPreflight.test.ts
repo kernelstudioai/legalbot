@@ -178,6 +178,7 @@ describe("ops preflight command", () => {
         DATABASE_URL: databaseUrl,
         DATABASE_MIGRATIONS_ENABLED: "true",
         BUSINESS_PERSISTENCE_ENABLED: "true",
+        LAWYER_PHONE_E164: "+15551234567",
         WHATSAPP_CLOUD_API_VERSION: "v22.0",
         WHATSAPP_CLOUD_PHONE_NUMBER_ID: "1234567890",
         WHATSAPP_CLOUD_VERIFY_TOKEN: "verify-token-123",
@@ -198,12 +199,13 @@ describe("ops preflight command", () => {
         transport: "cloud",
         minimalRequiredEnv: [
           "WHATSAPP_TRANSPORT",
+          "LAWYER_PHONE_E164",
           "WHATSAPP_CLOUD_API_VERSION",
           "WHATSAPP_CLOUD_PHONE_NUMBER_ID",
           "WHATSAPP_CLOUD_VERIFY_TOKEN",
           "WHATSAPP_CLOUD_ACCESS_TOKEN"
         ],
-        lawyerPhoneConfigured: false,
+        lawyerPhoneConfigured: true,
         databaseUrlConfigured: true,
         databaseMigrationsExplicit: true,
         databaseMigrationsEnabled: true,
@@ -263,6 +265,7 @@ describe("ops preflight command", () => {
         DATABASE_URL: databaseUrl,
         DATABASE_MIGRATIONS_ENABLED: "true",
         BUSINESS_PERSISTENCE_ENABLED: "true",
+        LAWYER_PHONE_E164: "+15551234567",
         WHATSAPP_CLOUD_API_VERSION: "v22.0",
         WHATSAPP_CLOUD_PHONE_NUMBER_ID: "1234567890",
         WHATSAPP_CLOUD_VERIFY_TOKEN: "verify-token-123",
@@ -279,6 +282,54 @@ describe("ops preflight command", () => {
     expect(summary.report.runtimeEnv.cloudAppSecretConfigured).toBe(false);
     expect(stdout.output).not.toContain("verify-token-123");
     expect(stdout.output).not.toContain("access-token-123");
+    expect(stdout.output).not.toContain("1234567890");
+  });
+
+  it("fails Cloud preflight when the operator phone is missing", () => {
+    const tempDir = createTempDir();
+    const stdout = createStdout();
+    const databaseUrl = "file:./tmp/legalbot-cloud.sqlite";
+
+    runSqliteMigrations({
+      cwd: tempDir,
+      databaseUrl,
+      enabled: true
+    });
+
+    const summary = runOpsPreflightCommand({
+      cwd: tempDir,
+      dockerRunner: {
+        run() {
+          return {
+            exitCode: 0,
+            stdout: "Docker Compose version v2.29.0\n",
+            stderr: ""
+          };
+        }
+      },
+      envSource: {
+        NODE_ENV: "production",
+        WHATSAPP_TRANSPORT: "cloud",
+        DATABASE_URL: databaseUrl,
+        DATABASE_MIGRATIONS_ENABLED: "true",
+        BUSINESS_PERSISTENCE_ENABLED: "true",
+        WHATSAPP_CLOUD_API_VERSION: "v22.0",
+        WHATSAPP_CLOUD_PHONE_NUMBER_ID: "1234567890",
+        WHATSAPP_CLOUD_VERIFY_TOKEN: "verify-token-123",
+        WHATSAPP_CLOUD_ACCESS_TOKEN: "access-token-123",
+        WHATSAPP_CLOUD_APP_SECRET: "app-secret-123"
+      },
+      nodeVersion: "v22.3.0",
+      repoRoot,
+      stdout
+    });
+
+    expect(summary.exitCode).toBe(1);
+    expect(summary.report.runtimeEnv.lawyerPhoneConfigured).toBe(false);
+    expect(summary.report.blockers).toContain("lawyer_phone_missing");
+    expect(stdout.output).not.toContain("verify-token-123");
+    expect(stdout.output).not.toContain("access-token-123");
+    expect(stdout.output).not.toContain("app-secret-123");
     expect(stdout.output).not.toContain("1234567890");
   });
 
@@ -313,6 +364,7 @@ describe("ops preflight command", () => {
         DATABASE_URL: "file:./tmp/legalbot-cloud.sqlite",
         DATABASE_MIGRATIONS_ENABLED: "true",
         BUSINESS_PERSISTENCE_ENABLED: "true",
+        LAWYER_PHONE_E164: "+15551234567",
         WHATSAPP_CLOUD_API_VERSION: "v22.0",
         WHATSAPP_CLOUD_PHONE_NUMBER_ID: "1234567890",
         WHATSAPP_CLOUD_VERIFY_TOKEN: "verify-token-123",

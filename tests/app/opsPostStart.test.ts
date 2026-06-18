@@ -294,6 +294,7 @@ describe("ops post-start command", () => {
     const summary = await runOpsPostStartCommand({
       envSource: {
         WHATSAPP_TRANSPORT: "cloud",
+        LAWYER_PHONE_E164: "+15551234567",
         WHATSAPP_CLOUD_API_VERSION: "v22.0",
         WHATSAPP_CLOUD_PHONE_NUMBER_ID: "1234567890",
         WHATSAPP_CLOUD_VERIFY_TOKEN: "verify-token-123",
@@ -395,6 +396,7 @@ describe("ops post-start command", () => {
       envSource: {
         OPS_POST_START_MODE: "docker",
         WHATSAPP_TRANSPORT: "cloud",
+        LAWYER_PHONE_E164: "+15551234567",
         WHATSAPP_CLOUD_API_VERSION: "v22.0",
         WHATSAPP_CLOUD_PHONE_NUMBER_ID: "1234567890",
         WHATSAPP_CLOUD_VERIFY_TOKEN: "verify-token-123",
@@ -499,6 +501,7 @@ describe("ops post-start command", () => {
     const summary = await runOpsPostStartCommand({
       envSource: {
         WHATSAPP_TRANSPORT: "cloud",
+        LAWYER_PHONE_E164: "+15551234567",
         WHATSAPP_CLOUD_API_VERSION: "v22.0",
         WHATSAPP_CLOUD_PHONE_NUMBER_ID: "1234567890",
         WHATSAPP_CLOUD_VERIFY_TOKEN: "verify-token-123",

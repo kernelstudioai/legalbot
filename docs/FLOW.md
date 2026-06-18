@@ -23,6 +23,8 @@ OpenWA listeners and Cloud webhook handlers orchestrate transport concerns only.
 - `POST /webhooks/whatsapp/cloud` parses WhatsApp Cloud webhook payloads, extracts text message events, ignores unsupported message types safely, and ignores status events for now.
 - When `WHATSAPP_CLOUD_APP_SECRET` is configured, the webhook handler validates `X-Hub-Signature-256` before processing the payload.
 - In production, Cloud signature verification is mandatory.
+- Cloud sender `wa_id` is normalized and compared with `LAWYER_PHONE_E164` for
+  operator routing. Message wording alone does not route a sender to the lawyer runtime.
 - Normalized inbound text messages are routed through the same consent, intake, routing, and output-plan pipeline already used by the existing app foundation.
 - Outbound replies go through the Cloud sender abstraction, which constructs Meta Graph API text payloads and supports an injected HTTP client for tests.
 - `npm run webhook:replay:cloud -- --fixture <path> --target <loopback-url>` posts an allowlisted fake fixture to
@@ -61,6 +63,13 @@ OpenWA listeners and Cloud webhook handlers orchestrate transport concerns only.
   - `problemSummary`
 - Only accepted structured fields are persisted after consent is granted.
 - Raw transcripts and rejected values are not persisted.
+
+## Current Lawyer Runtime Behavior
+
+- The Cloud lawyer branch is available only to the configured operator phone.
+- Supported commands are `help`, `status`, `ping`, and `intake-ready` with documented
+  Italian aliases.
+- Operator replies contain sanitized runtime or ready-intake summaries only.
 
 ## Case Handling
 

@@ -32,6 +32,7 @@ Confirm all items before touching the Meta dashboard:
 - The verify token is already configured in the runtime environment.
 - The app secret is already configured and signature enforcement is enabled.
 - The access token is already configured.
+- `LAWYER_PHONE_E164` is configured for operator recognition.
 - The correct WhatsApp app and phone number are already selected in the Meta dashboard.
 
 Operator checks:
@@ -151,11 +152,14 @@ The public ngrok path is the real webhook route, not the local replay harness.
 After verification succeeds and the `messages` subscription is active, capture the first
 real signed webhook event from Meta.
 
+Real inbound remains a live Meta and phone-delivery proof. Local replay and fake public
+fixtures do not prove that Meta can deliver a real user message to this runtime.
+
 Prepare safe log evidence:
 
 ```bash
 docker compose --profile cloud logs --tail=200 legalbot-whatsapp-cloud | \
-  grep -E "whatsapp_cloud_message_received|whatsapp_cloud_output_dispatched|whatsapp_cloud_request_failed|whatsapp_cloud_signature_invalid"
+  grep -E "cloud_actor_resolved|cloud_client_turn_received|cloud_operator_command_received|cloud_operator_command_handled|cloud_operator_command_rejected|whatsapp_cloud_message_received|whatsapp_cloud_output_dispatched|whatsapp_cloud_request_failed|whatsapp_cloud_signature_invalid"
 ```
 
 Operator procedure:
@@ -172,6 +176,7 @@ Expected first real delivery evidence:
 
 - the runtime receives a real Meta-signed request
 - sanitized `whatsapp_cloud_message_received` appears
+- sanitized `cloud_actor_resolved` appears
 - if outbound dispatch succeeds, sanitized `whatsapp_cloud_output_dispatched` appears
 - if outbound dispatch fails, sanitized `whatsapp_cloud_request_failed` may appear
 - any logged message identifier stays sanitized or partial according to current runtime
@@ -182,6 +187,30 @@ Real success proof for M42 is:
 
 - Meta verification `GET` succeeds
 - first real signed Meta event reaches the runtime safely
+
+## Operator Recognition Evidence
+
+Once live inbound delivery is available from the operator-held phone configured in
+`LAWYER_PHONE_E164`, send a controlled `ping` message to the business number.
+
+Safe evidence command:
+
+```bash
+docker compose --profile cloud logs --tail=200 legalbot-whatsapp-cloud | \
+  grep -E "cloud_actor_resolved|cloud_operator_command_received|cloud_operator_command_handled|whatsapp_cloud_output_dispatched"
+```
+
+Expected operator evidence:
+
+- `cloud_actor_resolved` reports `actor=lawyer` or equivalent structured JSON.
+- `cloud_operator_command_received` reports `command=ping`.
+- `cloud_operator_command_handled` appears.
+- `whatsapp_cloud_output_dispatched` appears if outbound Cloud dispatch succeeds.
+- No full phone number, token, raw body, transcript, or raw database row is printed.
+
+From a non-operator phone, send `status`. Expected evidence is client-path only:
+`cloud_actor_resolved` with `actor=client` and `cloud_client_turn_received`. It must not
+produce `cloud_operator_command_received`.
 
 ## Go/No-Go
 
