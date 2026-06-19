@@ -103,7 +103,7 @@ describe("business check command", () => {
       status: "healthy",
       sourceDatabase: databaseUrl,
       checkedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
-      migrationCount: 11,
+      migrationCount: 12,
       pendingMigrationCount: 0,
       consentStateCounts: {
         total: 1,
@@ -152,7 +152,7 @@ describe("business check command", () => {
       status: "consistency_errors_detected",
       sourceDatabase: databaseUrl,
       migrationCount: 0,
-      pendingMigrationCount: 11,
+      pendingMigrationCount: 12,
       consentStateCounts: {
         total: 0
       },

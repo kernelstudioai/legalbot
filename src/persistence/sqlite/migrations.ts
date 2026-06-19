@@ -15,6 +15,18 @@ const requiredCaseColumns = [
   "created_at",
   "updated_at"
 ] as const;
+const intakeStateConstraint =
+  "'not_started', 'asking_identity', 'asking_problem_summary', 'asking_attachments', 'intake_complete'";
+const intakeFieldConstraint =
+  "'firstName', 'lastName', 'birthDate', 'city', 'problemSummary', 'attachmentMetadata'";
+const supportedIntakeFields = new Set([
+  "firstName",
+  "lastName",
+  "birthDate",
+  "city",
+  "problemSummary",
+  "attachmentMetadata"
+]);
 
 const quoteIdentifier = (value: string): string => `"${value.replaceAll('"', '""')}"`;
 
@@ -223,8 +235,11 @@ const normalizeIntakeSchema = (database: DatabaseSync): void => {
   const intakeEventsDefinition = getTableDefinition(database, "intake_events");
   const alreadyNormalized =
     intakeStatesDefinition?.includes("asking_identity") === true &&
+    intakeStatesDefinition?.includes("asking_attachments") === true &&
     intakeFieldsDefinition?.includes("firstName") === true &&
-    intakeEventsDefinition?.includes("firstName") === true;
+    intakeFieldsDefinition?.includes("attachmentMetadata") === true &&
+    intakeEventsDefinition?.includes("firstName") === true &&
+    intakeEventsDefinition?.includes("attachmentMetadata") === true;
 
   if (alreadyNormalized) {
     return;
@@ -234,7 +249,7 @@ const normalizeIntakeSchema = (database: DatabaseSync): void => {
   database.exec(`
     CREATE TABLE intake_states__m26_new (
       subject_id TEXT PRIMARY KEY,
-      intake_state TEXT NOT NULL CHECK (intake_state IN ('not_started', 'asking_identity', 'asking_problem_summary', 'intake_complete')),
+      intake_state TEXT NOT NULL CHECK (intake_state IN (${intakeStateConstraint})),
       updated_at TEXT NOT NULL,
       metadata_json TEXT
     );
@@ -251,7 +266,6 @@ const normalizeIntakeSchema = (database: DatabaseSync): void => {
       subject_id,
       CASE intake_state
         WHEN 'asking_name' THEN 'asking_identity'
-        WHEN 'intake_complete' THEN 'asking_identity'
         ELSE intake_state
       END,
       updated_at,
@@ -266,7 +280,7 @@ const normalizeIntakeSchema = (database: DatabaseSync): void => {
     database.exec(`
       CREATE TABLE intake_fields__m26_new (
         subject_id TEXT NOT NULL,
-        field_name TEXT NOT NULL CHECK (field_name IN ('firstName', 'lastName', 'birthDate', 'city', 'problemSummary')),
+        field_name TEXT NOT NULL CHECK (field_name IN (${intakeFieldConstraint})),
         field_value TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         metadata_json TEXT,
@@ -291,7 +305,7 @@ const normalizeIntakeSchema = (database: DatabaseSync): void => {
     }>;
 
     for (const row of legacyRows) {
-      if (row.field_name === "problemSummary") {
+      if (supportedIntakeFields.has(row.field_name)) {
         database
           .prepare(
             `
@@ -331,8 +345,8 @@ const normalizeIntakeSchema = (database: DatabaseSync): void => {
         event_id TEXT PRIMARY KEY,
         subject_id TEXT NOT NULL,
         event_type TEXT NOT NULL,
-        intake_state TEXT CHECK (intake_state IN ('not_started', 'asking_identity', 'asking_problem_summary', 'intake_complete')),
-        field_name TEXT CHECK (field_name IN ('firstName', 'lastName', 'birthDate', 'city', 'problemSummary')),
+        intake_state TEXT CHECK (intake_state IN (${intakeStateConstraint})),
+        field_name TEXT CHECK (field_name IN (${intakeFieldConstraint})),
         occurred_at TEXT NOT NULL,
         metadata_json TEXT
       );
@@ -354,11 +368,10 @@ const normalizeIntakeSchema = (database: DatabaseSync): void => {
         event_type,
         CASE intake_state
           WHEN 'asking_name' THEN 'asking_identity'
-          WHEN 'intake_complete' THEN 'asking_identity'
           ELSE intake_state
         END,
-        CASE field_name
-          WHEN 'problemSummary' THEN 'problemSummary'
+        CASE
+          WHEN field_name IN (${intakeFieldConstraint}) THEN field_name
           ELSE NULL
         END,
         occurred_at,
@@ -382,6 +395,38 @@ const enforceDraftCaseUniqueness = (database: DatabaseSync): void => {
     database.exec("ROLLBACK;");
     throw error;
   }
+};
+
+const createPracticeRegistry = (database: DatabaseSync): void => {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS practice_sequence (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      last_code TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS practices (
+      practice_code TEXT PRIMARY KEY,
+      subject_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      client_first_name TEXT NOT NULL,
+      client_last_name TEXT NOT NULL,
+      birth_date TEXT NOT NULL,
+      city TEXT NOT NULL,
+      subject_ref TEXT NOT NULL,
+      legal_issue_text TEXT NOT NULL,
+      cleaned_issue_text TEXT,
+      attachment_metadata_json TEXT NOT NULL DEFAULT '[]',
+      source_message_id TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS practices_subject_id_created_at
+      ON practices(subject_id, created_at);
+
+    CREATE INDEX IF NOT EXISTS practices_created_at
+      ON practices(created_at);
+  `);
 };
 
 export const sqliteMigrations: SqliteMigration[] = [
@@ -453,7 +498,7 @@ export const sqliteMigrations: SqliteMigration[] = [
     sql: `
       CREATE TABLE IF NOT EXISTS intake_states (
         subject_id TEXT PRIMARY KEY,
-        intake_state TEXT NOT NULL CHECK (intake_state IN ('not_started', 'asking_identity', 'asking_problem_summary', 'intake_complete')),
+        intake_state TEXT NOT NULL CHECK (intake_state IN (${intakeStateConstraint})),
         updated_at TEXT NOT NULL,
         metadata_json TEXT
       );
@@ -464,7 +509,7 @@ export const sqliteMigrations: SqliteMigration[] = [
     sql: `
       CREATE TABLE IF NOT EXISTS intake_fields (
         subject_id TEXT NOT NULL,
-        field_name TEXT NOT NULL CHECK (field_name IN ('firstName', 'lastName', 'birthDate', 'city', 'problemSummary')),
+        field_name TEXT NOT NULL CHECK (field_name IN (${intakeFieldConstraint})),
         field_value TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         metadata_json TEXT,
@@ -479,8 +524,8 @@ export const sqliteMigrations: SqliteMigration[] = [
         event_id TEXT PRIMARY KEY,
         subject_id TEXT NOT NULL,
         event_type TEXT NOT NULL,
-        intake_state TEXT CHECK (intake_state IN ('not_started', 'asking_identity', 'asking_problem_summary', 'intake_complete')),
-        field_name TEXT CHECK (field_name IN ('firstName', 'lastName', 'birthDate', 'city', 'problemSummary')),
+        intake_state TEXT CHECK (intake_state IN (${intakeStateConstraint})),
+        field_name TEXT CHECK (field_name IN (${intakeFieldConstraint})),
         occurred_at TEXT NOT NULL,
         metadata_json TEXT
       );
@@ -502,6 +547,13 @@ export const sqliteMigrations: SqliteMigration[] = [
     id: "0011_normalize_intake_schema_for_identity_fields",
     run(database) {
       normalizeIntakeSchema(database);
+    }
+  },
+  {
+    id: "0012_create_practice_registry",
+    run(database) {
+      normalizeIntakeSchema(database);
+      createPracticeRegistry(database);
     }
   }
 ];

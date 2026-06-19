@@ -16,6 +16,9 @@ import type {
   IntakeStateRecord,
   IntakeStore,
   MarkProcessedMessageResult,
+  PracticeListFilter,
+  PracticeRecord,
+  PracticeStore,
   ProcessedMessageRecord,
   ProcessedMessageStore,
   SetConsentStateOptions,
@@ -23,6 +26,7 @@ import type {
   SetIntakeStateOptions,
   UpdateCaseInput
 } from "../index.ts";
+import { getNextPracticeCode } from "../../domain/practices/practiceCode.ts";
 import type { PersistenceTransactionRunner } from "../persistenceService.ts";
 
 const defaultCaseStatus = "draft";
@@ -89,6 +93,93 @@ export class InMemoryCaseStore implements CaseStore {
     for (const [caseId, record] of snapshot.entries()) {
       this.cases.set(caseId, cloneValue(record));
     }
+  }
+}
+
+export class InMemoryPracticeStore implements PracticeStore {
+  private readonly practices = new Map<string, PracticeRecord>();
+  private lastPracticeCode: string | null = null;
+
+  async allocateNextPracticeCode(): Promise<string> {
+    let nextCode = getNextPracticeCode(this.lastPracticeCode);
+
+    while (this.practices.has(nextCode)) {
+      nextCode = getNextPracticeCode(nextCode);
+    }
+
+    this.lastPracticeCode = nextCode;
+    return nextCode;
+  }
+
+  async create(input: Parameters<PracticeStore["create"]>[0]): Promise<PracticeRecord> {
+    const record: PracticeRecord = {
+      practiceCode: input.practiceCode,
+      subjectId: input.subjectId,
+      status: input.status ?? "draft",
+      clientFirstName: input.clientFirstName,
+      clientLastName: input.clientLastName,
+      birthDate: input.birthDate,
+      city: input.city,
+      subjectRef: input.subjectRef,
+      legalIssueText: input.legalIssueText,
+      ...(input.cleanedIssueText ? { cleanedIssueText: input.cleanedIssueText } : {}),
+      attachmentMetadata: input.attachmentMetadata ?? [],
+      sourceMessageId: input.sourceMessageId,
+      createdAt: input.createdAt ?? new Date().toISOString(),
+      updatedAt: input.updatedAt ?? input.createdAt ?? new Date().toISOString()
+    };
+
+    this.practices.set(record.practiceCode, record);
+    return record;
+  }
+
+  async findByPracticeCode(practiceCode: string): Promise<PracticeRecord | null> {
+    return this.practices.get(practiceCode) ?? null;
+  }
+
+  async findBySourceMessageId(sourceMessageId: string): Promise<PracticeRecord | null> {
+    return (
+      [...this.practices.values()].find(
+        (practice) => practice.sourceMessageId === sourceMessageId
+      ) ?? null
+    );
+  }
+
+  async list(filter: PracticeListFilter = {}): Promise<PracticeRecord[]> {
+    return [...this.practices.values()]
+      .filter(
+        (practice) =>
+          (!filter.createdAtOrAfter || practice.createdAt >= filter.createdAtOrAfter) &&
+          (!filter.createdAtBefore || practice.createdAt < filter.createdAtBefore)
+      )
+      .sort((left, right) =>
+        left.createdAt === right.createdAt
+          ? right.practiceCode.localeCompare(left.practiceCode)
+          : right.createdAt.localeCompare(left.createdAt)
+      );
+  }
+
+  createSnapshot(): {
+    practices: Map<string, PracticeRecord>;
+    lastPracticeCode: string | null;
+  } {
+    return {
+      practices: cloneMap(this.practices),
+      lastPracticeCode: this.lastPracticeCode
+    };
+  }
+
+  restoreSnapshot(snapshot: {
+    practices: Map<string, PracticeRecord>;
+    lastPracticeCode: string | null;
+  }): void {
+    this.practices.clear();
+
+    for (const [practiceCode, record] of snapshot.practices.entries()) {
+      this.practices.set(practiceCode, cloneValue(record));
+    }
+
+    this.lastPracticeCode = snapshot.lastPracticeCode;
   }
 }
 
@@ -208,7 +299,8 @@ const acceptedIntakeFields = new Set<IntakeFieldName>([
   "lastName",
   "birthDate",
   "city",
-  "problemSummary"
+  "problemSummary",
+  "attachmentMetadata"
 ]);
 
 export class InMemoryIntakeStore implements IntakeStore {
@@ -337,6 +429,7 @@ export interface InMemoryPersistenceStoreBundle {
   auditLogStore: InMemoryAuditLogStore;
   consentStore: InMemoryConsentStore;
   intakeStore: InMemoryIntakeStore;
+  practiceStore?: InMemoryPracticeStore;
 }
 
 export const createInMemoryPersistenceTransactionRunner = ({
@@ -344,7 +437,8 @@ export const createInMemoryPersistenceTransactionRunner = ({
   processedMessageStore,
   auditLogStore,
   consentStore,
-  intakeStore
+  intakeStore,
+  practiceStore
 }: InMemoryPersistenceStoreBundle): PersistenceTransactionRunner => ({
   async runInTransaction(operation) {
     const snapshot = {
@@ -352,7 +446,8 @@ export const createInMemoryPersistenceTransactionRunner = ({
       processedMessageStore: processedMessageStore.createSnapshot(),
       auditLogStore: auditLogStore.createSnapshot(),
       consentStore: consentStore.createSnapshot(),
-      intakeStore: intakeStore.createSnapshot()
+      intakeStore: intakeStore.createSnapshot(),
+      practiceStore: practiceStore?.createSnapshot()
     };
 
     try {
@@ -363,6 +458,9 @@ export const createInMemoryPersistenceTransactionRunner = ({
       auditLogStore.restoreSnapshot(snapshot.auditLogStore);
       consentStore.restoreSnapshot(snapshot.consentStore);
       intakeStore.restoreSnapshot(snapshot.intakeStore);
+      if (practiceStore && snapshot.practiceStore) {
+        practiceStore.restoreSnapshot(snapshot.practiceStore);
+      }
       throw error;
     }
   }

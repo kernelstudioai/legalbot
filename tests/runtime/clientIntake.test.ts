@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CLIENT_PROBLEM_SUMMARY_MAX_LENGTH,
   InMemoryClientIntakeStore,
@@ -24,6 +24,7 @@ describe("client intake runtime", () => {
   });
 
   it("extracts messy identity input and advances to the problem summary", () => {
+    const normalizeIdentity = vi.fn();
     const result = resolveClientIntakeRuntimeDecision({
       subjectId: "client-1",
       intakeRecord: {
@@ -31,10 +32,15 @@ describe("client intake runtime", () => {
         state: "asking_identity",
         updatedAt: "2026-06-04T12:00:00.000Z"
       },
-      inboundText: "mi chiamo mario rossi, sono nato il 1/1/1980 e vivo a roma"
+      inboundText: "mi chiamo mario rossi, sono nato il 1/1/1980 e vivo a roma",
+      aiNormalizationProvider: {
+        normalizeIdentity,
+        summarizeLegalIssue: vi.fn()
+      }
     });
 
     expect(result.intakeState).toBe("asking_problem_summary");
+    expect(normalizeIdentity).not.toHaveBeenCalled();
     expect(result.runtimeDecision.action).toBe("intake_ask_problem_summary");
     expect(result.nextRecord).toMatchObject({
       subjectId: "client-1",
@@ -89,7 +95,39 @@ describe("client intake runtime", () => {
     });
   });
 
-  it("accepts a valid problem summary and completes intake", () => {
+  it("validates fake AI identity output before accepting fields", () => {
+    const result = resolveClientIntakeRuntimeDecision({
+      subjectId: "client-1",
+      intakeRecord: {
+        subjectId: "client-1",
+        state: "asking_identity",
+        updatedAt: "2026-06-04T12:00:00.000Z"
+      },
+      inboundText: "12345",
+      aiNormalizationProvider: {
+        normalizeIdentity: vi.fn(() => ({
+          acceptedFields: {
+            firstName: "Mario123",
+            lastName: "Rossi",
+            birthDate: "1980-01-01",
+            city: "Roma"
+          },
+          missingFields: []
+        })),
+        summarizeLegalIssue: vi.fn()
+      }
+    });
+
+    expect(result.runtimeDecision.action).toBe("intake_clarify_identity");
+    expect(result.nextRecord).toMatchObject({
+      lastName: "Rossi",
+      city: "Roma"
+    });
+    expect(result.nextRecord).not.toHaveProperty("firstName");
+    expect(result.nextRecord).not.toHaveProperty("birthDate");
+  });
+
+  it("accepts a valid problem summary and advances to attachments", () => {
     const result = resolveClientIntakeRuntimeDecision({
       subjectId: "client-1",
       intakeRecord: {
@@ -104,16 +142,42 @@ describe("client intake runtime", () => {
       inboundText: "Problema con il contratto di lavoro e stipendio non pagato."
     });
 
-    expect(result.intakeState).toBe("intake_complete");
-    expect(result.runtimeDecision.action).toBe("intake_complete_ack");
+    expect(result.intakeState).toBe("asking_attachments");
+    expect(result.runtimeDecision.action).toBe("intake_ask_attachments");
     expect(result.nextRecord).toMatchObject({
       subjectId: "client-1",
-      state: "intake_complete",
+      state: "asking_attachments",
       firstName: "Mario",
       lastName: "Rossi",
       birthDate: "01/01/1980",
       city: "Roma",
       problemSummary: "Problema con il contratto di lavoro e stipendio non pagato."
+    });
+  });
+
+  it("completes intake when attachments are skipped", () => {
+    const result = resolveClientIntakeRuntimeDecision({
+      subjectId: "client-1",
+      intakeRecord: {
+        subjectId: "client-1",
+        state: "asking_attachments",
+        updatedAt: "2026-06-04T12:02:00.000Z",
+        firstName: "Mario",
+        lastName: "Rossi",
+        birthDate: "01/01/1980",
+        city: "Roma",
+        problemSummary: "Problema con il contratto di lavoro e stipendio non pagato."
+      },
+      inboundText: "Salta",
+      now: () => "2026-06-04T12:03:00.000Z"
+    });
+
+    expect(result.intakeState).toBe("intake_complete");
+    expect(result.runtimeDecision.action).toBe("intake_complete_ack");
+    expect(result.nextRecord).toMatchObject({
+      subjectId: "client-1",
+      state: "intake_complete",
+      attachmentMetadata: "[]"
     });
   });
 

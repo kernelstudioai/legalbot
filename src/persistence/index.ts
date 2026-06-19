@@ -4,6 +4,14 @@ export {
 } from "./caseStore.ts";
 export type { CaseRecord, CaseStatus, CaseStore, CreateCaseInput, UpdateCaseInput } from "./caseStore.ts";
 export type {
+  CreatePracticeInput,
+  PracticeAttachmentMetadata,
+  PracticeListFilter,
+  PracticeRecord,
+  PracticeStatus,
+  PracticeStore
+} from "./practiceStore.ts";
+export type {
   AppendConsentEventInput,
   ConsentEventRecord,
   ConsentState,
@@ -44,6 +52,7 @@ export {
   type PersistenceAuditEventInput,
   type PersistenceCreateCaseWithAuditInput,
   type PersistenceCreateCaseWithAuditResult,
+  type PersistenceCreatePracticeResult,
   type PersistenceConsentStateResult,
   type PersistenceIntakeEventResult,
   type PersistenceIntakeFieldResult,
@@ -67,6 +76,7 @@ export {
   InMemoryCaseStore,
   InMemoryConsentStore,
   InMemoryIntakeStore,
+  InMemoryPracticeStore,
   InMemoryProcessedMessageStore,
   createInMemoryPersistenceTransactionRunner,
   type InMemoryPersistenceStoreBundle

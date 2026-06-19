@@ -12,6 +12,11 @@ export const normalizeInbound = (
     senderId: rawMessage.from,
     senderDisplayName: rawMessage.sender?.pushname,
     body: sanitizeInboundBody(rawMessage.body),
+    ...(rawMessage.attachments && rawMessage.attachments.length > 0
+      ? {
+          attachments: rawMessage.attachments
+        }
+      : {}),
     receivedAt: new Date(rawMessage.timestamp).toISOString(),
     transportMetadata: {
       chatId: rawMessage.chatId,

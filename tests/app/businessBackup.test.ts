@@ -96,7 +96,7 @@ describe("business backup command", () => {
       sourceDatabase: databaseUrl,
       backupPath: expect.stringMatching(/^backups[\\/].+\.sqlite$/),
       createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
-      migrationCount: 11
+      migrationCount: 12
     });
     expect(summary.report!.sizeBytes).toBeGreaterThan(0);
 
@@ -110,7 +110,7 @@ describe("business backup command", () => {
     expect(logger.info).toHaveBeenCalledWith("business_backup_complete", expect.objectContaining({
       status: "backup_created",
       backupPath: summary.report!.backupPath,
-      migrationCount: 11
+      migrationCount: 12
     }));
   });
 
@@ -141,7 +141,7 @@ describe("business backup command", () => {
     expect(stdout.output).toBe("");
     expect(logger.error).toHaveBeenCalledWith("business_backup_failed", {
       error:
-        "Business backup requires completed migrations. Pending migration count: 11. Run npm run db:migrate first."
+        "Business backup requires completed migrations. Pending migration count: 12. Run npm run db:migrate first."
     });
   });
 });

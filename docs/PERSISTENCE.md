@@ -36,6 +36,13 @@ M28 adds operator-safe business backup/check tooling. `npm run business:check` r
 
 M29 adds operator-safe VPS/systemd startup workflow commands. `npm run ops:preflight` aggregates Node/runtime/migration/business/case/git-ignore readiness into sanitized JSON before start, and `npm run ops:post-start` aggregates sanitized readiness probes after start without exposing secrets, QR data, session state, transcripts, or raw rows.
 
+M45 adds the Cloud product practice registry. Completed client intake now includes an
+attachment metadata step and automatically creates a `draft` practice with a persistent
+`AA001...ZZ999` code. Practice creation is idempotent by completion message id, clients
+can own multiple practices, and lawyer WhatsApp commands can list practices or inspect a
+practice by code. AI is only a schema-validated normalization/summarization seam and is
+not legal advice.
+
 ## Interfaces
 
 - `CaseStore`: minimal create/get/update support for case records built from accepted structured intake data only.
@@ -43,8 +50,12 @@ M29 adds operator-safe VPS/systemd startup workflow commands. `npm run ops:prefl
 - `IntakeStore`: current intake-state lookup, accepted-field upsert, snapshot reads, and append-only intake event history.
 - `ProcessedMessageStore`: duplicate-detection markers keyed by transport message id.
 - `AuditLogStore`: append-only audit events with optional JSON metadata.
+- `PracticeStore`: persistent practice-code allocation plus practice create/list/detail
+  reads for the Cloud product path.
 - `PersistenceService`: the only application boundary that future intake/runtime code should use when it needs persistence.
-- `BusinessPersistenceService`: the explicit live business-state boundary for consent, intake, operator ready-intake reads, and manual case creation.
+- `BusinessPersistenceService`: the explicit live business-state boundary for consent,
+  intake, practice creation/listing, operator ready-intake reads, and legacy manual case
+  creation.
 
 ## Persistence Service Boundary
 
@@ -66,10 +77,15 @@ M29 adds operator-safe VPS/systemd startup workflow commands. `npm run ops:prefl
   - `findDraftCaseBySubjectId(subjectId)`
   - `getCase(caseId)`
   - `updateCaseStatus(caseId, status)`
+  - `allocatePracticeCode()`
+  - `createPractice(input)`
+  - `findPracticeByCode(practiceCode)`
+  - `findPracticeBySourceMessageId(sourceMessageId)`
+  - `listPractices(filter)`
 - `createSqlitePersistenceService(config)` opens a SQLite-backed service against an explicit `file:` database path.
 - `createInMemoryPersistenceService()` provides a process-local service for tests and non-SQLite callers.
-- `createBusinessPersistenceService(persistence)` narrows a shared persistence implementation to the consent/intake/case business boundary.
-- `createSqliteBusinessPersistenceService(config)` exposes the same business boundary plus ready-intake lookup helpers for operator commands.
+- `createBusinessPersistenceService(persistence)` narrows a shared persistence implementation to the consent/intake/practice/case business boundary.
+- `createSqliteBusinessPersistenceService(config)` exposes the same business boundary plus ready-intake lookup helpers for legacy operator commands.
 - The service sanitizes processed-message metadata, audit payloads, consent metadata, and intake metadata before they can cross the boundary.
 - The OpenWA smoke runtime can inject an existing shared `PersistenceService`, derive `BusinessPersistenceService` from it, or create one SQLite-backed shared implementation when either business persistence or technical persistence needs durable storage.
 - Client runtime wiring uses narrow application-layer adapters so consent-gated intake writes stay separate from M10 technical dedupe and audit wiring.
@@ -83,6 +99,11 @@ M29 adds operator-safe VPS/systemd startup workflow commands. `npm run ops:prefl
 - `src/app/caseDoctor.ts` is the operator entrypoint for persistence consistency checks. It loads env through the shared loader, requires an already migrated SQLite database, checks only migration and case-count aggregates, and never prints raw rows, SQL text, database paths, message bodies, transcripts, secrets, or full phone numbers.
 - `src/app/intakeListReady.ts` is the operator entrypoint for completed-intake discovery. It loads env through the shared loader, requires an already migrated SQLite database, reads through `SqliteBusinessPersistenceService`, lists only consent-granted `intake_complete` subjects that already have all accepted intake fields, and prints only `{ subjectId, intakeState, updatedAt, fieldNamesPresent }`.
 - The `subjectId` printed by `npm run intake:list-ready` is an operator-safe token accepted by `npm run case:create-from-intake -- --subject <subjectId>`. It does not print the raw phone-derived subject identifier.
+- `src/domain/practices/practiceCreationService.ts` is the Cloud practice creation
+  boundary. It revalidates granted consent, `intake_complete`, accepted identity,
+  legal issue, and attachment metadata; allocates the next practice code; creates a
+  `draft` practice; and appends sanitized `client_intake_completed`,
+  `practice_created_from_intake`, or `practice_create_idempotent_hit` audit events.
 
 ## SQLite Foundation
 
@@ -106,6 +127,9 @@ M29 adds operator-safe VPS/systemd startup workflow commands. `npm run ops:prefl
 - `0009_harden_cases_schema` safely rebuilds legacy `cases` tables when older SQLite files still use `reference`, camelCase columns, or extra transcript/body columns, and it copies forward only the minimal supported case fields.
 - `0010_enforce_draft_case_uniqueness` scans historical `draft` cases by `subjectId`, keeps the earliest `created_at` row as `draft`, marks later duplicates as `duplicate_archived`, and adds the partial unique index `cases_one_draft_per_subject_id` on `cases(subject_id) WHERE status = 'draft'`.
 - `0011_normalize_intake_schema_for_identity_fields` upgrades intake state and field storage to the formal single-message identity flow and preserves only supported structured values in the new schema.
+- `0012_create_practice_registry` adds `practice_sequence`, `practices`, and the
+  attachment-aware intake schema. Practice codes are allocated persistently from
+  `AA001` through `ZZ999` and fail safely after exhaustion.
 - `npm run case:doctor` reports only aggregate counts: applied and pending migration counts, current `draft` case count, unique `draft` subject count, `duplicate_archived` count, duplicate-draft anomaly counts, and whether the committed draft-uniqueness index is present.
 - Technical runtime startup never runs migrations. When `TECHNICAL_PERSISTENCE_ENABLED=true`, startup requires `npm run db:migrate` to have been completed already or it fails safely with a clear error.
 - Live OpenWA runtime startup also fails safely before accepting client traffic when business persistence is disabled or when the business persistence boundary cannot be constructed.
@@ -116,6 +140,8 @@ M29 adds operator-safe VPS/systemd startup workflow commands. `npm run ops:prefl
   - `intake_states`
   - `intake_fields`
   - `intake_events`
+  - `practice_sequence`
+  - `practices`
   - `processed_messages`
   - `audit_events`
   - `schema_migrations`
@@ -142,8 +168,10 @@ M29 adds operator-safe VPS/systemd startup workflow commands. `npm run ops:prefl
   - `birthDate`
   - `city`
   - `problemSummary`
+  - `attachmentMetadata`
 - Intake persistence stores state transitions separately from accepted structured fields and may append intake events without duplicating raw message content.
-- Intake persistence must not store raw inbound bodies, invalid replies, rejected values, full transcripts, attachments, or live case records.
+- Intake persistence must not store raw inbound bodies, invalid replies, rejected values,
+  full transcripts, attachment contents, or live case records.
 - Case records created through M16 and M17 store only:
   - `caseId`
   - `subjectId`
@@ -154,15 +182,32 @@ M29 adds operator-safe VPS/systemd startup workflow commands. `npm run ops:prefl
   - `updatedAt`
 - The M17 schema-hardening migration copies forward only those case fields and removes legacy `rawBody`, `body`, `transcript`, or other extra columns from the SQLite `cases` table.
 - Case creation does not store full phone-number metadata, raw message bodies, transcripts, rejected values, attachments, or legal advice content.
+- Practice records created through M45 store only:
+  - `practiceCode`
+  - `subjectId`
+  - `status`
+  - client first name, last name, birth date, and city snapshot
+  - safe subject reference
+  - original accepted legal issue text
+  - optional schema-validated cleaned issue text
+  - attachment metadata JSON
+  - source completion message id
+  - timestamps
+- Practice records do not store raw webhook bodies, full transcripts, rejected input,
+  provider tokens, media URLs, attachment contents, full phone numbers for display, or
+  legal advice.
 - The M18 manual command still stores only the accepted structured intake fields already present in intake persistence. It does not persist raw bodies, transcripts, rejected values, or secret-bearing metadata.
 - M19 keeps manual case creation idempotent by `subjectId` plus existing `draft` case. The idempotent-hit audit event stores only sanitized structured metadata and does not persist transcripts, raw bodies, rejected values, or full phone numbers.
 - M20 remediation never stores transcripts, message bodies, or rejected values. It changes only case status metadata inside the existing `cases` table and preserves duplicate rows as `duplicate_archived` instead of deleting them.
 - M21 uniqueness-error mapping and `case:doctor` output are sanitized by policy. They must not expose SQL statements, database paths, raw rows, message bodies, transcripts, rejected values, or secrets.
 - M22 `intake:list-ready` output is sanitized by policy. It must not expose raw subject ids, full phone numbers, SQL text, database paths, raw rows, message bodies, transcripts, rejected values, or secrets.
 - M28 `business:check` and `business:backup` outputs are sanitized by policy. They must not expose full phone numbers, subject ids, raw rows, transcripts, message bodies, QR data, session data, or secrets.
-- Live WhatsApp runtime writes never create or update cases automatically.
+- Live WhatsApp runtime writes never create or update legacy `cases` automatically.
+  The Cloud runtime does automatically create `draft` practices after completed intake.
 - M13 live consent wiring never stores inbound message body text in consent state metadata or consent events.
-- M15 live intake wiring persists only accepted structured `firstName`, `lastName`, `birthDate`, `city`, and `problemSummary` values plus sanitized metadata after explicit `granted` consent.
+- M15/M45 live intake wiring persists only accepted structured `firstName`, `lastName`,
+  `birthDate`, `city`, `problemSummary`, and `attachmentMetadata` values plus sanitized
+  metadata after explicit `granted` consent.
 - M27 keeps business-state persistence explicit even when technical persistence is disabled. Turning off technical persistence must not disable or bypass consent, intake, or manual case-creation reads.
 - M16 case creation requires `granted` consent, `intake_complete`, and valid accepted identity fields plus `problemSummary`. It remains a separate application boundary with its own tests and review.
 
@@ -221,7 +266,11 @@ M29 adds operator-safe VPS/systemd startup workflow commands. `npm run ops:prefl
   - `granted` + `not_started` -> persist `asking_identity` and output `intake_ask_identity`
   - `granted` + extractable `asking_identity` reply -> persist `asking_problem_summary`, store only accepted `firstName`, `lastName`, `birthDate`, and `city`, and output `intake_ask_problem_summary`
   - `granted` + incomplete or ambiguous `asking_identity` reply -> persist only safe partial accepted identity fields, output `intake_clarify_identity`, and do not persist the raw rejected text
-  - `granted` + valid `asking_problem_summary` reply -> persist `intake_complete`, store only the accepted `problemSummary` field, and output `intake_complete_ack`
+  - `granted` + valid `asking_problem_summary` reply -> persist `asking_attachments`,
+    store only the accepted `problemSummary` field, and output `intake_ask_attachments`
+  - `granted` + attachment metadata or explicit skip during `asking_attachments` ->
+    persist `intake_complete`, store only `attachmentMetadata`, and output
+    `intake_complete_ack`
   - invalid intake values -> output `intake_invalid_response` without storing the raw reply
   - `denied` -> output the safe no-processing close response
 - M16 adds explicit application-side case creation only:
@@ -254,4 +303,4 @@ M29 adds operator-safe VPS/systemd startup workflow commands. `npm run ops:prefl
   - `npm run intake:list-ready` logs `intake_list_ready_starting`, `intake_list_ready_checked`, or `intake_list_ready_failed`
   - `npm run intake:list-ready` prints only operator-safe completed-intake candidates
   - operators must still run `npm run case:create-from-intake` explicitly to create a draft case
-- The live OpenWA runtime still does not create cases automatically, store full transcripts, or persist raw message bodies.
+- The live OpenWA runtime still does not create cases automatically, store full transcripts, or persist raw message bodies. Automatic practice creation is wired for the Cloud product runtime.

@@ -61,26 +61,34 @@ OpenWA listeners and Cloud webhook handlers orchestrate transport concerns only.
   - `birthDate`
   - `city`
   - `problemSummary`
+  - `attachmentMetadata`
+- After the legal issue is accepted, the runtime asks for attachments. `Salta` records
+  an empty metadata list; supported Cloud media messages record safe metadata only.
 - Only accepted structured fields are persisted after consent is granted.
 - Raw transcripts and rejected values are not persisted.
 
 ## Current Lawyer Runtime Behavior
 
 - The Cloud lawyer branch is available only to the configured operator phone.
-- Supported commands are `help`, `status`, `ping`, and `intake-ready` with documented
-  Italian aliases.
-- Operator replies contain sanitized runtime or ready-intake summaries only.
+- Supported commands are `help` / `aiuto`, `status` / `stato`, `pratiche`,
+  `pratiche oggi`, `pratiche ultimi 7 giorni`, and `pratica AA001`.
+- Operator replies contain sanitized runtime state, safe practice lists, or structured
+  practice detail only.
 
 ## Case Handling
 
-- Manual case creation stays outside the live transport path.
+- Legacy manual case creation stays outside the live transport path.
 - `case:create-from-intake`, `business:check`, `business:backup`, `case:doctor`, and `ops:preflight` remain reusable operator commands.
-- No live transport path creates a case automatically.
+- The Cloud product path creates a `draft` practice automatically after completed
+  consent-gated intake. It does not create legacy `cases` automatically.
+- Practice codes use the persistent `AA001...ZZ999` allocator.
 - No automatic WhatsApp notification is sent to the lawyer when a new case is opened.
-- Lawyer reviews remain operator-command-driven now and dashboard-driven later.
+- Lawyer reviews remain operator-command-driven now.
 
 ## LLM Boundary
 
 - LLM usage is not the main conversation engine.
-- Future LLM usage is limited to behind-the-scenes parsing, extraction, and normalization of free-text user input.
+- AI usage is limited to the controlled normalization seam: identity fallback when
+  deterministic parsing fails and cleaned legal-issue summaries that add no facts.
+- AI must not provide legal advice, invent missing data, or process attachments.
 - Recaps and case summaries should be generated from structured fields and templates whenever possible.

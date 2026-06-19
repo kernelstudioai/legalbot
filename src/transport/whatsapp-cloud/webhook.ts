@@ -20,7 +20,16 @@ const textMessageSchema = z.object({
       body: z.string().min(1)
     })
     .optional()
-});
+}).passthrough();
+
+const mediaObjectSchema = z
+  .object({
+    id: z.string().min(1).optional(),
+    mime_type: z.string().min(1).optional(),
+    filename: z.string().min(1).optional(),
+    sha256: z.string().min(1).optional()
+  })
+  .passthrough();
 
 const webhookPayloadSchema = z.object({
   object: z.string().optional(),
@@ -75,6 +84,35 @@ const toTimestampMilliseconds = (value: string): number | null => {
   }
 
   return timestampSeconds * 1000;
+};
+
+const toAttachmentMetadata = (
+  message: z.infer<typeof textMessageSchema>
+): TransportInboundMessage["attachments"] => {
+  if (
+    message.type !== "audio" &&
+    message.type !== "document" &&
+    message.type !== "image" &&
+    message.type !== "video"
+  ) {
+    return undefined;
+  }
+
+  const media = mediaObjectSchema.safeParse((message as Record<string, unknown>)[message.type]);
+
+  if (!media.success) {
+    return undefined;
+  }
+
+  return [
+    {
+      kind: message.type,
+      ...(media.data.id ? { providerMediaId: media.data.id } : {}),
+      ...(media.data.mime_type ? { mimeType: media.data.mime_type } : {}),
+      ...(media.data.filename ? { fileName: media.data.filename } : {}),
+      ...(media.data.sha256 ? { sha256: media.data.sha256 } : {})
+    }
+  ];
 };
 
 export const verifyWhatsAppCloudWebhook = (
@@ -165,7 +203,9 @@ export const parseWhatsAppCloudWebhookPayload = (
       statusEventCount += change.value.statuses?.length ?? 0;
 
       for (const message of change.value.messages ?? []) {
-        if (message.type !== "text" || !message.text?.body) {
+        const attachments = toAttachmentMetadata(message);
+
+        if (message.type !== "text" && !attachments) {
           unsupportedMessageCount += 1;
           continue;
         }
@@ -178,12 +218,19 @@ export const parseWhatsAppCloudWebhookPayload = (
         }
 
         const senderDisplayName = contactNames.get(message.from);
+        const body = message.type === "text" ? message.text?.body : "[allegato]";
+
+        if (!body) {
+          unsupportedMessageCount += 1;
+          continue;
+        }
 
         messages.push({
           id: message.id,
           from: message.from,
           chatId: message.from,
-          body: message.text.body,
+          body,
+          ...(attachments ? { attachments } : {}),
           fromMe: false,
           timestamp,
           transport: "whatsapp_cloud",

@@ -58,6 +58,7 @@ const setCompleteIdentity = async (
     birthDate: string;
     city: string;
     problemSummary?: string;
+    attachmentMetadata?: string;
   }
 ) => {
   await persistence.setIntakeField(subjectId, "firstName", values.firstName);
@@ -67,6 +68,10 @@ const setCompleteIdentity = async (
 
   if (values.problemSummary) {
     await persistence.setIntakeField(subjectId, "problemSummary", values.problemSummary);
+  }
+
+  if (values.attachmentMetadata) {
+    await persistence.setIntakeField(subjectId, "attachmentMetadata", values.attachmentMetadata);
   }
 };
 
@@ -127,7 +132,8 @@ describe("ready-intake listing command", () => {
         lastName: "Rossi",
         birthDate: "01/01/1980",
         city: "Roma",
-        problemSummary: "Transcript body secret should never print"
+        problemSummary: "Transcript body secret should never print",
+        attachmentMetadata: "[]"
       });
 
       await persistence.setConsentState(readyGenericSubjectId, "granted");
@@ -139,7 +145,8 @@ describe("ready-intake listing command", () => {
         lastName: "Verdi",
         birthDate: "02/02/1985",
         city: "Milano",
-        problemSummary: "Token abc1234567890123456789012345 should never print"
+        problemSummary: "Token abc1234567890123456789012345 should never print",
+        attachmentMetadata: "[]"
       });
 
       await persistence.setConsentState(incompleteSubjectId, "granted");
@@ -193,13 +200,27 @@ describe("ready-intake listing command", () => {
         subjectId: toOperatorSubjectId(readyPhoneSubjectId),
         intakeState: "intake_complete",
         updatedAt: "2026-06-06T08:00:00.000Z",
-        fieldNamesPresent: ["firstName", "lastName", "birthDate", "city", "problemSummary"]
+        fieldNamesPresent: [
+          "firstName",
+          "lastName",
+          "birthDate",
+          "city",
+          "problemSummary",
+          "attachmentMetadata"
+        ]
       },
       {
         subjectId: toOperatorSubjectId(readyGenericSubjectId),
         intakeState: "intake_complete",
         updatedAt: "2026-06-06T09:00:00.000Z",
-        fieldNamesPresent: ["firstName", "lastName", "birthDate", "city", "problemSummary"]
+        fieldNamesPresent: [
+          "firstName",
+          "lastName",
+          "birthDate",
+          "city",
+          "problemSummary",
+          "attachmentMetadata"
+        ]
       }
     ]);
     expect(stdout.output).toBe(`${JSON.stringify(summary.candidates)}\n`);
@@ -286,6 +307,10 @@ describe("ready-intake listing command", () => {
           clientIntakePersistence: persistence
         }
       );
+      await runInboundPipeline(createMessage("wamid.flow-5", "Salta"), {
+        clientConsentPersistence: persistence,
+        clientIntakePersistence: persistence
+      });
     } finally {
       persistence.close();
     }
@@ -306,7 +331,14 @@ describe("ready-intake listing command", () => {
         subjectId: toOperatorSubjectId(subjectId),
         intakeState: "intake_complete",
         updatedAt: expect.any(String),
-        fieldNamesPresent: ["firstName", "lastName", "birthDate", "city", "problemSummary"]
+        fieldNamesPresent: [
+          "firstName",
+          "lastName",
+          "birthDate",
+          "city",
+          "problemSummary",
+          "attachmentMetadata"
+        ]
       }
     ]);
     expect(stdout.output).not.toContain(subjectId);
@@ -371,6 +403,7 @@ describe("ready-intake listing command", () => {
     await onMessageListener?.(
       createMessage("wamid.m27-4", "Ho bisogno di assistenza per un problema di lavoro.")
     );
+    await onMessageListener?.(createMessage("wamid.m27-5", "Salta"));
     await app.stop("test_shutdown");
 
     const persistence = createSqlitePersistenceService({
@@ -388,7 +421,8 @@ describe("ready-intake listing command", () => {
           lastName: "Barone",
           birthDate: "01/01/1976",
           city: "Roma",
-          problemSummary: "Ho bisogno di assistenza per un problema di lavoro."
+          problemSummary: "Ho bisogno di assistenza per un problema di lavoro.",
+          attachmentMetadata: "[]"
         }
       });
     } finally {
@@ -411,7 +445,14 @@ describe("ready-intake listing command", () => {
         subjectId: toOperatorSubjectId(subjectId),
         intakeState: "intake_complete",
         updatedAt: expect.any(String),
-        fieldNamesPresent: ["firstName", "lastName", "birthDate", "city", "problemSummary"]
+        fieldNamesPresent: [
+          "firstName",
+          "lastName",
+          "birthDate",
+          "city",
+          "problemSummary",
+          "attachmentMetadata"
+        ]
       }
     ]);
     expect(stdout.output).not.toContain(subjectId);

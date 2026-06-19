@@ -7,12 +7,22 @@ import {
 import type { ClientIntakeRecord } from "../../src/runtime/client/intake";
 import type { IntakeSnapshot } from "../../src/persistence";
 
-const createEnvelope = (body: string) => ({
+const createEnvelope = (
+  body: string,
+  attachments?: Array<{
+    kind: "audio" | "document" | "image" | "video";
+    providerMediaId?: string;
+    mimeType?: string;
+    fileName?: string;
+    sha256?: string;
+  }>
+) => ({
   messageId: "wamid.client-1",
   channel: "whatsapp" as const,
   senderId: "15551234567@c.us",
   senderDisplayName: "Prospective Client",
   body,
+  ...(attachments ? { attachments } : {}),
   receivedAt: "2026-06-04T12:00:00.000Z",
   transportMetadata: {
     chatId: "15551234567@c.us",
@@ -62,6 +72,11 @@ const toSnapshot = (intakeRecord: ClientIntakeRecord | null): IntakeSnapshot | n
           ...(intakeRecord.problemSummary
             ? {
                 problemSummary: intakeRecord.problemSummary
+              }
+            : {}),
+          ...(intakeRecord.attachmentMetadata
+            ? {
+                attachmentMetadata: intakeRecord.attachmentMetadata
               }
             : {})
         }
@@ -296,7 +311,7 @@ describe("client runtime wiring", () => {
     );
   });
 
-  it("accepts a valid problem summary and completes intake without storing the raw inbound body", async () => {
+  it("accepts a valid problem summary and asks for attachments without storing the raw inbound body", async () => {
     const consentPersistence = createConsentPersistence("granted");
     const intakePersistence = createIntakePersistence({
       subjectId: "15551234567@c.us",
@@ -314,10 +329,10 @@ describe("client runtime wiring", () => {
       intakePersistence
     });
 
-    expect(result.runtimeDecision.action).toBe("intake_complete_ack");
+    expect(result.runtimeDecision.action).toBe("intake_ask_attachments");
     expect(intakePersistence.setIntakeState).toHaveBeenCalledWith(
       "15551234567@c.us",
-      "intake_complete",
+      "asking_attachments",
       expect.objectContaining({
         updatedAt: expect.any(String)
       })
@@ -334,6 +349,39 @@ describe("client runtime wiring", () => {
           text: expect.anything()
         })
       })
+    );
+  });
+
+  it("completes intake when the attachment step is skipped", async () => {
+    const consentPersistence = createConsentPersistence("granted");
+    const intakePersistence = createIntakePersistence({
+      subjectId: "15551234567@c.us",
+      state: "asking_attachments",
+      updatedAt: "2026-06-04T12:03:00.000Z",
+      firstName: "Mario",
+      lastName: "Rossi",
+      birthDate: "01/01/1980",
+      city: "Roma",
+      problemSummary: "Licenziamento improvviso e richiesta di chiarimenti contrattuali"
+    });
+
+    const result = await runClientRuntime({
+      envelope: createEnvelope("Salta"),
+      consentPersistence,
+      intakePersistence
+    });
+
+    expect(result.runtimeDecision.action).toBe("intake_complete_ack");
+    expect(intakePersistence.setIntakeState).toHaveBeenCalledWith(
+      "15551234567@c.us",
+      "intake_complete",
+      expect.any(Object)
+    );
+    expect(intakePersistence.setIntakeField).toHaveBeenCalledWith(
+      "15551234567@c.us",
+      "attachmentMetadata",
+      "[]",
+      expect.any(Object)
     );
   });
 

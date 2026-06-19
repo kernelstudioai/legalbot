@@ -88,7 +88,7 @@ describe("ops preflight command", () => {
         webhookPort: null
       },
       migrations: {
-        appliedMigrationCount: 11,
+        appliedMigrationCount: 12,
         pendingMigrationCount: 0
       },
       businessCheck: {
@@ -139,7 +139,7 @@ describe("ops preflight command", () => {
     expect(summary.report.blockers).toContain("pending_migrations");
     expect(summary.report.blockers).toContain("business_check_failed");
     expect(summary.report.blockers).toContain("case_doctor_failed");
-    expect(summary.report.migrations.pendingMigrationCount).toBe(11);
+    expect(summary.report.migrations.pendingMigrationCount).toBe(12);
   });
 
   it("validates a Cloud runtime preflight without leaking secrets", () => {

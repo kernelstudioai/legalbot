@@ -10,6 +10,8 @@ import type {
   ClientConsentPersistence,
   ClientIntakePersistence
 } from "../runtime/client/clientRuntime.ts";
+import type { PracticeCreationPersistence } from "../domain/practices/practiceCreationService.ts";
+import type { AiNormalizationProvider } from "../domain/practices/aiNormalization.ts";
 import type { LawyerRuntimeOptions } from "../runtime/lawyer/lawyerRuntime.ts";
 import { resolveRouting } from "../routing/resolveRouting.ts";
 import { decideNextAction } from "../runtime/shared/decideNextAction.ts";
@@ -26,6 +28,8 @@ export interface PipelineResult {
 export interface RunInboundPipelineOptions {
   clientConsentPersistence?: ClientConsentPersistence;
   clientIntakePersistence?: ClientIntakePersistence;
+  practicePersistence?: PracticeCreationPersistence;
+  aiNormalizationProvider?: AiNormalizationProvider;
   lawyerRuntime?: LawyerRuntimeOptions;
   requireBusinessPersistence?: boolean;
 }
@@ -50,6 +54,16 @@ export const runInboundPipeline = async (
     ...(options.clientIntakePersistence
       ? {
           clientIntakePersistence: options.clientIntakePersistence
+        }
+      : {}),
+    ...(options.practicePersistence
+      ? {
+          practicePersistence: options.practicePersistence
+        }
+      : {}),
+    ...(options.aiNormalizationProvider
+      ? {
+          aiNormalizationProvider: options.aiNormalizationProvider
         }
       : {}),
     ...(options.lawyerRuntime

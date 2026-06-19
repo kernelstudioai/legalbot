@@ -16,7 +16,8 @@ const acceptedIntakeFields = new Set<IntakeFieldName>([
   "lastName",
   "birthDate",
   "city",
-  "problemSummary"
+  "problemSummary",
+  "attachmentMetadata"
 ]);
 
 const mapStateRow = (row: {

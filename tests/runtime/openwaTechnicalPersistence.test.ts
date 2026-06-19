@@ -107,7 +107,14 @@ describe("openwa technical persistence", () => {
       },
       findDraftCaseBySubjectId: async () => null,
       getCase: async () => null,
-      updateCaseStatus: async () => null
+      updateCaseStatus: async () => null,
+      allocatePracticeCode: async () => "AA001",
+      createPractice: async () => {
+        throw new Error("not used");
+      },
+      findPracticeByCode: async () => null,
+      findPracticeBySourceMessageId: async () => null,
+      listPractices: async () => []
     };
     const technicalPersistence = createOpenWaTechnicalPersistence(persistenceService, {
       sessionId: "legalbot-smoke"
@@ -203,7 +210,8 @@ describe("openwa technical persistence", () => {
         "0008_create_intake_events",
         "0009_harden_cases_schema",
         "0010_enforce_draft_case_uniqueness",
-        "0011_normalize_intake_schema_for_identity_fields"
+        "0011_normalize_intake_schema_for_identity_fields",
+        "0012_create_practice_registry"
       ],
       databasePath: path.join(tempDir, "data", "legalbot.sqlite")
     });

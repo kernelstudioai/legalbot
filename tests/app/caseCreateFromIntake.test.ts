@@ -56,6 +56,7 @@ const seedCompletedIntake = async (
     birthDate?: string;
     city?: string;
     problemSummary?: string;
+    attachmentMetadata?: string;
   } = {}
 ): Promise<void> => {
   await persistence.setConsentState(subjectId, options.consentState ?? "granted");
@@ -79,6 +80,10 @@ const seedCompletedIntake = async (
 
   if (options.problemSummary !== undefined) {
     await persistence.setIntakeField(subjectId, "problemSummary", options.problemSummary);
+  }
+
+  if (options.attachmentMetadata !== undefined) {
+    await persistence.setIntakeField(subjectId, "attachmentMetadata", options.attachmentMetadata);
   }
 };
 
@@ -385,7 +390,8 @@ describe("manual case creation command", () => {
         lastName: "Rossi",
         birthDate: "01/01/1980",
         city: "Roma",
-        problemSummary: "Completed intake stays sanitized"
+        problemSummary: "Completed intake stays sanitized",
+        attachmentMetadata: "[]"
       });
     } finally {
       persistence.close();

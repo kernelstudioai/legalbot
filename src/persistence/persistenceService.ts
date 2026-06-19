@@ -23,6 +23,12 @@ import type {
   ProcessedMessageRecord,
   ProcessedMessageStore
 } from "./processedMessageStore.ts";
+import type {
+  CreatePracticeInput,
+  PracticeListFilter,
+  PracticeRecord,
+  PracticeStore
+} from "./practiceStore.ts";
 import {
   openSqliteDatabase,
   createSqliteTransactionRunner,
@@ -31,6 +37,7 @@ import {
   SqliteCaseStore,
   SqliteConsentStore,
   SqliteIntakeStore,
+  SqlitePracticeStore,
   SqliteProcessedMessageStore
 } from "./sqlite/index.ts";
 import {
@@ -38,6 +45,7 @@ import {
   InMemoryCaseStore,
   InMemoryConsentStore,
   InMemoryIntakeStore,
+  InMemoryPracticeStore,
   InMemoryProcessedMessageStore,
   createInMemoryPersistenceTransactionRunner
 } from "./testing/inMemoryStores.ts";
@@ -115,6 +123,10 @@ export interface PersistenceCreateCaseWithAuditResult {
   auditEvent: AuditEventRecord;
 }
 
+export interface PersistenceCreatePracticeResult {
+  practiceRecord: PracticeRecord;
+}
+
 export interface PersistenceTransactionRunner {
   runInTransaction<T>(operation: () => Promise<T>): Promise<T>;
 }
@@ -155,6 +167,11 @@ export interface PersistenceService {
   findDraftCaseBySubjectId(subjectId: string): Promise<CaseRecord | null>;
   getCase(caseId: string): Promise<CaseRecord | null>;
   updateCaseStatus(caseId: string, status: CaseStatus): Promise<CaseRecord | null>;
+  allocatePracticeCode(): Promise<string>;
+  createPractice(input: CreatePracticeInput): Promise<PracticeRecord>;
+  findPracticeByCode(practiceCode: string): Promise<PracticeRecord | null>;
+  findPracticeBySourceMessageId(sourceMessageId: string): Promise<PracticeRecord | null>;
+  listPractices(filter?: PracticeListFilter): Promise<PracticeRecord[]>;
 }
 
 export interface CreatePersistenceServiceOptions {
@@ -163,6 +180,7 @@ export interface CreatePersistenceServiceOptions {
   auditLogStore: AuditLogStore;
   consentStore: ConsentStore;
   intakeStore: IntakeStore;
+  practiceStore?: PracticeStore;
   transactionRunner?: PersistenceTransactionRunner;
   now?: () => string;
 }
@@ -178,9 +196,18 @@ export const createPersistenceService = ({
   auditLogStore,
   consentStore,
   intakeStore,
+  practiceStore,
   transactionRunner,
   now = () => new Date().toISOString()
 }: CreatePersistenceServiceOptions): PersistenceService => {
+  const requirePracticeStore = (): PracticeStore => {
+    if (!practiceStore) {
+      throw new Error("Practice persistence is not available.");
+    }
+
+    return practiceStore;
+  };
+
   const toStoredAuditEvent = (event: PersistenceAuditEventInput): AuditEventRecord => {
     const sanitizedMetadata = sanitizePersistenceMetadata(event.metadata);
 
@@ -343,6 +370,26 @@ export const createPersistenceService = ({
         status,
         updatedAt: now()
       });
+    },
+
+    async allocatePracticeCode() {
+      return requirePracticeStore().allocateNextPracticeCode();
+    },
+
+    async createPractice(input) {
+      return requirePracticeStore().create(input);
+    },
+
+    async findPracticeByCode(practiceCode) {
+      return requirePracticeStore().findByPracticeCode(practiceCode);
+    },
+
+    async findPracticeBySourceMessageId(sourceMessageId) {
+      return requirePracticeStore().findBySourceMessageId(sourceMessageId);
+    },
+
+    async listPractices(filter) {
+      return requirePracticeStore().list(filter);
     }
   };
 };
@@ -357,6 +404,7 @@ export const createSqlitePersistenceService = (
     auditLogStore: new SqliteAuditLogStore(database),
     consentStore: new SqliteConsentStore(database),
     intakeStore: new SqliteIntakeStore(database),
+    practiceStore: new SqlitePracticeStore(database),
     transactionRunner: createSqliteTransactionRunner(database)
   });
 
@@ -375,6 +423,7 @@ export const createInMemoryPersistenceService = (): PersistenceService => {
   const auditLogStore = new InMemoryAuditLogStore();
   const consentStore = new InMemoryConsentStore();
   const intakeStore = new InMemoryIntakeStore();
+  const practiceStore = new InMemoryPracticeStore();
 
   return createPersistenceService({
     caseStore,
@@ -382,12 +431,14 @@ export const createInMemoryPersistenceService = (): PersistenceService => {
     auditLogStore,
     consentStore,
     intakeStore,
+    practiceStore,
     transactionRunner: createInMemoryPersistenceTransactionRunner({
       caseStore,
       processedMessageStore,
       auditLogStore,
       consentStore,
-      intakeStore
+      intakeStore,
+      practiceStore
     })
   });
 };

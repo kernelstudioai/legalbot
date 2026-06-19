@@ -92,6 +92,10 @@ describe("inbound pipeline", () => {
         clientIntakePersistence: intakeStore
       }
     );
+    const attachmentResult = await runInboundPipeline(createMessage("wamid.live-5", "Salta"), {
+      clientConsentPersistence: consentStore,
+      clientIntakePersistence: intakeStore
+    });
 
     expect(firstResult.runtimeDecision.action).toBe("request_consent");
     expect(consentResult.runtimeDecision.action).toBe("intake_ask_identity");
@@ -99,7 +103,8 @@ describe("inbound pipeline", () => {
     expect(identityResult.outputPlan.messages[0]?.body).toBe(
       "La ringrazio. Descriva brevemente il problema per cui desidera assistenza."
     );
-    expect(summaryResult.runtimeDecision.action).toBe("intake_complete_ack");
+    expect(summaryResult.runtimeDecision.action).toBe("intake_ask_attachments");
+    expect(attachmentResult.runtimeDecision.action).toBe("intake_complete_ack");
     expect(await consentStore.getConsentState("client-live-1@c.us")).toBe("granted");
     await expect(intakeStore.getIntakeSnapshot("client-live-1@c.us")).resolves.toMatchObject({
       subjectId: "client-live-1@c.us",
@@ -109,7 +114,8 @@ describe("inbound pipeline", () => {
         lastName: "Barone",
         birthDate: "01/01/1976",
         city: "Roma",
-        problemSummary: "Ho bisogno di assistenza per un problema di lavoro."
+        problemSummary: "Ho bisogno di assistenza per un problema di lavoro.",
+        attachmentMetadata: "[]"
       }
     });
   });

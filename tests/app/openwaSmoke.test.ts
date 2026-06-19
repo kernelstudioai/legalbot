@@ -86,7 +86,12 @@ const createPersistenceService = (): PersistenceService => ({
   createCaseWithAudit: vi.fn(),
   findDraftCaseBySubjectId: vi.fn().mockResolvedValue(null),
   getCase: vi.fn(),
-  updateCaseStatus: vi.fn()
+  updateCaseStatus: vi.fn(),
+  allocatePracticeCode: vi.fn().mockResolvedValue("AA001"),
+  createPractice: vi.fn(),
+  findPracticeByCode: vi.fn().mockResolvedValue(null),
+  findPracticeBySourceMessageId: vi.fn().mockResolvedValue(null),
+  listPractices: vi.fn().mockResolvedValue([])
 });
 
 describe("openwa smoke startup", () => {

@@ -8,6 +8,7 @@ import type {
   PersistenceService,
   SqlitePersistenceService
 } from "./persistenceService.ts";
+import type { PracticeListFilter, PracticeRecord } from "./practiceStore.ts";
 import { createSqlitePersistenceService } from "./persistenceService.ts";
 import { intakeFieldNames, type IntakeFieldName } from "./intakeStore.ts";
 import { toOperatorSubjectId } from "./operatorSubjectId.ts";
@@ -17,6 +18,11 @@ export interface BusinessPersistenceService
     ClientIntakePersistence,
     CaseCreationPersistence {
   close?(): void;
+  allocatePracticeCode(): Promise<string>;
+  createPractice(input: Parameters<PersistenceService["createPractice"]>[0]): Promise<PracticeRecord>;
+  findPracticeByCode(practiceCode: string): Promise<PracticeRecord | null>;
+  findPracticeBySourceMessageId(sourceMessageId: string): Promise<PracticeRecord | null>;
+  listPractices(filter?: PracticeListFilter): Promise<PracticeRecord[]>;
 }
 
 export interface BusinessReadyIntakeCandidate {
@@ -71,6 +77,21 @@ const createBusinessBoundary = (
   findDraftCaseBySubjectId(subjectId) {
     return persistence.findDraftCaseBySubjectId(subjectId);
   },
+  allocatePracticeCode() {
+    return persistence.allocatePracticeCode();
+  },
+  createPractice(input) {
+    return persistence.createPractice(input);
+  },
+  findPracticeByCode(practiceCode) {
+    return persistence.findPracticeByCode(practiceCode);
+  },
+  findPracticeBySourceMessageId(sourceMessageId) {
+    return persistence.findPracticeBySourceMessageId(sourceMessageId);
+  },
+  listPractices(filter) {
+    return persistence.listPractices(filter);
+  },
   ...(typeof (persistence as { close?: unknown }).close === "function"
     ? {
         close() {
@@ -99,7 +120,7 @@ const listReadyIntakeCandidatesFromDatabase = (
           ON intake_fields.subject_id = intake_states.subject_id
         WHERE intake_states.intake_state = 'intake_complete'
           AND consent_states.consent_state = 'granted'
-          AND intake_fields.field_name IN ('firstName', 'lastName', 'birthDate', 'city', 'problemSummary')
+          AND intake_fields.field_name IN ('firstName', 'lastName', 'birthDate', 'city', 'problemSummary', 'attachmentMetadata')
         ORDER BY intake_states.updated_at ASC, intake_states.subject_id ASC, intake_fields.field_name ASC
       `
     ).all() as Array<{

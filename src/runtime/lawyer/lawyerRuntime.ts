@@ -4,7 +4,9 @@ import {
   isOperatorSubjectId,
   toOperatorSubjectId,
   type BusinessReadyIntakeCandidate,
-  type IntakeFieldName
+  type IntakeFieldName,
+  type PracticeListFilter,
+  type PracticeRecord
 } from "../../persistence/index.ts";
 import type { RuntimeContext } from "../shared/runtimeContext.ts";
 
@@ -15,8 +17,10 @@ export const lawyerRuntimeContext: RuntimeContext = {
 export type LawyerCommandKind =
   | "help"
   | "status"
-  | "ping"
-  | "intake-ready"
+  | "practice-list"
+  | "practice-list-today"
+  | "practice-list-last-7-days"
+  | "practice-detail"
   | "unknown";
 
 export interface LawyerRuntimeStatus {
@@ -46,6 +50,9 @@ export interface LawyerRuntimeOptions {
     | BusinessReadyIntakeCandidate[]
     | LawyerReadyIntakeSummary[]
     | Promise<BusinessReadyIntakeCandidate[] | LawyerReadyIntakeSummary[]>;
+  listPractices?: (filter?: PracticeListFilter) => PracticeRecord[] | Promise<PracticeRecord[]>;
+  getPracticeByCode?: (practiceCode: string) => PracticeRecord | null | Promise<PracticeRecord | null>;
+  now?: () => Date;
 }
 
 export interface RunLawyerRuntimeInput extends LawyerRuntimeOptions {
@@ -55,8 +62,10 @@ export interface RunLawyerRuntimeInput extends LawyerRuntimeOptions {
 const implementedCommands = [
   "help / aiuto",
   "status / stato",
-  "ping",
-  "intake-ready / intake pronti / intake completati"
+  "pratiche",
+  "pratiche oggi",
+  "pratiche ultimi 7 giorni",
+  "pratica AA001"
 ] as const;
 
 const normalizeCommandText = (value: string): string =>
@@ -80,26 +89,29 @@ export const classifyLawyerCommand = (value: string): LawyerCommandKind => {
     return "status";
   }
 
-  if (normalized === "ping") {
-    return "ping";
+  if (normalized === "pratiche") {
+    return "practice-list";
   }
 
-  if (
-    normalized === "intake-ready" ||
-    normalized === "intake ready" ||
-    normalized === "intake pronti" ||
-    normalized === "intake completati"
-  ) {
-    return "intake-ready";
+  if (normalized === "pratiche oggi") {
+    return "practice-list-today";
+  }
+
+  if (normalized === "pratiche ultimi 7 giorni" || normalized === "pratiche ultimi 7 giorni") {
+    return "practice-list-last-7-days";
+  }
+
+  if (/^pratica [a-z]{2}\d{3}$/iu.test(normalized)) {
+    return "practice-detail";
   }
 
   return "unknown";
 };
 
 const buildHelpMessage = (): string =>
-  `Comandi operatore disponibili:\n${implementedCommands
+  `Comandi studio disponibili:\n${implementedCommands
     .map((command) => `- ${command}`)
-    .join("\n")}`;
+    .join("\n")}\n\nLe pratiche vengono create automaticamente dopo il completamento dell'intake cliente. PDF e reinvio allegati non sono implementati.`;
 
 const defaultStatus = (): LawyerRuntimeStatus => ({
   runtime: {
@@ -156,6 +168,79 @@ const formatReadyIntakesMessage = (candidates: LawyerReadyIntakeSummary[]): stri
   ].join("\n");
 };
 
+const extractPracticeCode = (value: string): string | null => {
+  const match = normalizeCommandText(value).match(/\b([a-z]{2}\d{3})\b/iu);
+
+  return match?.[1]?.toUpperCase() ?? null;
+};
+
+const maskNameForList = (practice: PracticeRecord): string =>
+  `${practice.clientFirstName} ${practice.clientLastName.charAt(0).toLocaleUpperCase("it-IT")}.`;
+
+const formatPracticeListMessage = (practices: PracticeRecord[]): string => {
+  if (practices.length === 0) {
+    return "Nessuna pratica trovata.";
+  }
+
+  return [
+    "Pratiche:",
+    ...practices.map(
+      (practice) =>
+        `- ${practice.practiceCode} | ${maskNameForList(practice)} | ${practice.city} | ${practice.createdAt} | ${practice.status}`
+    )
+  ].join("\n");
+};
+
+const formatAttachmentBlock = (practice: PracticeRecord): string => {
+  if (practice.attachmentMetadata.length === 0) {
+    return "Allegati:\n- nessun allegato registrato";
+  }
+
+  return [
+    "Allegati:",
+    ...practice.attachmentMetadata.map((attachment, index) => {
+      const parts = [
+        `#${index + 1}`,
+        attachment.kind,
+        attachment.fileName ? `file=${attachment.fileName}` : null,
+        attachment.mimeType ? `mime=${attachment.mimeType}` : null,
+        attachment.sha256 ? "sha256=presente" : null
+      ].filter(Boolean);
+
+      return `- ${parts.join(" ")}`;
+    })
+  ].join("\n");
+};
+
+const formatPracticeDetailMessage = (practice: PracticeRecord): string =>
+  [
+    `Pratica ${practice.practiceCode} | stato: ${practice.status}`,
+    "",
+    "Cliente:",
+    `- nome: ${practice.clientFirstName} ${practice.clientLastName}`,
+    `- città: ${practice.city}`,
+    `- data di nascita: ${practice.birthDate}`,
+    `- riferimento: ${practice.subjectRef}`,
+    "",
+    "Questione legale:",
+    practice.legalIssueText,
+    ...(practice.cleanedIssueText
+      ? ["", "Sintesi normalizzata:", practice.cleanedIssueText]
+      : []),
+    "",
+    formatAttachmentBlock(practice),
+    "",
+    "Date:",
+    `- creata: ${practice.createdAt}`,
+    `- aggiornata: ${practice.updatedAt}`
+  ].join("\n");
+
+const startOfUtcDay = (date: Date): string =>
+  new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())).toISOString();
+
+const addUtcDays = (date: Date, days: number): string =>
+  new Date(date.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+
 const toRuntimeDecision = (
   action: RuntimeDecisionType["action"],
   rationale: string,
@@ -171,7 +256,10 @@ const toRuntimeDecision = (
 export const runLawyerRuntime = async ({
   envelope,
   getStatus,
-  listReadyIntakes
+  listReadyIntakes,
+  listPractices,
+  getPracticeByCode,
+  now = () => new Date()
 }: RunLawyerRuntimeInput): Promise<RuntimeDecisionType> => {
   const command = classifyLawyerCommand(envelope.body);
 
@@ -193,29 +281,59 @@ export const runLawyerRuntime = async ({
     );
   }
 
-  if (command === "ping") {
-    return toRuntimeDecision(
-      "lawyer_ping",
-      "Operator requested a Cloud runtime liveness ping",
-      "pong: runtime ready"
-    );
-  }
-
-  if (command === "intake-ready") {
-    if (!listReadyIntakes) {
+  if (
+    command === "practice-list" ||
+    command === "practice-list-today" ||
+    command === "practice-list-last-7-days"
+  ) {
+    if (!listPractices) {
       return toRuntimeDecision(
-        "lawyer_intake_ready",
-        "Operator requested ready intake list but no safe listing boundary is available",
-        "Elenco intake completati non disponibile in questa runtime."
+        "lawyer_practice_list",
+        "Operator requested practice list but no safe listing boundary is available",
+        "Elenco pratiche non disponibile in questa runtime."
       );
     }
 
-    const candidates = (await listReadyIntakes()).map(toSafeReadyIntakeSummary);
+    const currentDate = now();
+    const filter =
+      command === "practice-list-today"
+        ? {
+            createdAtOrAfter: startOfUtcDay(currentDate),
+            createdAtBefore: addUtcDays(new Date(startOfUtcDay(currentDate)), 1)
+          }
+        : command === "practice-list-last-7-days"
+          ? {
+              createdAtOrAfter: addUtcDays(currentDate, -7)
+            }
+          : undefined;
+    const practices = await listPractices(filter);
 
     return toRuntimeDecision(
-      "lawyer_intake_ready",
-      "Operator requested safe completed intake summaries",
-      formatReadyIntakesMessage(candidates)
+      "lawyer_practice_list",
+      "Operator requested safe practice summaries",
+      formatPracticeListMessage(practices)
+    );
+  }
+
+  if (command === "practice-detail") {
+    const practiceCode = extractPracticeCode(envelope.body);
+
+    if (!practiceCode || !getPracticeByCode) {
+      return toRuntimeDecision(
+        "lawyer_practice_detail",
+        "Operator requested practice detail but no safe detail boundary is available",
+        "Dettaglio pratica non disponibile in questa runtime."
+      );
+    }
+
+    const practice = await getPracticeByCode(practiceCode);
+
+    return toRuntimeDecision(
+      "lawyer_practice_detail",
+      "Operator requested safe practice detail",
+      practice
+        ? formatPracticeDetailMessage(practice)
+        : `Pratica ${practiceCode} non trovata.`
     );
   }
 

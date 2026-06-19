@@ -25,10 +25,16 @@ This is the only default startup context.
   - identity extraction boundary
   - `BusinessPersistenceService`
   - SQLite migrations
+  - practice registry and code allocator
   - manual case creation boundary
   - operator commands such as `business:check`, `business:backup`, `case:doctor`, `ops:preflight`, `ops:preflight:cloud`, `ops:post-start`, and `ops:post-start:cloud`
-- Keep case creation manual and operator-triggered only.
-- Do not add automatic lawyer WhatsApp notifications, dashboard flows, attachments, PDFs, or external SaaS automation in this phase.
+- Keep legacy case creation manual and operator-triggered only.
+- Cloud client intake automatically creates `draft` practices after consent, identity,
+  legal issue, and attachment metadata/skip are complete.
+- Keep attachments metadata-only unless a future storage milestone explicitly changes
+  that boundary.
+- Do not add automatic lawyer WhatsApp notifications, dashboard flows, PDFs,
+  appointment flow, legal advice, or external SaaS automation in this phase.
 
 ## Runtime Entry Points
 

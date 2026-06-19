@@ -131,21 +131,39 @@ Client flow over Cloud:
 1. First client text asks for explicit privacy consent.
 2. `Acconsento` starts the minimal intake.
 3. The client provides name, surname, birth date, and city in one message.
-4. The client provides a short problem summary.
-5. The bot stores only approved structured fields and replies with the intake completion
-   acknowledgement. It does not create a case automatically.
+4. The client provides the legal issue / reason for contacting the lawyer.
+5. The bot asks for attachments. The client can send a supported Cloud media message or
+   write `Salta`.
+6. Once the attachment step is completed or skipped, the bot automatically creates a
+   `draft` practice and replies with the practice code.
+
+Practice codes are allocated as `AA001` through `AA999`, then `AB001` through
+`ZZ999`. Codes are persistent and are not derived from conversation ids. A client can
+own multiple practices.
 
 Supported Cloud operator commands from the configured operator number:
 
 - `help` / `aiuto`
 - `status` / `stato`
-- `ping`
-- `intake-ready` / `intake pronti` / `intake completati`
+- `pratiche`
+- `pratiche oggi`
+- `pratiche ultimi 7 giorni`
+- `pratica AA001`
 
 `status` returns only sanitized runtime readiness, persistence enabled state, and
-migration counts when available. `intake-ready` returns only safe operator subject IDs,
-intake state, update time, and present field names. It does not include message bodies,
-transcripts, rejected input, full phone numbers, secrets, or raw database rows.
+migration counts when available. Practice list replies include only practice code,
+masked client name, city, created time, and status. Practice detail replies include
+structured client, legal issue, attachment metadata, and timestamp blocks. They never
+include raw webhook bodies, raw database rows, provider tokens, media URLs, app secrets,
+verify tokens, or full phone numbers.
+
+AI is only a controlled normalization/summarization seam. It may normalize identity
+fields when deterministic parsing fails and may produce a cleaned legal-issue summary
+without adding facts. It is disabled/stubbed unless an implementation is explicitly
+configured, must validate schema output before persistence, must not provide legal
+advice, and must not process attachments. Future provider configuration should use
+dedicated environment keys such as `AI_NORMALIZATION_PROVIDER`, `AI_NORMALIZATION_MODEL`,
+and a provider-specific API key; do not print those values.
 
 ## Operator Runbook
 
@@ -184,10 +202,10 @@ Expected sanitized logs during live Cloud messages include:
 - `whatsapp_cloud_output_dispatched`
 
 Once a phone and live Meta delivery are available, capture evidence by sending a
-controlled operator `ping` from the configured phone and one client consent/intake turn
-from a non-operator phone. Record only sanitized log event names and HTTP status
-evidence. Do not store tokens, raw webhook bodies, full phone numbers, transcripts, or
-raw database rows.
+controlled operator `status` or `pratiche` command from the configured phone and one
+client consent/intake-to-practice flow from a non-operator phone. Record only sanitized
+log event names, practice code presence, and HTTP status evidence. Do not store tokens,
+raw webhook bodies, full phone numbers, transcripts, or raw database rows.
 
 ## Local Webhook Replay
 
@@ -279,9 +297,9 @@ npm run webhook:replay:cloud -- --signed --fixture tests/fixtures/whatsapp-cloud
 ```
 
 Stop the foreground runtime with `Ctrl-C`. The runtime closes its HTTP server and
-persistence handle before exiting. This workflow does not call Meta, register a public
-webhook, run the business pipeline, dispatch outbound messages, create cases, or notify
-a lawyer.
+persistence handle before exiting. This workflow does not call Meta or register a
+public webhook. Replay validation stops before the business pipeline, outbound
+dispatch, practice creation, or lawyer notification.
 
 ## Deployment Shape
 
@@ -310,9 +328,10 @@ use `docs/META_WEBHOOK_NGROK_EVIDENCE_RUNBOOK.md`.
 - Client-initiated service flow should stay inside the customer service window when possible.
 - That operating model keeps the WhatsApp API cost near zero for the intended intake flow.
 - No automatic WhatsApp notification is sent to the lawyer when a new case is opened.
-- Lawyer review remains operator-command-driven now and dashboard-driven later.
-- No automatic case creation is enabled.
-- LLM is not the main conversation engine.
+- Lawyer review remains operator-command-driven now.
+- Practices are created automatically after completed client intake; the lawyer does
+  not manually create intake/practice records.
+- AI is not the main conversation engine and is not legal advice.
 
 ## Pricing Model Notes
 
@@ -334,6 +353,9 @@ For this project's current low-volume intake assumptions:
 - No dashboard.
 - No multi-bot runtime.
 - No n8n integration.
-- No attachments.
+- Attachments are metadata-only unless a future media download/storage milestone is
+  implemented.
 - No PDF generation.
+- No appointment flow.
+- No legal advice.
 - No automatic lawyer WhatsApp notifications.

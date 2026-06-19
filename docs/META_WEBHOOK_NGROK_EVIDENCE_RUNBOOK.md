@@ -9,8 +9,9 @@ This runbook documents the operator-safe manual path to:
 - subscribe the app to the relevant WhatsApp webhook field
 - capture first real Meta-signed delivery evidence
 
-This runbook does not automate Meta dashboard registration, does not add production
-nginx/TLS, and does not change runtime business behavior. Keep all evidence sanitized.
+This runbook does not automate Meta dashboard registration and does not add production
+nginx/TLS. Runtime business behavior is the current Cloud product flow: completed
+client intake creates a draft practice automatically. Keep all evidence sanitized.
 
 ## Safety Rules
 
@@ -166,7 +167,9 @@ Operator procedure:
 
 1. Keep the verified callback and active ngrok tunnel in place.
 2. Send one controlled real WhatsApp message to the business number from an operator-held
-   test handset.
+   test handset. For product evidence, complete the consent, identity, legal issue, and
+   attachment skip flow from a non-operator phone and record only that a practice code
+   was returned.
 3. Wait for the real Meta webhook delivery to hit the runtime.
 4. Capture only sanitized runtime evidence.
 5. Record the HTTP outcome observed from Meta dashboard tooling if available, without
@@ -178,6 +181,7 @@ Expected first real delivery evidence:
 - sanitized `whatsapp_cloud_message_received` appears
 - sanitized `cloud_actor_resolved` appears
 - if outbound dispatch succeeds, sanitized `whatsapp_cloud_output_dispatched` appears
+- for a completed client intake, a safe practice code is returned to the client
 - if outbound dispatch fails, sanitized `whatsapp_cloud_request_failed` may appear
 - any logged message identifier stays sanitized or partial according to current runtime
   behavior
@@ -191,7 +195,8 @@ Real success proof for M42 is:
 ## Operator Recognition Evidence
 
 Once live inbound delivery is available from the operator-held phone configured in
-`LAWYER_PHONE_E164`, send a controlled `ping` message to the business number.
+`LAWYER_PHONE_E164`, send a controlled `status` or `pratiche` message to the business
+number.
 
 Safe evidence command:
 
@@ -203,7 +208,8 @@ docker compose --profile cloud logs --tail=200 legalbot-whatsapp-cloud | \
 Expected operator evidence:
 
 - `cloud_actor_resolved` reports `actor=lawyer` or equivalent structured JSON.
-- `cloud_operator_command_received` reports `command=ping`.
+- `cloud_operator_command_received` reports `command=status` or
+  `command=practice-list`.
 - `cloud_operator_command_handled` appears.
 - `whatsapp_cloud_output_dispatched` appears if outbound Cloud dispatch succeeds.
 - No full phone number, token, raw body, transcript, or raw database row is printed.

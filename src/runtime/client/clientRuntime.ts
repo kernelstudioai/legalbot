@@ -11,6 +11,11 @@ import type {
 } from "../../persistence/index.ts";
 import type { RuntimeContext } from "../shared/runtimeContext.ts";
 import { resolveConsentRuntimeDecision } from "./consent.ts";
+import {
+  createPracticeCreationService,
+  type PracticeCreationPersistence
+} from "../../domain/practices/practiceCreationService.ts";
+import type { AiNormalizationProvider } from "../../domain/practices/aiNormalization.ts";
 import type { ClientIntakeRecord, SetClientIntakeRecordInput } from "./intake.ts";
 import { resolveClientIntakeRuntimeDecision } from "./intake.ts";
 
@@ -55,6 +60,8 @@ export interface RunClientRuntimeInput {
   envelope: CanonicalEnvelopeType;
   consentPersistence?: ClientConsentPersistence;
   intakePersistence?: ClientIntakePersistence;
+  practicePersistence?: PracticeCreationPersistence;
+  aiNormalizationProvider?: AiNormalizationProvider;
   requireBusinessPersistence?: boolean;
 }
 
@@ -66,6 +73,9 @@ export interface RunClientRuntimeResult {
 
 const deriveConsentSubjectId = (envelope: CanonicalEnvelopeType): string =>
   envelope.transportMetadata.chatId;
+
+const buildPracticeCreatedMessage = (practiceCode: string): string =>
+  `La ringrazio. La richiesta e stata registrata come pratica ${practiceCode}. Lo studio la revisionera e La contattera se servono integrazioni. Non Le sto fornendo consulenza legale.`;
 
 const buildConsentMetadata = (
   envelope: CanonicalEnvelopeType
@@ -98,6 +108,11 @@ const toClientIntakeRecord = (snapshot: IntakeSnapshot | null): ClientIntakeReco
         ...(snapshot.fields.problemSummary
           ? {
               problemSummary: snapshot.fields.problemSummary
+            }
+          : {}),
+        ...(snapshot.fields.attachmentMetadata
+          ? {
+              attachmentMetadata: snapshot.fields.attachmentMetadata
             }
           : {})
       }
@@ -132,7 +147,8 @@ const persistIntakeRecord = async (
     "lastName",
     "birthDate",
     "city",
-    "problemSummary"
+    "problemSummary",
+    "attachmentMetadata"
   ] as const) {
     const nextValue = nextRecord[fieldName];
     const currentValue = currentRecord?.[fieldName];
@@ -161,6 +177,8 @@ export const runClientRuntime = async ({
   envelope,
   consentPersistence,
   intakePersistence,
+  practicePersistence,
+  aiNormalizationProvider,
   requireBusinessPersistence = false
 }: RunClientRuntimeInput): Promise<RunClientRuntimeResult> => {
   if (requireBusinessPersistence && (!consentPersistence || !intakePersistence)) {
@@ -220,6 +238,23 @@ export const runClientRuntime = async ({
     };
   }
 
+  const existingPracticeForMessage = practicePersistence
+    ? await practicePersistence.findPracticeBySourceMessageId(envelope.messageId)
+    : null;
+
+  if (existingPracticeForMessage) {
+    return {
+      subjectId,
+      consentState: consentDecision.consentState,
+      runtimeDecision: {
+        actor: "client",
+        action: "intake_complete_ack",
+        rationale: "Duplicate intake completion message matched an existing practice",
+        messageOverride: buildPracticeCreatedMessage(existingPracticeForMessage.practiceCode)
+      }
+    };
+  }
+
   const intakeSnapshot = intakePersistence
     ? await intakePersistence.getIntakeSnapshot(subjectId)
     : null;
@@ -229,11 +264,45 @@ export const runClientRuntime = async ({
     intakeRecord,
     inboundText: envelope.body,
     consentJustGranted:
-      currentConsentState !== "granted" && consentDecision.consentState === "granted"
+      currentConsentState !== "granted" && consentDecision.consentState === "granted",
+    ...(aiNormalizationProvider
+      ? {
+          aiNormalizationProvider
+        }
+      : {}),
+    ...(envelope.attachments
+      ? {
+          attachments: envelope.attachments
+        }
+      : {})
   });
 
   if (intakePersistence && intakeDecision.nextRecord) {
     await persistIntakeRecord(intakePersistence, envelope, intakeRecord, intakeDecision.nextRecord);
+  }
+
+  if (practicePersistence && intakeDecision.nextRecord?.state === "intake_complete") {
+    const practiceCreation = createPracticeCreationService({
+      persistence: practicePersistence,
+      ...(aiNormalizationProvider
+        ? {
+            aiNormalizationProvider
+          }
+        : {})
+    });
+    const result = await practiceCreation.createPracticeFromCompletedIntake({
+      subjectId,
+      sourceMessageId: envelope.messageId
+    });
+
+    return {
+      subjectId,
+      consentState: consentDecision.consentState,
+      runtimeDecision: {
+        ...intakeDecision.runtimeDecision,
+        messageOverride: buildPracticeCreatedMessage(result.practiceRecord.practiceCode)
+      }
+    };
   }
 
   return {

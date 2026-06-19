@@ -9,6 +9,7 @@ import {
   SqliteCaseStore,
   SqliteConsentStore,
   SqliteIntakeStore,
+  SqlitePracticeStore,
   SqliteProcessedMessageStore
 } from "../../src/persistence/sqlite/index.ts";
 
@@ -24,7 +25,8 @@ const allMigrationIds = [
   "0008_create_intake_events",
   "0009_harden_cases_schema",
   "0010_enforce_draft_case_uniqueness",
-  "0011_normalize_intake_schema_for_identity_fields"
+  "0011_normalize_intake_schema_for_identity_fields",
+  "0012_create_practice_registry"
 ] as const;
 const migrationIdsThrough0008 = allMigrationIds.slice(0, 8);
 const migrationIdsThrough0009 = allMigrationIds.slice(0, 9);
@@ -92,6 +94,8 @@ describe("sqlite persistence foundation", () => {
         "intake_events",
         "intake_fields",
         "intake_states",
+        "practice_sequence",
+        "practices",
         "processed_messages",
         "schema_migrations"
       ]);
@@ -168,11 +172,12 @@ describe("sqlite persistence foundation", () => {
       enabled: true
     });
 
-    expect(migrationResult.appliedMigrationIds).toEqual([
-      "0009_harden_cases_schema",
-      "0010_enforce_draft_case_uniqueness",
-      "0011_normalize_intake_schema_for_identity_fields"
-    ]);
+      expect(migrationResult.appliedMigrationIds).toEqual([
+        "0009_harden_cases_schema",
+        "0010_enforce_draft_case_uniqueness",
+        "0011_normalize_intake_schema_for_identity_fields",
+        "0012_create_practice_registry"
+      ]);
     expect(migrationResult.pendingMigrationIds).toEqual([]);
 
     const { database: migratedDatabase } = openSqliteDatabase({
@@ -309,7 +314,8 @@ describe("sqlite persistence foundation", () => {
 
     expect(migrationResult.appliedMigrationIds).toEqual([
       "0010_enforce_draft_case_uniqueness",
-      "0011_normalize_intake_schema_for_identity_fields"
+      "0011_normalize_intake_schema_for_identity_fields",
+      "0012_create_practice_registry"
     ]);
     expect(migrationResult.pendingMigrationIds).toEqual([]);
 
@@ -506,6 +512,57 @@ describe("sqlite persistence foundation", () => {
       });
     } finally {
       database.close();
+    }
+  });
+
+  it("allocates and stores practice codes persistently", async () => {
+    const { tempDir, databaseUrl } = createTempDatabaseConfig();
+    runSqliteMigrations({ databaseUrl, cwd: tempDir, enabled: true });
+
+    const firstConnection = openSqliteDatabase({
+      databaseUrl,
+      cwd: tempDir
+    });
+
+    try {
+      const store = new SqlitePracticeStore(firstConnection.database);
+
+      expect(await store.allocateNextPracticeCode()).toBe("AA001");
+      await store.create({
+        practiceCode: "AA001",
+        subjectId: "393331119999",
+        status: "draft",
+        clientFirstName: "Mario",
+        clientLastName: "Rossi",
+        birthDate: "01/01/1980",
+        city: "Roma",
+        subjectRef: "subject:test",
+        legalIssueText: "Sintesi breve del problema",
+        attachmentMetadata: [],
+        sourceMessageId: "wamid.practice-1",
+        createdAt: "2026-06-05T09:00:00.000Z",
+        updatedAt: "2026-06-05T09:00:00.000Z"
+      });
+      expect(await store.allocateNextPracticeCode()).toBe("AA002");
+    } finally {
+      firstConnection.database.close();
+    }
+
+    const secondConnection = openSqliteDatabase({
+      databaseUrl,
+      cwd: tempDir
+    });
+
+    try {
+      const store = new SqlitePracticeStore(secondConnection.database);
+
+      expect(await store.allocateNextPracticeCode()).toBe("AA003");
+      await expect(store.findByPracticeCode("AA001")).resolves.toMatchObject({
+        practiceCode: "AA001",
+        subjectId: "393331119999"
+      });
+    } finally {
+      secondConnection.database.close();
     }
   });
 

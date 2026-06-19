@@ -24,6 +24,11 @@ import type {
   ClientConsentPersistence,
   ClientIntakePersistence
 } from "../runtime/client/clientRuntime.ts";
+import {
+  createDisabledAiNormalizationProvider,
+  type AiNormalizationProvider
+} from "../domain/practices/aiNormalization.ts";
+import type { PracticeCreationPersistence } from "../domain/practices/practiceCreationService.ts";
 import { runInboundPipeline, type PipelineResult } from "./pipeline.ts";
 import {
   classifyLawyerCommand,
@@ -70,6 +75,8 @@ export interface StartWhatsAppCloudRuntimeOptions {
   businessPersistenceService?: BusinessPersistenceService;
   clientConsentPersistence?: ClientConsentPersistence;
   clientIntakePersistence?: ClientIntakePersistence;
+  practicePersistence?: PracticeCreationPersistence;
+  aiNormalizationProvider?: AiNormalizationProvider;
   operatorStatusProvider?: () => LawyerRuntimeStatus | Promise<LawyerRuntimeStatus>;
   readyIntakeLister?: () => BusinessReadyIntakeCandidate[] | Promise<BusinessReadyIntakeCandidate[]>;
   createSqlitePersistence?: (config: {
@@ -437,6 +444,8 @@ export const startWhatsAppCloudRuntime = async ({
   businessPersistenceService,
   clientConsentPersistence,
   clientIntakePersistence,
+  practicePersistence,
+  aiNormalizationProvider = createDisabledAiNormalizationProvider(),
   operatorStatusProvider,
   readyIntakeLister,
   createSqlitePersistence = createSqlitePersistenceService,
@@ -490,10 +499,12 @@ export const startWhatsAppCloudRuntime = async ({
     clientConsentPersistence ?? defaultBusinessPersistence;
   const resolvedIntakePersistence =
     clientIntakePersistence ?? defaultBusinessPersistence;
+  const resolvedPracticePersistence =
+    practicePersistence ?? defaultBusinessPersistence;
 
-  if (!resolvedConsentPersistence || !resolvedIntakePersistence) {
+  if (!resolvedConsentPersistence || !resolvedIntakePersistence || !resolvedPracticePersistence) {
     throw new Error(
-      "Business persistence is required for the WhatsApp Cloud runtime. Provide explicit consent and intake persistence before startup."
+      "Business persistence is required for the WhatsApp Cloud runtime. Provide explicit consent, intake, and practice persistence before startup."
     );
   }
 
@@ -524,6 +535,13 @@ export const startWhatsAppCloudRuntime = async ({
     (hasReadyIntakeListing(defaultBusinessPersistence)
       ? () => defaultBusinessPersistence.listReadyIntakeCandidates()
       : undefined);
+  const resolvedPracticeLister = defaultBusinessPersistence
+    ? (filter?: Parameters<typeof defaultBusinessPersistence.listPractices>[0]) =>
+        defaultBusinessPersistence.listPractices(filter)
+    : undefined;
+  const resolvedPracticeGetter = defaultBusinessPersistence
+    ? (practiceCode: string) => defaultBusinessPersistence.findPracticeByCode(practiceCode)
+    : undefined;
 
   const closeSharedPersistence = () => {
     if (
@@ -554,8 +572,20 @@ export const startWhatsAppCloudRuntime = async ({
         requireBusinessPersistence: true,
         clientConsentPersistence: resolvedConsentPersistence,
         clientIntakePersistence: resolvedIntakePersistence,
+        practicePersistence: resolvedPracticePersistence,
+        aiNormalizationProvider,
         lawyerRuntime: {
           getStatus: resolvedOperatorStatusProvider,
+          ...(resolvedPracticeLister
+            ? {
+                listPractices: resolvedPracticeLister
+              }
+            : {}),
+          ...(resolvedPracticeGetter
+            ? {
+                getPracticeByCode: resolvedPracticeGetter
+              }
+            : {}),
           ...(resolvedReadyIntakeLister
             ? {
                 listReadyIntakes: resolvedReadyIntakeLister

@@ -4,6 +4,8 @@ import type {
   ClientConsentPersistence,
   ClientIntakePersistence
 } from "../client/clientRuntime.ts";
+import type { PracticeCreationPersistence } from "../../domain/practices/practiceCreationService.ts";
+import type { AiNormalizationProvider } from "../../domain/practices/aiNormalization.ts";
 import { runClientRuntime } from "../client/clientRuntime.ts";
 import { runLawyerRuntime, type LawyerRuntimeOptions } from "../lawyer/lawyerRuntime.ts";
 import type { RuntimeContext } from "./runtimeContext.ts";
@@ -14,6 +16,8 @@ export interface DecideNextActionInput {
   runtimeContext: RuntimeContext;
   clientConsentPersistence?: ClientConsentPersistence;
   clientIntakePersistence?: ClientIntakePersistence;
+  practicePersistence?: PracticeCreationPersistence;
+  aiNormalizationProvider?: AiNormalizationProvider;
   lawyerRuntime?: LawyerRuntimeOptions;
   requireBusinessPersistence?: boolean;
 }
@@ -24,6 +28,8 @@ export const decideNextAction = ({
   runtimeContext,
   clientConsentPersistence,
   clientIntakePersistence,
+  practicePersistence,
+  aiNormalizationProvider,
   lawyerRuntime,
   requireBusinessPersistence = false
 }: DecideNextActionInput): Promise<RuntimeDecisionType> => {
@@ -40,6 +46,16 @@ export const decideNextAction = ({
         ? {
             intakePersistence: clientIntakePersistence
           }
+        : {}),
+      ...(practicePersistence
+        ? {
+            practicePersistence
+          }
+        : {}),
+      ...(aiNormalizationProvider
+        ? {
+            aiNormalizationProvider
+          }
         : {})
     }).then((result) => result.runtimeDecision);
   }
@@ -55,6 +71,16 @@ export const decideNextAction = ({
       ...(lawyerRuntime?.listReadyIntakes
         ? {
             listReadyIntakes: lawyerRuntime.listReadyIntakes
+          }
+        : {}),
+      ...(lawyerRuntime?.listPractices
+        ? {
+            listPractices: lawyerRuntime.listPractices
+          }
+        : {}),
+      ...(lawyerRuntime?.getPracticeByCode
+        ? {
+            getPracticeByCode: lawyerRuntime.getPracticeByCode
           }
         : {})
     });

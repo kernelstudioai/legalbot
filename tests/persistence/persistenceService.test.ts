@@ -92,7 +92,12 @@ class CapturingIntakeStore implements IntakeStore {
   stateBySubject = new Map<
     string,
     {
-      state: "not_started" | "asking_identity" | "asking_problem_summary" | "intake_complete";
+      state:
+        | "not_started"
+        | "asking_identity"
+        | "asking_problem_summary"
+        | "asking_attachments"
+        | "intake_complete";
       updatedAt: string;
       metadata?: Record<string, unknown>;
     }
@@ -141,7 +146,7 @@ class CapturingIntakeStore implements IntakeStore {
     value: string,
     options: SetIntakeFieldOptions = {}
   ) {
-    if (!["firstName", "lastName", "birthDate", "city", "problemSummary"].includes(fieldName)) {
+    if (!["firstName", "lastName", "birthDate", "city", "problemSummary", "attachmentMetadata"].includes(fieldName)) {
       throw new Error(`Unsupported intake field: ${fieldName}`);
     }
 

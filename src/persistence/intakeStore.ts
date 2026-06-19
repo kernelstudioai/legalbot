@@ -2,6 +2,7 @@ export const intakeStates = [
   "not_started",
   "asking_identity",
   "asking_problem_summary",
+  "asking_attachments",
   "intake_complete"
 ] as const;
 
@@ -12,7 +13,8 @@ export const intakeFieldNames = [
   "lastName",
   "birthDate",
   "city",
-  "problemSummary"
+  "problemSummary",
+  "attachmentMetadata"
 ] as const;
 
 export type IntakeFieldName = (typeof intakeFieldNames)[number];
